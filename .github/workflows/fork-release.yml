@@ -1,0 +1,214 @@
+name: Fork Release
+
+# Builds the fork's release assets. A `v<upstream>+fork.<N>` tag publishes a
+# GitHub release; a pull request touching this file and workflow_dispatch are
+# dry runs that build and package only.
+
+on:
+  push:
+    tags:
+      - "v*"
+  pull_request:
+    paths:
+      - ".github/workflows/fork-release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  RUST_TOOLCHAIN_VERSION: 1.96.1
+  # Upstream's own `v*` tags (no `+fork.`) must never publish here.
+  IS_RELEASE: ${{ github.event_name == 'push' && contains(github.ref_name, '+fork.') }}
+
+jobs:
+  build:
+    if: github.repository == 'saitonakamura/herdr' && (github.event_name != 'push' || contains(github.ref_name, '+fork.'))
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            name: herdr-linux-x86_64
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            name: herdr-linux-aarch64
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            name: herdr-macos-x86_64
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            name: herdr-macos-aarch64
+          - target: x86_64-pc-windows-msvc
+            os: windows-2022
+            name: herdr-windows-x86_64.zip
+
+    runs-on: ${{ matrix.os }}
+    env:
+      LIBGHOSTTY_VT_OPTIMIZE: ReleaseFast
+      LIBGHOSTTY_VT_SIMD: 'true'
+
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Verify tag matches Cargo.toml version
+        if: env.IS_RELEASE == 'true'
+        shell: bash
+        run: |
+          CARGO_VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          if [ "$CARGO_VERSION" != "$TAG_VERSION" ]; then
+            echo "error: tag $GITHUB_REF_NAME doesn't match Cargo.toml version $CARGO_VERSION"
+            exit 1
+          fi
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # v1
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN_VERSION }}
+          targets: ${{ matrix.target }}
+
+      - name: Install Zig
+        uses: vercel-labs/setup-zig@83c1594f26b86da8a9a8ddd9b5ee5f3af0f96943 # v1.0.2
+        with:
+          version: 0.16.0
+
+      - name: Prefer official Ubuntu mirrors over Azure
+        if: runner.os == 'Linux'
+        run: |
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            sudo sed -i '/azure.archive.ubuntu.com/d' /etc/apt/apt-mirrors.txt
+          fi
+
+      - name: Install Linux build tools
+        if: runner.os == 'Linux'
+        run: |
+          sudo find /etc/apt/sources.list.d -type f \( -iname '*microsoft*' -o -iname '*azure-cli*' \) -print -delete
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build musl-tools gcc-aarch64-linux-gnu crossbuild-essential-arm64
+
+      - name: Install macOS build tools
+        if: runner.os == 'macOS'
+        run: HOMEBREW_NO_AUTO_UPDATE=1 brew install cmake ninja
+
+      - name: Set Linux aarch64 linker
+        if: matrix.target == 'aarch64-unknown-linux-musl'
+        run: echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        with:
+          key: fork-release-${{ matrix.target }}
+
+      - name: Remove Zig caches
+        shell: bash
+        run: rm -rf .zig-cache vendor/libghostty-vt/.zig-cache vendor/libghostty-vt/zig-out
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Package artifact
+        if: runner.os != 'Windows'
+        shell: bash
+        run: cp target/${{ matrix.target }}/release/herdr ${{ matrix.name }}
+
+      - name: Package artifact
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $package = Join-Path $env:RUNNER_TEMP "Microsoft.Windows.Console.ConPTY.nupkg"
+          $stage = Join-Path $env:RUNNER_TEMP "herdr-windows-x86_64"
+          .\scripts\package_windows_conpty.ps1 `
+            -HerdrExe target\${{ matrix.target }}\release\herdr.exe `
+            -PackagePath $package `
+            -StageDir $stage `
+            -OutputPath ${{ matrix.name }}
+          $version = (& (Join-Path $stage "herdr.exe") --version | Out-String).Trim()
+          Write-Output "packaged $version"
+          if ($env:IS_RELEASE -eq "true") {
+            $tagVersion = $env:GITHUB_REF_NAME -replace '^v', ''
+            if ($version -notmatch [regex]::Escape($tagVersion) -or $version -match "preview") {
+              throw "Packaged Windows binary has unexpected version identity: $version"
+            }
+          }
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.name }}
+
+  release:
+    needs: build
+    if: github.repository == 'saitonakamura/herdr'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          path: artifacts
+
+      - name: Assemble assets, notices and checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir dist
+          for name in herdr-linux-x86_64 herdr-linux-aarch64 herdr-macos-x86_64 herdr-macos-aarch64 herdr-windows-x86_64.zip; do
+            cp "artifacts/$name/$name" "dist/$name"
+          done
+          chmod +x dist/herdr-linux-* dist/herdr-macos-*
+          # Bare binaries cannot carry the license, so it ships beside them.
+          cp LICENSE dist/LICENSE
+          mkdir -p notices/THIRD-PARTY-NOTICES
+          cp vendor/libghostty-vt/LICENSE notices/THIRD-PARTY-NOTICES/libghostty-vt-LICENSE
+          cp vendor/portable-pty/LICENSE.md notices/THIRD-PARTY-NOTICES/portable-pty-LICENSE.md
+          cp packaging/windows/licenses/* notices/THIRD-PARTY-NOTICES/
+          cp LICENSE notices/LICENSE
+          tar -C notices -czf dist/herdr-notices.tar.gz LICENSE THIRD-PARTY-NOTICES
+          (cd dist && sha256sum -- * > SHA256SUMS)
+          cat dist/SHA256SUMS
+
+      - name: Write release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          UPSTREAM="${VERSION%%+*}"
+          {
+            echo "Fork build of herdr ${UPSTREAM} from saitonakamura/herdr."
+            echo
+            echo "Upstream release: https://github.com/herdrdev/herdr/releases/tag/v${UPSTREAM}"
+            echo "Source: https://github.com/${GITHUB_REPOSITORY}/tree/${GITHUB_SHA}"
+            echo
+            echo "Licensed under Apache-2.0; see LICENSE and herdr-notices.tar.gz. Verify downloads against SHA256SUMS."
+          } > RELEASE_NOTES.md
+
+      - name: Upload dry-run bundle
+        if: env.IS_RELEASE != 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: fork-release-dry-run
+          path: dist
+
+      - name: Create release
+        if: env.IS_RELEASE == 'true'
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
+        with:
+          name: ${{ github.ref_name }}
+          files: dist/*
+          body_path: RELEASE_NOTES.md
+          make_latest: true

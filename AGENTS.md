@@ -1,3 +1,5 @@
+> **Fork:** this is `saitonakamura/herdr`. [`FORK.md`](./FORK.md) overrides the Maintainer Workflow, Local Can Machine Workflow, Release Channels and External contributor guardrail sections below.
+
 # herdr
 
 Terminal based agent runtime for coding agents.

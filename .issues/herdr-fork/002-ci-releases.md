@@ -28,3 +28,12 @@ Adapt upstream's `.github/workflows/release.yml` so a tag on the fork builds and
 ## Blocked by
 
 - herdr-fork-sync-and-branch
+
+## Resolution
+
+_Draft, until [PR #3](https://github.com/saitonakamura/herdr/pull/3) merges._
+
+- `.github/workflows/fork-release.yml`: a `v<upstream>+fork.N` tag publishes the five upstream asset names, plus `LICENSE`, `herdr-notices.tar.gz` and `SHA256SUMS`. A PR touching the file and `workflow_dispatch` are dry runs. Bare binaries can't carry the license, so it ships beside them.
+- `website-deploy`, `label-next-release-issues` and `distribution` are guarded to `herdrdev/herdr`; `release`, `preview` and `pr-gate` already were.
+- Version `0.9.5+fork.1` in Cargo.toml; `BASE_VERSION` is the semver core, so plugin and update comparisons ignore the metadata. Fork builds refuse `herdr update` / `herdr channel set` and skip the background version check; `manifest_check` is unchanged. loom's doctor reads `0.9.5`; no dotfiles change was needed for this.
+- Building on the primary mac: dotfiles `07c9585` (Brewfile `BOX == "macos"` block, `.zprofile` keg PATH, docs/setup/herdr.md § building the fork); `~/.config/dotfiles/box` written as `macos` on-box.

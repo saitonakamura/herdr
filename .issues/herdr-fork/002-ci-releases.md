@@ -1,14 +1,14 @@
 ---
 id: herdr-fork-ci-releases
 title: Fork CI builds and publishes releases
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
   - herdr-fork-sync-and-branch
-assignee:
-claimed_by:
+assignee: saitonakamura
+claimed_by: macos/w6:p3/78b5ca1a-5afc-4903-a949-deb1bda5aefa
 ---
 
 ## Question

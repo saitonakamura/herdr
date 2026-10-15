@@ -29,6 +29,7 @@ const HERDR_UPDATE_COMMAND: &str = "herdr update";
 const HOMEBREW_UPDATE_COMMAND: &str = "brew update && brew upgrade herdr";
 const MISE_UPDATE_COMMAND: &str = "mise upgrade herdr";
 const NIX_UPDATE_COMMAND: &str = "update through Nix";
+const FORK_RELEASES_URL: &str = "https://github.com/saitonakamura/herdr/releases";
 const MISE_INSTALLS_DIR_ENV: &str = "MISE_INSTALLS_DIR";
 const FAKE_UPDATE_VERSION_ENV: &str = "HERDR_FAKE_UPDATE_VERSION";
 const FAKE_UPDATE_NOTES_VERSION_ENV: &str = "HERDR_FAKE_UPDATE_NOTES_VERSION";
@@ -72,6 +73,8 @@ pub struct Version {
 impl Version {
     pub fn parse(s: &str) -> Option<Self> {
         let s = s.strip_prefix('v').unwrap_or(s);
+        // Build metadata does not affect precedence (semver 2.0.0 §10).
+        let s = s.split_once('+').map_or(s, |(core, _)| core);
         let parts: Vec<&str> = s.split('.').collect();
         if parts.len() != 3 {
             return None;
@@ -2105,8 +2108,24 @@ fn homebrew_cellar_keg_root(path: &Path) -> Option<PathBuf> {
 // Public API
 // ---------------------------------------------------------------------------
 
+/// Fork builds would otherwise "update" to upstream's release of the same core
+/// version, so they refuse and point at the fork's own distribution.
+pub(crate) fn fork_build_update_rejection() -> Option<String> {
+    crate::build_info::is_fork().then(fork_build_update_message)
+}
+
+fn fork_build_update_message() -> String {
+    format!(
+        "self-update is disabled for fork builds of herdr; run `{HOMEBREW_UPDATE_COMMAND}` or download a release from {FORK_RELEASES_URL}"
+    )
+}
+
 /// Manual self-update command (`herdr update`).
 pub fn self_update(options: SelfUpdateOptions) -> Result<Version, String> {
+    if let Some(rejection) = fork_build_update_rejection() {
+        return Err(rejection);
+    }
+
     let channel = UpdateChannel::configured();
 
     if is_homebrew_managed_install() {
@@ -2346,6 +2365,10 @@ fn print_outdated_integration_notice_with_updated_binary(updated_exe: &Path) {
 /// Background update check: only surface availability and release notes.
 /// Runs in a background thread at startup.
 pub fn auto_update(events: tokio::sync::mpsc::Sender<crate::events::AppEvent>) {
+    if crate::build_info::is_fork() {
+        tracing::debug!("skipping background version check for a fork build");
+        return;
+    }
     crate::logging::update_check_started();
     if let Ok(version) = env::var(FAKE_UPDATE_VERSION_ENV) {
         let version = version.trim();
@@ -2721,6 +2744,21 @@ mod tests {
                 patch: 0
             })
         );
+    }
+
+    #[test]
+    fn parse_version_ignores_build_metadata() {
+        assert_eq!(Version::parse("v0.9.5+fork.1"), Version::parse("0.9.5"));
+        assert_eq!(Version::parse("0.9.5+"), Version::parse("0.9.5"));
+        assert_eq!(Version::parse("0.9+fork.1"), None);
+    }
+
+    #[test]
+    fn fork_build_update_message_points_at_the_fork() {
+        let message = fork_build_update_message();
+        // main.rs prints this prefix without the "update failed" wrapper.
+        assert!(message.starts_with("self-update is disabled"));
+        assert!(message.contains(FORK_RELEASES_URL));
     }
 
     #[test]

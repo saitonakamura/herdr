@@ -1,14 +1,14 @@
 ---
 id: herdr-fork-read-layer
 title: Read layer: reads that agents can trust
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
   - herdr-fork-sync-and-branch
-assignee:
-claimed_by:
+assignee: saitonakamura
+claimed_by: macos/w6:p6/89d59791-506a-4eb1-8841-fa352a1ac144
 ---
 
 ## Question

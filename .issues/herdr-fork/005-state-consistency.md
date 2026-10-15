@@ -1,14 +1,14 @@
 ---
 id: herdr-fork-state-consistency
 title: State consistency: server, detector and waits agree
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
   - herdr-fork-sync-and-branch
-assignee:
-claimed_by:
+assignee: saitonakamura
+claimed_by: macos/w6:p5/2c06d5cc-b134-4965-a44e-1c4c2bf815ad
 ---
 
 ## Question

@@ -1,7 +1,7 @@
 ---
 id: herdr-fork-done-semantics
 title: Done is per pane and acknowledged once
-status: blocked
+status: open
 labels:
   - wayfinder:task
 parent: herdr-fork-map

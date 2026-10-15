@@ -1,7 +1,7 @@
 ---
 id: herdr-fork-agent-identity-parent
 title: Stable agent identity and Parent
-status: blocked
+status: open
 labels:
   - wayfinder:task
 parent: herdr-fork-map

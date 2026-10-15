@@ -1,7 +1,7 @@
 ---
 id: herdr-fork-worktree-post-create
 title: Worktree post-create hook
-status: blocked
+status: open
 labels:
   - wayfinder:task
 parent: herdr-fork-map

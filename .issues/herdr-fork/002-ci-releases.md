@@ -1,7 +1,7 @@
 ---
 id: herdr-fork-ci-releases
 title: Fork CI builds and publishes releases
-status: blocked
+status: open
 labels:
   - wayfinder:task
 parent: herdr-fork-map

@@ -1,7 +1,7 @@
 ---
 id: herdr-fork-state-consistency
 title: State consistency: server, detector and waits agree
-status: blocked
+status: open
 labels:
   - wayfinder:task
 parent: herdr-fork-map

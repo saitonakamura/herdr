@@ -1,7 +1,7 @@
 ---
 id: herdr-fork-workspace-is-effort
 title: A workspace is an effort
-status: blocked
+status: open
 labels:
   - wayfinder:task
 parent: herdr-fork-map

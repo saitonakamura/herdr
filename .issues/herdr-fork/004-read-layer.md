@@ -1,7 +1,7 @@
 ---
 id: herdr-fork-read-layer
 title: Read layer: reads that agents can trust
-status: blocked
+status: open
 labels:
   - wayfinder:task
 parent: herdr-fork-map

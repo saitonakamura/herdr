@@ -1,7 +1,7 @@
 ---
 id: herdr-fork-native-tab-names
 title: Tab names follow their agent natively
-status: blocked
+status: open
 labels:
   - wayfinder:task
 parent: herdr-fork-map

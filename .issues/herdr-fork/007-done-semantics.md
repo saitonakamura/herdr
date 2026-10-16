@@ -37,4 +37,5 @@ Draft, pending merge of [PR #10](https://github.com/saitonakamura/herdr/pull/10)
 - `switch_tab`, `mark_active_tab_seen` and the `pane focus` / `agent focus` acknowledgement are gone. The client's `EndpointAgentPresentation` no longer projects or acknowledges done; it trusts the server's `agent_status`. No wire change.
 - Sound (blocked included) and client notifications are suppressed only for acknowledging panes. The in-app toast keeps upstream's "not in the active tab" rule plus the same check.
 - loom needs no change: it reads `agent_status`, and done now surviving tab switches is what its attention view and `$fold +N!` want.
+- Merged with #5 (state consistency): its `published_done_panes` idle emitter stays as a fallback; its `viewer_attached` / `pane_is_watched` gate is dropped, since with no client the acknowledging set is empty and completions stay done.
 - Left open: ja / zh-cn docs still describe the old rule; not live-smoked in a real client.

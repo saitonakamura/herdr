@@ -24,3 +24,18 @@ Same change in loom: `loom resume`, most of `lib/restore.sh` and `bin/loom-sessi
 ## Blocked by
 
 - herdr-fork-agent-identity-parent
+
+## Resolution
+
+Draft, open until merged: [PR #14](https://github.com/saitonakamura/herdr/pull/14) (branch
+`fork/011-resume-args-env`) and dotfiles branch `herdr-fork/011-resume-args-env` (0efaa66).
+
+- herdr stores `agent start` args (`launch_args`, replaceable with `agent set-args`), the pane's
+  `--env`, and the profile dir a claude or codex session is reported in (`agent_home`), persists
+  them, and resumes with them: per-agent session/headless flags dropped, pane env set in the
+  restored shell, the profile selected with `env CLAUDE_CONFIG_DIR=…`/`env -u` on the command.
+  Capability `agent_launch_resume`. The codex hook now reports its transcript path (integration 11).
+- loom on such a server reports no resume command, its SessionStart hook is a no-op, escalate
+  calls `agent set-args`, and `loom resume` stays the by-hand restart.
+- On-box after the release: `herdr integration install codex` per box; the loom SessionStart hook
+  can be unwired once every box runs the fork.

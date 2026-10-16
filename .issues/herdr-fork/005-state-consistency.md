@@ -29,3 +29,13 @@ Add deterministic tests, not wall-clock ones. Re-check the dotfiles' `agent-dete
 ## Blocked by
 
 - herdr-fork-sync-and-branch
+
+## Resolution
+
+Draft; the ticket closes when [PR #5](https://github.com/saitonakamura/herdr/pull/5) merges. Findings, design and verification: [assets/005-state-consistency.md](./assets/005-state-consistency.md) (on the PR branch).
+
+- `pane.closed` per pane on tab, workspace and layout-replace close (#4690). The done → idle acknowledgement emits a status change (#4473). With no client attached, active-tab completions stay done (#5222).
+- Manifest engine 4: wrap-tolerant `contains` (#2868) and a rule-level `after_last_line_regex` frame boundary (#4819). Claude dialog rules outrank the busy title (#3467).
+- The detector re-asserts its last result every 2s, and a held agent's `working` is withdrawn (#4875, #3993; not reproduced live).
+- `<agent>.v<N>.toml` overrides for a mixed fleet. Dotfiles branch `herdr-fork/005-state-consistency` adds `claude.v4.toml` beside an unchanged `claude.toml`, safe to merge any time.
+- **Cleanup once every box runs a fork release with 005:** fold the dotfiles `claude.v4.toml` into `claude.toml` and delete it.

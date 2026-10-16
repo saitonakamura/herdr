@@ -907,3 +907,136 @@ contains = ["active"]
 "#;
     assert!(parse_manifest(manifest).is_err());
 }
+
+#[test]
+fn contains_phrases_match_across_line_wraps() {
+    with_manifest_dirs("contains-wrap", || {
+        write_local_codex(&rules_manifest(
+            r#"
+[[rules]]
+id = "footer"
+state = "blocked"
+priority = 10
+contains = ["esc to cancel"]
+not = [{ contains = ["stale footer"] }]
+"#,
+        ));
+
+        for screen in [
+            "Enter to select · Esc to cancel",
+            "Enter to select · Esc to\ncancel",
+            "Enter to select · Esc to\n   cancel",
+            "Enter to select · Esc  to\tcancel",
+        ] {
+            let explain = explain(Agent::Codex, screen);
+            assert_eq!(explain.state, AgentState::Blocked, "{screen:?}");
+        }
+
+        let wrapped_not = explain(Agent::Codex, "Esc to cancel\nstale\nfooter");
+        assert_eq!(wrapped_not.state, AgentState::Idle);
+
+        let split_word = explain(Agent::Codex, "Esc to can\ncel");
+        assert_eq!(split_word.state, AgentState::Idle);
+    });
+}
+
+#[test]
+fn after_last_line_regex_ends_region_at_latest_frame() {
+    with_manifest_dirs("after-last-line", || {
+        write_local_codex(&rules_manifest(
+            r#"
+[[rules]]
+id = "live_activity"
+state = "working"
+priority = 10
+region = "bottom_non_empty_lines(6)"
+after_last_line_regex = ['^-- turn done$']
+line_regex = ['^spinning$']
+
+[[rules]]
+id = "prompt"
+state = "idle"
+priority = 5
+line_regex = ['^> $']
+"#,
+        ));
+
+        let stale = explain(Agent::Codex, "spinning\nanswer\n-- turn done\n> ");
+        assert_eq!(stale.state, AgentState::Idle);
+
+        let live = explain(Agent::Codex, "-- turn done\nnext question\nspinning\n> ");
+        assert_eq!(live.state, AgentState::Working);
+
+        let no_boundary = explain(Agent::Codex, "answer\nspinning\n> ");
+        assert_eq!(no_boundary.state, AgentState::Working);
+
+        let boundary_last = explain(Agent::Codex, "spinning\n-- turn done");
+        assert_eq!(boundary_last.state, AgentState::Idle);
+    });
+}
+
+#[test]
+fn manifest_validation_gates_after_last_line_regex_on_engine_version() {
+    let manifest = |min_engine_version: u32, pattern: &str| {
+        format!(
+            r#"
+id = "codex"
+version = "2026.10.15.1"
+min_engine_version = {min_engine_version}
+
+[[rules]]
+id = "frame"
+state = "working"
+after_last_line_regex = ['{pattern}']
+contains = ["spinning"]
+"#
+        )
+    };
+
+    assert!(parse_manifest(&manifest(3, "^done$")).is_err());
+    assert!(parse_manifest(&manifest(4, "^done$")).is_ok());
+    assert!(parse_manifest(&manifest(4, "(unclosed")).is_err());
+}
+
+#[test]
+fn engine_versioned_override_is_preferred_up_to_the_running_engine() {
+    let dir = Path::new("/overrides");
+    let engine = crate::detect::manifest_update::MANIFEST_ENGINE_VERSION;
+    let lookup = |names: &[String]| {
+        override_path_in(dir, "claude", |path| {
+            names.iter().any(|name| path == dir.join(name).as_path())
+        })
+    };
+    let plain = "claude.toml".to_string();
+    let oldest = "claude.v1.toml".to_string();
+    let current = format!("claude.v{engine}.toml");
+    let newer = format!("claude.v{}.toml", engine + 1);
+
+    assert_eq!(lookup(&[]), dir.join(&plain));
+    assert_eq!(lookup(&[plain.clone(), oldest.clone()]), dir.join(&oldest));
+    assert_eq!(
+        lookup(&[plain, oldest, current.clone(), newer]),
+        dir.join(&current),
+        "a file for a newer engine is left to the build that can read it"
+    );
+}
+
+#[test]
+fn engine_versioned_override_shadows_the_plain_override() {
+    with_manifest_dirs("versioned-override", || {
+        write_local_codex(&local_manifest("working", "marker"));
+        let plain = override_path(Agent::Codex).unwrap();
+        let versioned = plain.with_file_name(format!(
+            "codex.v{}.toml",
+            crate::detect::manifest_update::MANIFEST_ENGINE_VERSION
+        ));
+        std::fs::write(&versioned, local_manifest("blocked", "marker")).unwrap();
+        reload_manifests();
+
+        assert_eq!(explain(Agent::Codex, "marker").state, AgentState::Blocked);
+
+        std::fs::remove_file(&versioned).unwrap();
+        reload_manifests();
+        assert_eq!(explain(Agent::Codex, "marker").state, AgentState::Working);
+    });
+}

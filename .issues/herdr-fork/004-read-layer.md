@@ -1,14 +1,14 @@
 ---
 id: herdr-fork-read-layer
 title: Read layer: reads that agents can trust
-status: in-progress
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
   - herdr-fork-sync-and-branch
 assignee: saitonakamura
-claimed_by: macos/w6:p6/89d59791-506a-4eb1-8841-fa352a1ac144
+claimed_by: macos/89d59791-506a-4eb1-8841-fa352a1ac144
 ---
 
 ## Question
@@ -31,7 +31,7 @@ Leave the wheel-scroll alt-screen history read alone. Switch loom's reads (`lib/
 
 ## Resolution
 
-_Draft, until [PR #4](https://github.com/saitonakamura/herdr/pull/4) merges._
+[PR #4](https://github.com/saitonakamura/herdr/pull/4), merged 2026-10-16 as `9e871321`.
 
 - `--source screen` on `pane read` / `agent read`: the live screen, bottom-pinned whatever a client has scrolled to. `visible` still follows the client's scroll, and docs/next, the CLI help and the API schema now say so and point agents at `screen`.
 - **No default changed**, which corrects the question's "make it the default for agent-facing reads" (and the map's wording). `agent read` keeps `recent`, because that is how agents read another agent's reply: it needs the scrollback and the alt-screen history read, and `recent` was already bottom-anchored, so it was never the #2900 bug.

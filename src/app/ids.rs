@@ -37,6 +37,34 @@ impl App {
         ))
     }
 
+    /// Public ids of a tab's panes; capture them before closing, the numbers go with the tab.
+    pub(crate) fn public_pane_ids_in_tab(&self, ws_idx: usize, tab_idx: usize) -> Vec<String> {
+        let Some(tab) = self
+            .state
+            .workspaces
+            .get(ws_idx)
+            .and_then(|ws| ws.tabs.get(tab_idx))
+        else {
+            return Vec::new();
+        };
+        tab.layout
+            .pane_ids()
+            .into_iter()
+            .filter_map(|pane_id| self.public_pane_id(ws_idx, pane_id))
+            .collect()
+    }
+
+    pub(crate) fn public_pane_ids_in_workspace(&self, ws_idx: usize) -> Vec<String> {
+        let tab_count = self
+            .state
+            .workspaces
+            .get(ws_idx)
+            .map_or(0, |ws| ws.tabs.len());
+        (0..tab_count)
+            .flat_map(|tab_idx| self.public_pane_ids_in_tab(ws_idx, tab_idx))
+            .collect()
+    }
+
     pub(super) fn pane_launch_env(
         &self,
         ws_idx: usize,

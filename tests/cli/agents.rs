@@ -1245,6 +1245,7 @@ fn agent_wait_tolerates_detection_uncertainty_and_pane_target_rename() {
     .success());
     let wait_socket = socket_path.clone();
     let wait_pane = pane_id.clone();
+    // No client is attached, so nobody sees the turn finish: it ends done.
     let waiter = thread::spawn(move || {
         run_cli(
             &wait_socket,
@@ -1252,8 +1253,6 @@ fn agent_wait_tolerates_detection_uncertainty_and_pane_target_rename() {
                 "agent",
                 "wait",
                 &wait_pane,
-                "--until",
-                "idle",
                 "--until",
                 "done",
                 "--timeout",
@@ -1290,11 +1289,7 @@ fn agent_wait_tolerates_detection_uncertainty_and_pane_target_rename() {
         String::from_utf8_lossy(&waited.stderr)
     );
     let waited: serde_json::Value = serde_json::from_slice(&waited.stdout).unwrap();
-    // Without a client nothing acknowledges the finished turn, so it may read done.
-    assert!(matches!(
-        waited["result"]["agent"]["agent_status"].as_str(),
-        Some("idle" | "done")
-    ));
+    assert_eq!(waited["result"]["agent"]["agent_status"], "done");
     assert_eq!(waited["result"]["agent"]["name"], "reviewer");
 
     cleanup_spawned_herdr(herdr, base);

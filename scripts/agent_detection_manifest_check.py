@@ -32,6 +32,7 @@ RULE_KEYS = {
     "contains",
     "regex",
     "line_regex",
+    "after_last_line_regex",
 }
 GATE_KEYS = {"all", "any", "not", "contains", "regex", "line_regex"}
 STATES = {"idle", "working", "blocked", "unknown"}
@@ -52,6 +53,7 @@ MAX_TOTAL_GATES = 512
 MAX_MATCHERS_PER_GATE = 32
 MAX_TOTAL_MATCHERS = 1024
 MAX_MATCHER_CHARS = 512
+AFTER_LAST_LINE_REGEX_ENGINE_VERSION = 4
 
 # Keep older-engine clients on a published manifest until a release with the
 # bundled manifest's engine ships. Maps agent id to (bundled version, published
@@ -157,6 +159,11 @@ def validate_manifest(path: Path, engine_version: int) -> dict:
             raise CheckError(
                 f"{path}: rule {rule['id']} region {region!r} requires min_engine_version 3"
             )
+        if rule.get("after_last_line_regex") and min_engine < AFTER_LAST_LINE_REGEX_ENGINE_VERSION:
+            raise CheckError(
+                f"{path}: rule {rule['id']} after_last_line_regex requires min_engine_version "
+                f"{AFTER_LAST_LINE_REGEX_ENGINE_VERSION}"
+            )
 
     return manifest
 
@@ -183,6 +190,17 @@ def validate_rule(path: Path, index: int, rule: object, complexity: dict[str, in
         and int(count_match.group(1)) > MAX_TOP_REGION_LINE_COUNT
     ):
         raise CheckError(f"{path}: rule {rule_id} has invalid region {region!r}")
+    frame_starts = rule.get("after_last_line_regex", [])
+    if not isinstance(frame_starts, list) or not all(isinstance(item, str) for item in frame_starts):
+        raise CheckError(f"{path}: rule {rule_id} after_last_line_regex must be an array of strings")
+    if len(frame_starts) > MAX_MATCHERS_PER_GATE:
+        raise CheckError(
+            f"{path}: rule {rule_id} after_last_line_regex exceeds max count {MAX_MATCHERS_PER_GATE}"
+        )
+    if any(len(value) > MAX_MATCHER_CHARS for value in frame_starts):
+        raise CheckError(
+            f"{path}: rule {rule_id} after_last_line_regex exceeds max length {MAX_MATCHER_CHARS}"
+        )
     if rule.get("skip_state_update"):
         if state != "unknown":
             raise CheckError(f"{path}: rule {rule_id} skip_state_update requires state unknown")

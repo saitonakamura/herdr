@@ -24,3 +24,10 @@ Same change in loom: `lib/names.sh` stops writing tab names and reads them inste
 ## Blocked by
 
 - herdr-fork-sync-and-branch
+
+## Resolution
+
+Draft, pending [saitonakamura/herdr#9](https://github.com/saitonakamura/herdr/pull/9); the ticket closes when it merges.
+
+- herdr: a tab with exactly one agent follows a slug of its title (`ui.tab_name_max_length`, default 24); a hand rename pins it (`custom_name`); an empty or bare-number rename unpins. The followed name is persisted beside the pin, so neither drops back to the tab number across a restart. `TabInfo.label_source` = `pinned | following | number`; `tab.renamed` fires when a following tab takes a new name.
+- loom (dotfiles branch `herdr-fork/009-native-tab-names`, merge with the PR): detects native naming by `label_source` in the startup sync (`names.native` per lane), then writes no tab labels, drops the status-hook title polling and takes node names from tab labels. Stable herdr keeps the old path, which can go once every box runs the fork (014).

@@ -111,6 +111,9 @@ pub struct App {
     pub(crate) api_rx: tokio::sync::mpsc::UnboundedReceiver<crate::api::ApiRequestMessage>,
     pub(crate) event_hub: crate::api::EventHub,
     pub(crate) last_focus: Option<(usize, crate::layout::PaneId)>,
+    /// Panes last published as `done`; acknowledging one flips it to `idle`
+    /// without a state update, so focus sync emits that change from here.
+    pub(crate) published_done_panes: std::collections::HashSet<crate::layout::PaneId>,
     pub(crate) policy: AppPolicy,
     pub(crate) config_diagnostic_deadline: Option<Instant>,
     pub(crate) toast_deadline: Option<Instant>,
@@ -672,6 +675,7 @@ impl App {
             api_rx,
             event_hub,
             last_focus,
+            published_done_panes: std::collections::HashSet::new(),
             policy,
             render_notify,
             render_dirty,

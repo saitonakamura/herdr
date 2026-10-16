@@ -20,6 +20,36 @@ pub(super) struct DetectionPublishState {
     pub(super) visible_working: bool,
 }
 
+/// The task publishes only on change, while the server can drop or replace a
+/// published screen state (a release, a hook clearing its claim). Re-asserting
+/// the last result at this pace bounds how long the two can disagree.
+pub(super) const DETECTION_RESYNC_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
+
+#[derive(Debug, Default)]
+pub(super) struct DetectionResync {
+    last: Option<(DetectionPublishState, std::time::Instant)>,
+}
+
+impl DetectionResync {
+    pub(super) fn clear(&mut self) {
+        self.last = None;
+    }
+
+    pub(super) fn record(&mut self, published: DetectionPublishState, now: std::time::Instant) {
+        self.last = Some((published, now));
+    }
+
+    /// The last published result, once it is due to be re-asserted.
+    pub(super) fn due(&mut self, now: std::time::Instant) -> Option<DetectionPublishState> {
+        let (published, at) = self.last?;
+        if now.saturating_duration_since(at) < DETECTION_RESYNC_INTERVAL {
+            return None;
+        }
+        self.last = Some((published, now));
+        Some(published)
+    }
+}
+
 #[derive(Debug, Default)]
 pub(super) struct PendingIdleConfirmation {
     started_at: Option<std::time::Instant>,
@@ -679,6 +709,52 @@ mod tests {
                 visible_working: false,
                 process_exited: false,
             }
+        );
+    }
+
+    #[test]
+    fn resync_reasserts_last_publish_once_per_interval() {
+        let now = std::time::Instant::now();
+        let published = publish_state(AgentState::Working);
+        let mut resync = DetectionResync::default();
+
+        assert_eq!(resync.due(now + DETECTION_RESYNC_INTERVAL * 5), None);
+
+        resync.record(published, now);
+        assert_eq!(resync.due(now), None);
+        assert_eq!(
+            resync.due(now + DETECTION_RESYNC_INTERVAL - std::time::Duration::from_millis(1)),
+            None
+        );
+        let first = now + DETECTION_RESYNC_INTERVAL;
+        assert_eq!(resync.due(first), Some(published));
+        assert_eq!(
+            resync.due(first),
+            None,
+            "a re-assertion restarts the interval"
+        );
+        assert_eq!(
+            resync.due(first + DETECTION_RESYNC_INTERVAL),
+            Some(published)
+        );
+
+        resync.clear();
+        assert_eq!(resync.due(first + DETECTION_RESYNC_INTERVAL * 3), None);
+    }
+
+    #[test]
+    fn resync_reasserts_the_latest_publish() {
+        let now = std::time::Instant::now();
+        let mut resync = DetectionResync::default();
+        resync.record(publish_state(AgentState::Working), now);
+        let mut idle = publish_state(AgentState::Idle);
+        idle.visible_idle = true;
+        resync.record(idle, now + std::time::Duration::from_millis(500));
+
+        assert_eq!(resync.due(now + DETECTION_RESYNC_INTERVAL), None);
+        assert_eq!(
+            resync.due(now + std::time::Duration::from_millis(500) + DETECTION_RESYNC_INTERVAL),
+            Some(idle)
         );
     }
 

@@ -340,13 +340,15 @@ impl App {
                 (
                     self.public_workspace_id(*index),
                     self.workspace_info(*index),
+                    self.public_pane_ids_in_workspace(*index),
                 )
             })
             .collect::<Vec<_>>();
         self.state.selected = index;
         self.state.close_workspaces(close_indices);
         self.shutdown_detached_terminal_runtimes();
-        for (workspace_id, workspace) in closed_workspaces {
+        for (workspace_id, workspace, pane_ids) in closed_workspaces {
+            self.emit_panes_closed(pane_ids, &workspace_id);
             self.emit_event(EventEnvelope {
                 event: EventKind::WorkspaceClosed,
                 data: EventData::WorkspaceClosed {
@@ -846,7 +848,12 @@ mod tests {
         }
         assert!(app.state.terminal_runtime_shutdowns.is_empty());
         app.state.assert_invariants_for_test();
-        let events = app.event_hub.events_after(0);
+        let events: Vec<_> = app
+            .event_hub
+            .events_after(0)
+            .into_iter()
+            .filter(|(_, event)| event.event != EventKind::PaneClosed)
+            .collect();
         assert_eq!(events.len(), closed.len());
         for ((_, event), (workspace_id, workspace)) in events.iter().zip(closed) {
             assert!(matches!(event.event, EventKind::WorkspaceClosed));

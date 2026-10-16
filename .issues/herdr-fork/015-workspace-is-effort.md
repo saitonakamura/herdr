@@ -1,14 +1,14 @@
 ---
 id: herdr-fork-workspace-is-effort
 title: A workspace is an effort
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
   - herdr-fork-sync-and-branch
-assignee:
-claimed_by:
+assignee: saitonakamura
+claimed_by: macos/w6:pH/3d87f24a-ba58-420f-b5ef-157cbd75ec48
 ---
 
 ## Question

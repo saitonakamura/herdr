@@ -1670,6 +1670,42 @@ impl AppState {
         }
     }
 
+    /// The done → idle change of a pane that was acknowledged by focus or a tab
+    /// switch, which set `seen` without going through a state update.
+    pub(crate) fn acknowledged_done_update(
+        &self,
+        ws_idx: usize,
+        pane_id: PaneId,
+    ) -> Option<PaneStateUpdate> {
+        let workspace = self.workspaces.get(ws_idx)?;
+        if !workspace.pane_state(pane_id)?.seen {
+            return None;
+        }
+        let terminal = self.terminals.get(workspace.terminal_id(pane_id)?)?;
+        if terminal.state != AgentState::Idle {
+            return None;
+        }
+        let change = terminal.unchanged_effective_state_change_at(Instant::now());
+        Some(PaneStateUpdate {
+            pane_id,
+            ws_idx,
+            previous_agent_label: change.previous_agent_label,
+            previous_known_agent: change.previous_known_agent,
+            previous_state: change.previous_state,
+            previous_seen: false,
+            previous_presentation: change.previous_presentation,
+            agent_label: change.agent_label,
+            known_agent: change.known_agent,
+            state: change.state,
+            seen: true,
+            presentation: change.presentation,
+            agent_name_changed: false,
+            agent_released: false,
+            agent_release_status: None,
+            suppress_completion: true,
+        })
+    }
+
     fn update_terminal_state<F>(&mut self, pane_id: PaneId, update: F) -> Option<PaneStateUpdate>
     where
         F: FnOnce(&mut crate::terminal::TerminalState) -> Option<TerminalStateMutation>,
@@ -3083,6 +3119,38 @@ mod tests {
         assert_eq!(terminal.state, AgentState::Idle);
         let pane = state.workspaces[0].panes.get(&pane_id).unwrap();
         assert!(pane.seen);
+    }
+
+    #[test]
+    fn active_tab_completion_without_a_viewer_stays_unseen() {
+        let mut state = app_with_workspaces(&["active"]);
+        state.active = Some(0);
+        state.outer_terminal_focus = None;
+        let pane_id = *state.workspaces[0].panes.keys().next().unwrap();
+        let terminal_id = state.workspaces[0]
+            .panes
+            .get(&pane_id)
+            .unwrap()
+            .attached_terminal_id
+            .clone();
+        state.terminals.get_mut(&terminal_id).unwrap().state = AgentState::Working;
+
+        state.handle_app_event(AppEvent::StateChanged {
+            pane_id,
+            agent: Some(Agent::Pi),
+            state: AgentState::Idle,
+            visible_blocker: false,
+            visible_working: false,
+            process_exited: false,
+            observed_at: std::time::Instant::now(),
+        });
+
+        let pane = state.workspaces[0].panes.get(&pane_id).unwrap();
+        assert!(!pane.seen, "nobody was attached to see it finish");
+        assert_eq!(
+            pane_agent_status(state.terminals[&terminal_id].state, pane.seen),
+            crate::api::schema::AgentStatus::Done
+        );
     }
 
     #[test]

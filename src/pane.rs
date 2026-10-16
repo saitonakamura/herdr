@@ -37,9 +37,10 @@ mod xtgettcap;
 use self::agent_detection::{
     codex_prompt_ready, decide_detection_screen_read, decide_screen_detection_publish,
     detection_update_for_publish_with_osc, mark_detection_content_changed,
-    observe_detection_content_change, DetectionPublishDecision, DetectionScreenReadDecision,
-    DetectionScreenReadInput, DetectionTextCache, PendingIdleConfirmation,
-    ScreenDetectionPublishInput, AGENT_PENDING_IDLE_RECHECK, AGENT_STARTUP_GRACE_WINDOW,
+    observe_detection_content_change, DetectionPublishDecision, DetectionPublishState,
+    DetectionResync, DetectionScreenReadDecision, DetectionScreenReadInput, DetectionTextCache,
+    PendingIdleConfirmation, ScreenDetectionPublishInput, AGENT_PENDING_IDLE_RECHECK,
+    AGENT_STARTUP_GRACE_WINDOW,
 };
 use self::background_agent::{AgentJobStatus, AgentJobTracker};
 #[cfg(test)]
@@ -967,6 +968,7 @@ fn spawn_basic_detection_task(
         let mut last_codex_prompt_ready = false;
         let mut last_self_reported_shell_check = None;
         let mut agent_job = AgentJobTracker::default();
+        let mut resync = DetectionResync::default();
 
         loop {
             let sleep_duration = if pending_idle.active() {
@@ -1000,6 +1002,7 @@ fn spawn_basic_detection_task(
                     agent_startup_grace_until = None;
                     pending_idle.clear();
                     agent_job = AgentJobTracker::default();
+                    resync.clear();
                 }
             }
 
@@ -1102,6 +1105,7 @@ fn spawn_basic_detection_task(
                         pending_idle.clear();
                         last_codex_prompt_ready = false;
                         last_screen_scan_detection_content_seq = None;
+                        resync.clear();
                         // A replacement agent must not inherit OSC evidence
                         // from the previous process; a first acquisition keeps
                         // the evidence its own process already emitted.
@@ -1135,6 +1139,34 @@ fn spawn_basic_detection_task(
             // in the background, so it says nothing about the agent's state.
             if (lifecycle_authority_active || agent_job.in_background()) && !process_exited {
                 pending_idle.clear();
+                // The agent's last working claim cannot be kept current while another
+                // job owns the screen, so it is withdrawn rather than left standing.
+                if agent_job.in_background()
+                    && !lifecycle_authority_active
+                    && state == AgentState::Working
+                {
+                    apply_agent_detection_publish_update(
+                        state_events.clone(),
+                        pane_id,
+                        agent,
+                        AgentDetectionPublishUpdate {
+                            state: AgentState::Unknown,
+                            visible_idle: false,
+                            visible_blocker: false,
+                            visible_working: false,
+                            process_exited: false,
+                        },
+                        now,
+                        &mut state,
+                        &mut last_visible_idle,
+                        &mut last_visible_blocker,
+                        &mut last_visible_working,
+                        &mut last_visible_signal_refresh,
+                        &mut foreground_shell_exit_reported,
+                    )
+                    .await;
+                    resync.clear();
+                }
                 continue;
             }
 
@@ -1159,6 +1191,19 @@ fn spawn_basic_detection_task(
             } else {
                 None
             };
+            if let Some(published) = resync.due(now).filter(|_| agent.is_some()) {
+                publish_state_changed_event(
+                    state_events.clone(),
+                    pane_id,
+                    agent,
+                    published.state,
+                    published.visible_blocker,
+                    published.visible_working,
+                    false,
+                    now,
+                )
+                .await;
+            }
             match decide_detection_screen_read(DetectionScreenReadInput {
                 state,
                 agent,
@@ -1250,6 +1295,19 @@ fn spawn_basic_detection_task(
                         &mut foreground_shell_exit_reported,
                     )
                     .await;
+                    if publish_process_exited {
+                        resync.clear();
+                    } else {
+                        resync.record(
+                            DetectionPublishState {
+                                state: new_state,
+                                visible_idle,
+                                visible_blocker,
+                                visible_working,
+                            },
+                            now,
+                        );
+                    }
                 }
             }
         }
@@ -2892,6 +2950,7 @@ impl PaneRuntime {
                 let mut last_codex_prompt_ready = false;
                 let mut last_self_reported_shell_check = None;
                 let mut agent_job = AgentJobTracker::default();
+                let mut resync = DetectionResync::default();
 
                 tokio::time::sleep(Duration::from_millis(50)).await;
 
@@ -2935,6 +2994,7 @@ impl PaneRuntime {
                             agent_startup_grace_until = None;
                             pending_idle.clear();
                             agent_job = AgentJobTracker::default();
+                            resync.clear();
                         }
                     }
 
@@ -3073,6 +3133,7 @@ impl PaneRuntime {
                                     pending_idle.clear();
                                     last_codex_prompt_ready = false;
                                     last_screen_scan_detection_content_seq = None;
+                                    resync.clear();
                                     // A replacement agent must not inherit OSC
                                     // evidence from the previous process; a first
                                     // acquisition keeps the evidence its own
@@ -3141,6 +3202,34 @@ impl PaneRuntime {
                     if (lifecycle_authority_active || agent_job.in_background()) && !process_exited
                     {
                         pending_idle.clear();
+                        // The agent's last working claim cannot be kept current while another
+                        // job owns the screen, so it is withdrawn rather than left standing.
+                        if agent_job.in_background()
+                            && !lifecycle_authority_active
+                            && state == AgentState::Working
+                        {
+                            apply_agent_detection_publish_update(
+                                state_events.clone(),
+                                pane_id,
+                                agent,
+                                AgentDetectionPublishUpdate {
+                                    state: AgentState::Unknown,
+                                    visible_idle: false,
+                                    visible_blocker: false,
+                                    visible_working: false,
+                                    process_exited: false,
+                                },
+                                now,
+                                &mut state,
+                                &mut last_visible_idle,
+                                &mut last_visible_blocker,
+                                &mut last_visible_working,
+                                &mut last_visible_signal_refresh,
+                                &mut foreground_shell_exit_reported,
+                            )
+                            .await;
+                            resync.clear();
+                        }
                         continue;
                     }
 
@@ -3165,6 +3254,19 @@ impl PaneRuntime {
                     } else {
                         None
                     };
+                    if let Some(published) = resync.due(now).filter(|_| agent.is_some()) {
+                        publish_state_changed_event(
+                            state_events.clone(),
+                            pane_id,
+                            agent,
+                            published.state,
+                            published.visible_blocker,
+                            published.visible_working,
+                            false,
+                            now,
+                        )
+                        .await;
+                    }
                     match decide_detection_screen_read(DetectionScreenReadInput {
                         state,
                         agent,
@@ -3258,6 +3360,19 @@ impl PaneRuntime {
                                 &mut foreground_shell_exit_reported,
                             )
                             .await;
+                            if publish_process_exited {
+                                resync.clear();
+                            } else {
+                                resync.record(
+                                    DetectionPublishState {
+                                        state: new_state,
+                                        visible_idle,
+                                        visible_blocker,
+                                        visible_working,
+                                    },
+                                    now,
+                                );
+                            }
                         }
                     }
                 }

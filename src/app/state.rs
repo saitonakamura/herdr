@@ -888,6 +888,8 @@ pub struct AppState {
     /// Terminal runtimes that should be shut down by the app/runtime layer
     /// after state has detached their terminal metadata.
     pub(crate) terminal_runtime_shutdowns: Vec<crate::terminal::TerminalId>,
+    /// Set when an agent's terminal went away, so its children's parent must be dropped.
+    pub(crate) agent_identities_dirty: bool,
 }
 
 impl AppState {
@@ -1120,6 +1122,7 @@ impl AppState {
             host_cell_size: crate::kitty_graphics::HostCellSize::default(),
             session_dirty: false,
             terminal_runtime_shutdowns: Vec::new(),
+            agent_identities_dirty: false,
         }
     }
 

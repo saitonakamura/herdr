@@ -84,6 +84,15 @@ impl App {
             }
         }
 
+        if let Some(resolved) = crate::terminal::AgentId::parse(target)
+            .and_then(|agent_id| self.terminal_with_agent_id(&agent_id))
+            .and_then(|terminal_id| self.pane_for_terminal(&terminal_id))
+            .and_then(|(ws_idx, pane_id)| self.terminal_target_for_pane(ws_idx, pane_id))
+            .filter(|resolved| self.target_is_agent(resolved))
+        {
+            return Ok(resolved);
+        }
+
         let name_matches: Vec<_> = self
             .terminal_targets()
             .into_iter()

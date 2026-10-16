@@ -92,6 +92,7 @@ fn start_request(pane_id: &str, argument: &str) -> Request {
             kind: "codex".into(),
             pane_id: pane_id.into(),
             args: vec!["resume".into(), argument.into()],
+            parent: None,
             timeout_ms: Some(10_000),
         }),
     }

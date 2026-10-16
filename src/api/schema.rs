@@ -84,6 +84,7 @@ operations::define_operations! {
     AgentExplain(AgentTarget) => "agent.explain", false, false;
     AgentSendKeys(AgentSendKeysParams) => "agent.send_keys", true, false;
     AgentRename(AgentRenameParams) => "agent.rename", true, false;
+    AgentSetParent(AgentSetParentParams) => "agent.set_parent", false, false;
     AgentViewSet(AgentViewSetParams) => "agent.view.set", true, false;
     AgentViewClear(AgentViewClearParams) => "agent.view.clear", true, false;
     AgentFocus(AgentTarget) => "agent.focus", true, false;

@@ -223,6 +223,14 @@ async fn headless_api_reads_latest_title_without_spinner_event_flooding() {
         .get_mut(&terminal_id)
         .unwrap()
         .detected_agent = Some(crate::detect::Agent::Claude);
+    // An id minted by the first read would publish its own pane.updated; only titles count here.
+    server
+        .app
+        .state
+        .terminals
+        .get_mut(&terminal_id)
+        .unwrap()
+        .agent_id = Some(crate::terminal::AgentId::alloc());
     let runtime = crate::terminal::TerminalRuntime::test_with_screen_bytes(80, 24, b"");
     runtime.test_process_pty_bytes(b"\x1b]0;\xe2\xa0\x8b task\x07");
     server

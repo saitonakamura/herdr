@@ -111,6 +111,10 @@ pub struct PaneSnapshot {
     pub agent_resume: Option<PaneAgentResumeSnapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub launch_argv: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<crate::terminal::AgentId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_agent_id: Option<crate::terminal::AgentId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -388,6 +392,8 @@ fn capture_tab(
                 agent_session,
                 agent_resume,
                 launch_argv,
+                agent_id: terminal.and_then(|terminal| terminal.agent_id.clone()),
+                parent_agent_id: terminal.and_then(|terminal| terminal.parent_agent_id.clone()),
             },
         );
     }
@@ -707,6 +713,8 @@ mod tests {
                 agent_session: None,
                 agent_resume: None,
                 launch_argv: None,
+                agent_id: None,
+                parent_agent_id: None,
             },
         );
         panes.insert(
@@ -719,6 +727,8 @@ mod tests {
                 agent_session: None,
                 agent_resume: None,
                 launch_argv: None,
+                agent_id: None,
+                parent_agent_id: None,
             },
         );
 
@@ -1263,6 +1273,26 @@ mod tests {
     }
 
     #[test]
+    fn capture_contract_tracks_agent_identity_and_parent() {
+        let mut state = state_with_workspaces(&["one"]);
+        let root = state.workspaces[0].tabs[0].root_pane;
+        state.ensure_test_terminals();
+        let terminal_id = state.workspaces[0].tabs[0].panes[&root]
+            .attached_terminal_id
+            .clone();
+        let terminal = state.terminals.get_mut(&terminal_id).unwrap();
+        terminal.agent_id = crate::terminal::AgentId::parse("1234abcd");
+        terminal.parent_agent_id = crate::terminal::AgentId::parse("2345bcde");
+
+        let snapshot = capture_from_state(&state);
+        let pane = &snapshot.workspaces[0].tabs[0].panes[&root.raw()];
+        let json = serde_json::to_value(pane).unwrap();
+
+        assert_eq!(json["agent_id"], "1234abcd");
+        assert_eq!(json["parent_agent_id"], "2345bcde");
+    }
+
+    #[test]
     fn capture_contract_tracks_hook_authority_agent_session() {
         let mut state = state_with_workspaces(&["one"]);
         let session_path = test_session_path("pi-session.jsonl");
@@ -1405,6 +1435,8 @@ mod tests {
                 agent_session: None,
                 agent_resume: None,
                 launch_argv: None,
+                agent_id: None,
+                parent_agent_id: None,
             },
         );
         panes.insert(
@@ -1419,6 +1451,8 @@ mod tests {
                 agent_session: None,
                 agent_resume: None,
                 launch_argv: None,
+                agent_id: None,
+                parent_agent_id: None,
             },
         );
 

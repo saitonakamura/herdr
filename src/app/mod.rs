@@ -4,6 +4,7 @@
 //! - `actions.rs` — state mutations (testable without PTYs/async)
 
 pub(crate) mod actions;
+mod agent_identity;
 mod agent_resume;
 #[cfg(test)]
 mod agent_suspend_tests;
@@ -575,6 +576,8 @@ impl App {
             host_cell_size: crate::kitty_graphics::HostCellSize::default(),
             session_dirty: false,
             terminal_runtime_shutdowns: Vec::new(),
+            // Restored identities may name parents whose panes did not come back.
+            agent_identities_dirty: true,
         };
 
         state.terminals = restored_terminals;
@@ -2970,6 +2973,7 @@ mod tests {
                 kind: "pi".into(),
                 pane_id,
                 args: Vec::new(),
+                parent: None,
                 timeout_ms: Some(1_000),
             }),
         });
@@ -3012,6 +3016,7 @@ mod tests {
                 kind: "codex".into(),
                 pane_id: pane_id.clone(),
                 args: vec!["resume".into(), "codex-session".into()],
+                parent: None,
                 timeout_ms: Some(4_000),
             }),
         };

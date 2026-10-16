@@ -1148,7 +1148,7 @@ fn named_workspace_overlay_targets_projected_source_workspace() {
         crate::api::schema::Method::WorkspaceCreate(params)
             if params.source_workspace_id.as_deref() == Some("ws_1")
                 && params.cwd.as_deref() == Some("/repo")
-                && params.label.is_none()
+                && params.label.as_deref() == Some("repo")
     ));
 }
 

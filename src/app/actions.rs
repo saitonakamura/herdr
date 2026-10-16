@@ -1368,6 +1368,12 @@ impl AppState {
             }
 
             let ws = &mut self.workspaces[ws_idx];
+            if ws.custom_name.is_none() {
+                // An upstream snapshot's workspace keeps the label it showed, frozen.
+                ws.custom_name = Some(result.auto_label.clone());
+                self.session_dirty = true;
+                changed = true;
+            }
             if ws.cached_identity_cwd != result.resolved_identity_cwd {
                 ws.cached_identity_cwd = result.resolved_identity_cwd;
             }
@@ -2635,6 +2641,74 @@ mod tests {
         assert_eq!(state.workspaces[0].git_ahead_behind(), Some((2, 1)));
         assert_eq!(state.workspaces[1].id, second_id);
         assert_eq!(state.workspaces[1].git_ahead_behind(), None);
+    }
+
+    fn git_status_with_label(
+        state: &AppState,
+        ws_idx: usize,
+        auto_label: &str,
+    ) -> WorkspaceGitStatus {
+        let cwd = state.workspaces[ws_idx].resolved_identity_cwd().unwrap();
+        WorkspaceGitStatus {
+            workspace_id: state.workspaces[ws_idx].id.clone(),
+            resolved_identity_cwd: cwd.clone(),
+            status_cache_key: cwd,
+            demand: crate::workspace::GitStatusRefreshDemand::ALL,
+            auto_label: auto_label.into(),
+            branch: Some("main".into()),
+            ahead_behind: None,
+            space: None,
+        }
+    }
+
+    #[test]
+    fn apply_workspace_git_statuses_keeps_workspace_name() {
+        let mut state = app_with_workspaces(&["effort"]);
+        state.session_dirty = false;
+        let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
+
+        let status = git_status_with_label(&state, 0, "repo");
+        state.apply_workspace_git_statuses(&terminal_runtimes, vec![status]);
+
+        assert_eq!(state.workspaces[0].custom_name.as_deref(), Some("effort"));
+        assert_eq!(
+            state.workspaces[0].display_name_from(&state.terminals, &terminal_runtimes),
+            "effort"
+        );
+        assert!(!state.session_dirty);
+    }
+
+    #[test]
+    fn unnamed_workspace_freezes_its_first_resolved_label() {
+        let mut state = app_with_workspaces(&["placeholder"]);
+        state.workspaces[0].custom_name = None;
+        state.session_dirty = false;
+        let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
+
+        let status = git_status_with_label(&state, 0, "herdr");
+        assert!(state.apply_workspace_git_statuses(&terminal_runtimes, vec![status]));
+        assert_eq!(state.workspaces[0].custom_name.as_deref(), Some("herdr"));
+        assert!(state.session_dirty);
+
+        state.session_dirty = false;
+        let status = git_status_with_label(&state, 0, "elsewhere");
+        state.apply_workspace_git_statuses(&terminal_runtimes, vec![status]);
+        assert_eq!(state.workspaces[0].custom_name.as_deref(), Some("herdr"));
+        assert!(!state.session_dirty);
+        state.assert_invariants_for_test();
+    }
+
+    #[test]
+    fn unnamed_workspace_ignores_stale_label() {
+        let mut state = app_with_workspaces(&["placeholder"]);
+        state.workspaces[0].custom_name = None;
+        let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
+
+        let mut status = git_status_with_label(&state, 0, "stale");
+        status.resolved_identity_cwd = "/definitely/not/current".into();
+        state.apply_workspace_git_statuses(&terminal_runtimes, vec![status]);
+
+        assert_eq!(state.workspaces[0].custom_name, None);
     }
 
     #[test]

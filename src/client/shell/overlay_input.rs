@@ -343,7 +343,7 @@ impl ClientShellState {
         let suggested_name = cwd
             .as_deref()
             .map(std::path::Path::new)
-            .map(crate::workspace::derive_label_from_cwd)
+            .map(crate::workspace::fallback_label_from_cwd)
             .unwrap_or_else(|| "workspace".to_owned());
         self.overlay = Some(ClientShellOverlay::Rename(ClientRenameOverlay {
             title: "new workspace",
@@ -351,7 +351,6 @@ impl ClientShellState {
             target: ClientRenameTarget::NewWorkspace {
                 source_workspace_id,
                 cwd,
-                suggested_name,
             },
         }));
     }
@@ -939,14 +938,12 @@ impl ClientShellState {
             ClientRenameTarget::NewWorkspace {
                 source_workspace_id,
                 cwd,
-                suggested_name,
             } => Some(crate::api::schema::Method::WorkspaceCreate(
                 crate::api::schema::WorkspaceCreateParams {
                     source_workspace_id,
                     cwd,
                     focus: true,
-                    label: (!trimmed.is_empty() && trimmed != suggested_name)
-                        .then(|| trimmed.to_owned()),
+                    label: (!trimmed.is_empty()).then(|| trimmed.to_owned()),
                     env: Default::default(),
                 },
             )),

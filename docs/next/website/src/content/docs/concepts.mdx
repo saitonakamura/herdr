@@ -9,6 +9,8 @@ Herdr is a terminal workspace manager. It keeps real terminal processes running 
 
 A workspace is the top-level project container. Use one workspace per repo, task, or investigation.
 
+A workspace has a name, not a directory: its panes can run in any repo. Creating one from the TUI asks for the name. `herdr workspace create` without `--label` names it after its starting directory, and that name stays until you rename the workspace; it does not follow later `cd`s.
+
 A workspace owns tabs and panes. Its sidebar state rolls up from the agents inside it, so you can see which project needs attention.
 
 ## Tab

@@ -41,7 +41,8 @@ Draft, pending merge of [saitonakamura/herdr#7](https://github.com/saitonakamura
   No generation step: upstream already publishes `distribution/agent-detection/`, and
   `scripts/agent_detection_manifest_check.py` keeps it in step with
   `src/detect/manifests/` (published ≥ bundled, same version ⇒ same bytes).
-- The "Distribution contract" CI job now also runs on the fork, so a fork manifest fix
+- A fork-only `fork-agent-detection` job in `distribution.yml` (upstream's `validate`
+  job needs upstream release tags the fork lacks) runs that check, so a fork manifest fix
   must bump the version and update both copies.
 - FORK.md: the sync recipe runs the manifest check; a new "Detection manifests" section
   covers both copies, sync conflicts and override precedence.

@@ -446,8 +446,8 @@ mod tests {
         assert_eq!(agent["parent_agent_id"], parent.as_str());
     }
 
-    #[test]
-    fn closing_the_parent_pane_makes_its_children_top_level() {
+    #[tokio::test]
+    async fn closing_the_parent_pane_makes_its_children_top_level() {
         let mut f = fixture();
         f.detect(f.root, Agent::Claude);
         f.detect(f.second, Agent::Pi);

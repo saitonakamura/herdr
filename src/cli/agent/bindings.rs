@@ -2,11 +2,12 @@ use clap::{ArgGroup, ArgMatches, Command};
 
 use crate::api::schema::agents::{
     AgentPromptProjection, AgentPromptWaitProjection, AgentReadProjection, AgentRenameProjection,
-    AgentSendKeysProjection, AgentStartProjection, AgentWaitProjection,
+    AgentSendKeysProjection, AgentSetParentProjection, AgentStartProjection, AgentWaitProjection,
 };
 use crate::api::schema::{
-    AgentPromptParams, AgentReadParams, AgentRenameParams, AgentSendKeysParams, AgentStartParams,
-    AgentStatus, AgentTarget, AgentWaitParams, ReadFormat, ReadSource, READ_FORMATS, READ_SOURCES,
+    AgentPromptParams, AgentReadParams, AgentRenameParams, AgentSendKeysParams,
+    AgentSetParentParams, AgentStartParams, AgentStatus, AgentTarget, AgentWaitParams, ReadFormat,
+    ReadSource, READ_FORMATS, READ_SOURCES,
 };
 pub(crate) use crate::cli::projection::optional_text;
 use crate::cli::projection::{
@@ -171,6 +172,27 @@ pub(crate) fn clear_name() -> Input<Option<String>> {
     })
 }
 
+pub(crate) fn parent_flag() -> Input<Option<String>> {
+    optional_text("parent", "AGENT_ID").help("Agent id of the agent that starts this one")
+}
+
+pub(crate) fn parent_position() -> Input<Option<String>> {
+    Input::positional("parent", 1, |slot, value| {
+        *slot = Some(value.to_owned());
+        Ok(())
+    })
+    .value_name("PARENT")
+    .configure(|arg| arg.required(false).conflicts_with("clear"))
+}
+
+pub(crate) fn clear_parent() -> Input<Option<String>> {
+    Input::flag("clear", |slot, _| {
+        *slot = None;
+        Ok(())
+    })
+    .help("Make the agent top-level")
+}
+
 pub(crate) fn wait_presence() -> Input<Option<crate::api::schema::AgentPromptWaitOptions>> {
     Input::flag("wait", |slot, _| {
         *slot = Some(crate::api::schema::AgentPromptWaitOptions {
@@ -231,6 +253,7 @@ pub(crate) enum Operation {
     Read(AgentReadParams),
     SendKeys(AgentSendKeysParams),
     Rename(AgentRenameParams),
+    SetParent(AgentSetParentParams),
     Wait(AgentWaitParams),
     Prompt(AgentPromptParams),
     Start(AgentStartParams),
@@ -256,6 +279,10 @@ pub(crate) fn command() -> Command {
         .subcommand(leaf("rename", AgentRenameProjection::arguments(), "Rename an agent")
             .override_usage("herdr agent rename <TARGET> <NAME>|--clear")
             .group(ArgGroup::new("rename").args(["name", "clear"]).required(true)))
+        .subcommand(leaf("set-parent", AgentSetParentProjection::arguments(), "Set or clear an agent's parent")
+            .override_usage("herdr agent set-parent <TARGET> <PARENT>|--clear")
+            .group(ArgGroup::new("set_parent").args(["parent", "clear"]).required(true))
+            .after_help("TARGET is an agent id, agent name or pane id; a pane without an agent gets an agent id too. PARENT is an agent id. When the parent's pane closes, the agent becomes top-level."))
         .subcommand(leaf("wait", AgentWaitProjection::arguments(), "Wait until an agent reaches one of the requested states")
             .override_usage("herdr agent wait <TARGET> [OPTIONS]")
             .after_help("Without --until, matches idle, done, or blocked. Use --until unknown explicitly when needed. Without --timeout, waits indefinitely."))
@@ -287,6 +314,7 @@ pub(crate) fn from_matches(matches: &ArgMatches) -> Result<Operation, ParseError
         }
         "send-keys" => Operation::SendKeys(AgentSendKeysProjection::from_matches(matches)?),
         "rename" => Operation::Rename(AgentRenameProjection::from_matches(matches)?),
+        "set-parent" => Operation::SetParent(AgentSetParentProjection::from_matches(matches)?),
         "wait" => Operation::Wait(AgentWaitProjection::from_matches(matches)?),
         "prompt" => {
             let mut params = AgentPromptProjection::from_matches(matches)?;

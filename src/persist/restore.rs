@@ -448,6 +448,7 @@ fn unavailable_restored_terminal(
     warn!(cwd = %cwd.display(), reason = %reason, "preserving unavailable restored pane");
     let mut terminal = TerminalState::new(TerminalId::alloc(), cwd);
     terminal.restore_error = Some(reason);
+    restore_agent_identity(&mut terminal, pane);
     if let Some(pane) = pane {
         terminal.manual_label = pane.label.clone();
         terminal.launch_argv = pane.launch_argv.clone();
@@ -469,6 +470,18 @@ fn unavailable_restored_terminal(
         }
     }
     terminal
+}
+
+/// Agent identity outlives the process, so it is restored whether or not the
+/// agent itself is resumed.
+fn restore_agent_identity(
+    terminal: &mut TerminalState,
+    pane: Option<&super::snapshot::PaneSnapshot>,
+) {
+    if let Some(pane) = pane {
+        terminal.agent_id = pane.agent_id.clone();
+        terminal.parent_agent_id = pane.parent_agent_id.clone();
+    }
 }
 
 pub(crate) fn restored_worktree_space_membership(
@@ -593,6 +606,7 @@ fn restore_tab(
             let terminal_id = TerminalId::alloc();
             let mut terminal = TerminalState::new(terminal_id.clone(), cwd.clone())
                 .with_pending_agent_resume_plan(plan);
+            restore_agent_identity(&mut terminal, saved_pane);
             if let Some(label) = saved_label {
                 terminal.set_manual_label(label);
             }
@@ -688,6 +702,7 @@ fn restore_tab(
             Ok(runtime) => {
                 let terminal_id = TerminalId::alloc();
                 let mut terminal = TerminalState::new(terminal_id.clone(), cwd.clone());
+                restore_agent_identity(&mut terminal, saved_pane);
                 if was_imported {
                     if let Some(argv) = saved_launch_argv {
                         terminal = terminal.with_launch_argv(argv).with_respawn_shell_on_exit();
@@ -1554,6 +1569,8 @@ mod tests {
                             }),
                             agent_resume: None,
                             launch_argv: None,
+                            agent_id: crate::terminal::AgentId::parse("1234abcd"),
+                            parent_agent_id: crate::terminal::AgentId::parse("2345bcde"),
                         },
                     )]),
                     zoomed: false,
@@ -1601,6 +1618,15 @@ mod tests {
         assert_eq!(session.source, "herdr:opencode");
         assert_eq!(session.agent, "opencode");
         assert_eq!(session.session_ref.value, "opencode-session");
+        assert_eq!(
+            terminal.agent_id.as_ref().map(|id| id.as_str()),
+            Some("1234abcd"),
+            "agent identity survives restore even when the agent is not resumed"
+        );
+        assert_eq!(
+            terminal.parent_agent_id.as_ref().map(|id| id.as_str()),
+            Some("2345bcde")
+        );
     }
 
     #[tokio::test]
@@ -1636,6 +1662,8 @@ mod tests {
                                 agent_session: None,
                                 agent_resume: None,
                                 launch_argv: None,
+                                agent_id: None,
+                                parent_agent_id: None,
                             },
                         ),
                         (
@@ -1648,6 +1676,8 @@ mod tests {
                                 agent_session: None,
                                 agent_resume: None,
                                 launch_argv: None,
+                                agent_id: None,
+                                parent_agent_id: None,
                             },
                         ),
                     ]),
@@ -1702,6 +1732,8 @@ mod tests {
                     agent_session: None,
                     agent_resume: None,
                     launch_argv: None,
+                    agent_id: None,
+                    parent_agent_id: None,
                 },
             )
         };
@@ -1718,6 +1750,8 @@ mod tests {
             }),
             agent_resume: None,
             launch_argv: None,
+            agent_id: None,
+            parent_agent_id: None,
         };
         let snapshot = SessionSnapshot {
             version: super::super::snapshot::SNAPSHOT_VERSION,
@@ -1870,6 +1904,8 @@ mod tests {
                             }),
                             agent_resume: None,
                             launch_argv: None,
+                            agent_id: None,
+                            parent_agent_id: None,
                         },
                     )]),
                     zoomed: false,
@@ -2176,6 +2212,8 @@ mod tests {
                 agent_session: None,
                 agent_resume: None,
                 launch_argv: None,
+                agent_id: None,
+                parent_agent_id: None,
             },
         );
         let mut history = SessionHistorySnapshot {

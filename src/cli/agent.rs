@@ -1,9 +1,9 @@
 use std::time::{Duration, Instant};
 
 use crate::api::schema::{
-    AgentPromptParams, AgentReadParams, AgentRenameParams, AgentSendKeysParams, AgentStartParams,
-    AgentTarget, AgentWaitParams, EmptyParams, ErrorBody, ErrorResponse, Method,
-    PaneProcessInfoParams, PaneTarget, Request,
+    AgentPromptParams, AgentReadParams, AgentRenameParams, AgentSendKeysParams,
+    AgentSetParentParams, AgentStartParams, AgentTarget, AgentWaitParams, EmptyParams, ErrorBody,
+    ErrorResponse, Method, PaneProcessInfoParams, PaneTarget, Request,
 };
 
 const AGENT_START_POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -56,6 +56,7 @@ pub(super) fn run_agent_command(args: &[String]) -> std::io::Result<i32> {
         Operation::Read(params) => agent_read(params),
         Operation::SendKeys(params) => agent_send_keys(params),
         Operation::Rename(params) => agent_rename(params),
+        Operation::SetParent(params) => agent_set_parent(params),
         Operation::Wait(params) => agent_wait(params),
         Operation::Prompt(params) => agent_prompt(params),
         Operation::Start(params) => agent_start(params),
@@ -256,6 +257,7 @@ fn agent_start(params: AgentStartParams) -> std::io::Result<i32> {
         kind,
         pane_id,
         args: agent_args,
+        parent,
         timeout_ms,
     } = params;
     let Some(expected_kind) = crate::detect::parse_agent_label(&kind) else {
@@ -287,6 +289,7 @@ fn agent_start(params: AgentStartParams) -> std::io::Result<i32> {
                 kind: kind.clone(),
                 pane_id: pane_id.clone(),
                 args: agent_args.clone(),
+                parent: parent.clone(),
                 timeout_ms,
             }),
         })?;
@@ -583,6 +586,13 @@ fn agent_get_request(target: &str, request_id: &str) -> Request {
             target: target.to_owned(),
         }),
     }
+}
+
+fn agent_set_parent(params: AgentSetParentParams) -> std::io::Result<i32> {
+    super::print_response(&super::send_request(&Request {
+        id: "cli:agent:set_parent".into(),
+        method: Method::AgentSetParent(params),
+    })?)
 }
 
 fn agent_rename(params: AgentRenameParams) -> std::io::Result<i32> {

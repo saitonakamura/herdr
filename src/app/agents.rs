@@ -147,6 +147,7 @@ impl App {
         params: AgentStartParams,
     ) -> Result<(crate::api::schema::AgentInfo, Vec<String>), AgentStartError> {
         let name = params.name;
+        let requested_parent = params.parent;
         if !valid_agent_name(&name) {
             return Err(AgentStartError::InvalidName);
         }
@@ -187,6 +188,9 @@ impl App {
         if terminal.is_agent_terminal() || terminal.managed_agent_kind().is_some() {
             return Err(AgentStartError::TargetBusy(params.pane_id));
         }
+        let parent = self
+            .validate_agent_parent(requested_parent, &terminal_id)
+            .map_err(AgentStartError::Parent)?;
         let runtime = self
             .terminal_runtimes
             .get(&terminal_id)
@@ -226,8 +230,12 @@ impl App {
         if let Some(session) = persisted_agent_session {
             terminal.set_managed_agent_launch_session(session);
         }
+        let identity_changed = self.assign_agent_identity(&terminal_id, Some(parent));
         self.state.mark_session_dirty();
         self.schedule_session_save();
+        if identity_changed {
+            self.emit_pane_updated(ws_idx, pane_id);
+        }
 
         let agent = self
             .agent_info(ws_idx, pane_id)
@@ -272,6 +280,7 @@ impl App {
                 code: "agent_start_input_failed".into(),
                 message,
             },
+            AgentStartError::Parent(err) => self.agent_parent_error_body(err),
             AgentStartError::DuplicateName { name, candidates } => crate::api::schema::ErrorBody {
                 code: "agent_name_taken".into(),
                 message: format!(
@@ -392,6 +401,8 @@ impl App {
             state_labels: pane.state_labels,
             tokens: pane.tokens,
             agent_session: pane.agent_session,
+            agent_id: pane.agent_id,
+            parent_agent_id: pane.parent_agent_id,
             workspace_id: pane.workspace_id,
             tab_id: pane.tab_id,
             pane_id: pane.pane_id,
@@ -459,6 +470,7 @@ pub(super) enum AgentStartError {
     TargetBusy(String),
     TargetUnavailable(String),
     InputFailed(String),
+    Parent(super::agent_identity::AgentParentError),
     DuplicateName {
         name: String,
         candidates: Vec<crate::api::schema::AgentInfo>,

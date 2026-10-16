@@ -67,6 +67,18 @@ cli_params! {
     }
 }
 
+cli_params! {
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+    pub struct AgentSetParentParams => AgentSetParentProjection {
+        /// Agent id, agent name, or pane id. A pane without an agent gets an agent id too.
+        pub target: String => Field::new(String::new()).input(bindings::target()),
+        /// Parent agent id; omit to make the target top-level.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub parent: Option<String> => Field::new(None)
+            .input(bindings::parent_position()).input(bindings::clear_parent()),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AgentViewSetParams {
     pub source: String,
@@ -189,6 +201,9 @@ cli_params! {
         pub pane_id: String => Field::new(String::new()).input(bindings::pane()),
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         pub args: Vec<String> => Field::new(Vec::new()).input(bindings::agent_args()),
+        /// Agent id of the agent that starts this one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub parent: Option<String> => Field::new(None).input(bindings::parent_flag()),
         /// Startup timeout in milliseconds. Values must be greater than 3000 and at most 300000.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub timeout_ms: Option<u64> => Field::new(None).input(bindings::timeout()
@@ -231,6 +246,12 @@ pub struct AgentInfo {
     pub tokens: HashMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_session: Option<AgentSessionInfo>,
+    /// Stable agent identity; survives session changes, pane moves and server restarts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+    /// The agent that started this one; absent for a top-level agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_agent_id: Option<String>,
     pub workspace_id: String,
     pub tab_id: String,
     pub pane_id: String,

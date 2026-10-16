@@ -360,6 +360,8 @@ impl App {
             state_labels: presentation.state_labels,
             tokens: terminal.metadata_tokens.values(),
             agent_session: terminal_agent_session_info(terminal),
+            agent_id: terminal.agent_id.as_ref().map(ToString::to_string),
+            parent_agent_id: terminal.parent_agent_id.as_ref().map(ToString::to_string),
             scroll: None,
             revision: terminal.revision,
         })

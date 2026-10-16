@@ -765,6 +765,13 @@
                 "null"
               ]
             },
+            "agent_id": {
+              "description": "Stable agent identity; survives session changes, pane moves and server restarts.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "agent_session": {
               "anyOf": [
                 {
@@ -807,6 +814,13 @@
             },
             "pane_id": {
               "type": "string"
+            },
+            "parent_agent_id": {
+              "description": "The agent that started this one; absent for a top-level agent.",
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "restore_error": {
               "type": [
@@ -1338,6 +1352,25 @@
           ],
           "type": "object"
         },
+        "AgentSetParentParams": {
+          "properties": {
+            "parent": {
+              "description": "Parent agent id; omit to make the target top-level.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "target": {
+              "description": "Agent id, agent name, or pane id. A pane without an agent gets an agent id too.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "target"
+          ],
+          "type": "object"
+        },
         "AgentStartParams": {
           "properties": {
             "args": {
@@ -1354,6 +1387,13 @@
             },
             "pane_id": {
               "type": "string"
+            },
+            "parent": {
+              "description": "Agent id of the agent that starts this one.",
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "timeout_ms": {
               "description": "Startup timeout in milliseconds. Values must be greater than 3000 and at most 300000.",
@@ -5341,6 +5381,22 @@
         {
           "properties": {
             "method": {
+              "const": "agent.set_parent",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/AgentSetParentParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "agent.view.set",
               "type": "string"
             },
@@ -6550,6 +6606,13 @@
                 "null"
               ]
             },
+            "agent_id": {
+              "description": "Stable agent identity; survives session changes, pane moves and server restarts.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "agent_session": {
               "anyOf": [
                 {
@@ -6607,6 +6670,13 @@
             },
             "pane_id": {
               "type": "string"
+            },
+            "parent_agent_id": {
+              "description": "The agent that started this one; absent for a top-level agent.",
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "revision": {
               "format": "uint64",
@@ -7875,6 +7945,13 @@
                 "null"
               ]
             },
+            "agent_id": {
+              "description": "Stable agent identity; survives session changes, pane moves and server restarts.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "agent_session": {
               "anyOf": [
                 {
@@ -7917,6 +7994,13 @@
             },
             "pane_id": {
               "type": "string"
+            },
+            "parent_agent_id": {
+              "description": "The agent that started this one; absent for a top-level agent.",
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "restore_error": {
               "type": [

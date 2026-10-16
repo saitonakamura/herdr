@@ -642,10 +642,14 @@ impl AppState {
                         .any(|pane| pane.attached_terminal_id == terminal_id)
                 })
             });
-            if !still_attached
-                && self.terminals.remove(&terminal_id).is_some()
-                && !self.terminal_runtime_shutdowns.contains(&terminal_id)
-            {
+            if still_attached {
+                continue;
+            }
+            let Some(terminal) = self.terminals.remove(&terminal_id) else {
+                continue;
+            };
+            self.agent_identities_dirty |= terminal.agent_id.is_some();
+            if !self.terminal_runtime_shutdowns.contains(&terminal_id) {
                 self.terminal_runtime_shutdowns.push(terminal_id);
             }
         }

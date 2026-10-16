@@ -128,6 +128,8 @@ struct RecentAgentProcessExit {
 /// metadata.
 pub struct TerminalState {
     pub id: TerminalId,
+    pub agent_id: Option<super::AgentId>,
+    pub parent_agent_id: Option<super::AgentId>,
     pub cwd: PathBuf,
     pub detected_agent: Option<Agent>,
     pub fallback_state: AgentState,
@@ -168,6 +170,8 @@ impl TerminalState {
     pub fn new(id: TerminalId, cwd: PathBuf) -> Self {
         Self {
             id,
+            agent_id: None,
+            parent_agent_id: None,
             cwd,
             detected_agent: None,
             fallback_state: AgentState::Unknown,

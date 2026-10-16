@@ -3,8 +3,8 @@ use std::time::Duration;
 use bytes::Bytes;
 
 use crate::api::schema::{
-    AgentPromptParams, AgentRenameParams, AgentSendKeysParams, AgentStartParams, AgentTarget,
-    PaneReadResult, ResponseResult,
+    AgentPromptParams, AgentRenameParams, AgentSendKeysParams, AgentSetParentParams,
+    AgentStartParams, AgentTarget, PaneReadResult, ResponseResult,
 };
 use crate::app::App;
 
@@ -68,6 +68,17 @@ impl App {
         };
 
         encode_success(id, ResponseResult::AgentInfo { agent })
+    }
+
+    pub(super) fn handle_agent_set_parent(
+        &mut self,
+        id: String,
+        params: AgentSetParentParams,
+    ) -> String {
+        match self.set_agent_parent(&params.target, params.parent) {
+            Ok(pane) => encode_success(id, ResponseResult::PaneInfo { pane }),
+            Err(err) => encode_error_body(id, self.agent_parent_error_body(err)),
+        }
     }
 
     pub(super) fn handle_agent_start(&mut self, id: String, params: AgentStartParams) -> String {

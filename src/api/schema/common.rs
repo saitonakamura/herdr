@@ -246,6 +246,35 @@ pub enum PaneAgentState {
     Unknown,
 }
 
+/// What a blocked agent waits on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentBlockedReason {
+    Question,
+    Permission,
+    Form,
+}
+
+impl From<crate::detect::BlockedReason> for AgentBlockedReason {
+    fn from(reason: crate::detect::BlockedReason) -> Self {
+        match reason {
+            crate::detect::BlockedReason::Question => Self::Question,
+            crate::detect::BlockedReason::Permission => Self::Permission,
+            crate::detect::BlockedReason::Form => Self::Form,
+        }
+    }
+}
+
+impl From<AgentBlockedReason> for crate::detect::BlockedReason {
+    fn from(reason: AgentBlockedReason) -> Self {
+        match reason {
+            AgentBlockedReason::Question => Self::Question,
+            AgentBlockedReason::Permission => Self::Permission,
+            AgentBlockedReason::Form => Self::Form,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentStatus {

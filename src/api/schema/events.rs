@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::common::{AgentStatus, ReadSource};
+use super::common::{AgentBlockedReason, AgentStatus, ReadSource};
 use super::panes::{PaneInfo, PaneReadResult, PaneScrollInfo};
 use super::tabs::TabInfo;
 use super::workspaces::WorkspaceInfo;
@@ -401,6 +401,8 @@ pub struct PaneAgentStatusChangedEvent {
     pub workspace_id: String,
     pub agent_status: AgentStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocked_reason: Option<AgentBlockedReason>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
@@ -541,6 +543,8 @@ pub enum EventData {
         pane_id: String,
         workspace_id: String,
         agent_status: AgentStatus,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        blocked_reason: Option<AgentBlockedReason>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         agent: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]

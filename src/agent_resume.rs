@@ -163,8 +163,7 @@ pub fn normalize_session_start_source(value: Option<String>) -> Option<String> {
 pub fn is_reserved_native_state_source(source: &str, agent: &str) -> bool {
     matches!(
         (source, agent),
-        ("herdr:claude", "claude")
-            | ("herdr:codex", "codex")
+        ("herdr:codex", "codex")
             | ("herdr:copilot", "copilot")
             | ("herdr:devin", "devin")
             | ("herdr:droid", "droid")
@@ -406,7 +405,7 @@ mod tests {
 
     #[test]
     fn native_state_reservation_excludes_full_lifecycle_sources() {
-        assert!(is_reserved_native_state_source("herdr:claude", "claude"));
+        assert!(!is_reserved_native_state_source("herdr:claude", "claude"));
         assert!(is_reserved_native_state_source("herdr:codex", "codex"));
         assert!(is_reserved_native_state_source("herdr:devin", "devin"));
         assert!(!is_reserved_native_state_source("herdr:kimi", "kimi"));

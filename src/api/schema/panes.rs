@@ -6,7 +6,9 @@ use crate::cli::pane::bindings as binding;
 use crate::cli::projection::{Field, Input};
 
 use super::agents::AgentSessionInfo;
-use super::common::{AgentStatus, PaneAgentState, ReadFormat, ReadSource, SplitDirection};
+use super::common::{
+    AgentBlockedReason, AgentStatus, PaneAgentState, ReadFormat, ReadSource, SplitDirection,
+};
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema, Default,
@@ -407,6 +409,12 @@ crate::cli::projection::cli_params! {
         pub source: String => Field::new(String::new()).input(binding::source()),
         pub agent: String => Field::new(String::new()).input(binding::text("agent", "LABEL").required()),
         pub state: PaneAgentState => Field::new(PaneAgentState::Unknown).input(binding::state()),
+        /// With `blocked`: what the agent waits on.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub blocked_reason: Option<super::common::AgentBlockedReason> => Field::new(None).input(binding::blocked_reason()),
+        /// With `working`: the turn ended and work the agent started runs on.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        pub background: bool => Field::new(false).input(binding::boolean("background", true)),
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub message: Option<String> => Field::new(None).input(binding::optional_text("message", "TEXT")),
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -521,6 +529,8 @@ pub struct PaneInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_agent: Option<String>,
     pub agent_status: AgentStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocked_reason: Option<AgentBlockedReason>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub state_labels: HashMap<String, String>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]

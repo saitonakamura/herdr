@@ -210,6 +210,9 @@ pub(super) fn prompt_agent(
     };
     let prompt_started_working =
         before_prompt.agent_status == crate::api::schema::AgentStatus::Working;
+    // A pane blocked on a question takes the prompt; still reading blocked is no effect.
+    let prompt_started_blocked =
+        before_prompt.agent_status == crate::api::schema::AgentStatus::Blocked;
     let target = params.target.clone();
     if let Some(prompt_wait) = params.wait.as_mut() {
         prompt_wait.submission_deadline = wait
@@ -242,10 +245,9 @@ pub(super) fn prompt_agent(
     }
 
     let prompt_activity_observed = prompt_started_working
-        || matches!(
-            prompted.agent_status,
-            crate::api::schema::AgentStatus::Working | crate::api::schema::AgentStatus::Blocked
-        );
+        || prompted.agent_status == crate::api::schema::AgentStatus::Working
+        || (prompted.agent_status == crate::api::schema::AgentStatus::Blocked
+            && !prompt_started_blocked);
     let prompt_state_change_seq = prompted.state_change_seq;
     let until = agent_wait_statuses(wait.until);
     let mut initial = prompted;
@@ -810,6 +812,7 @@ fn wait_matched_response(request_id: &str, event: serde_json::Value) -> String {
                     pane_id: data.pane_id,
                     workspace_id: data.workspace_id,
                     agent_status: data.agent_status,
+                    blocked_reason: data.blocked_reason,
                     agent: data.agent,
                     title: data.title,
                     display_agent: data.display_agent,

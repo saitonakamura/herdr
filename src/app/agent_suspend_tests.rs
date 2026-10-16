@@ -72,6 +72,7 @@ fn pi_report(app: &mut AppState, pane_id: PaneId, state: AgentState, seq: u64) {
         source: "herdr:pi".into(),
         agent_label: "pi".into(),
         state,
+        detail: Default::default(),
         message: None,
         seq: Some(seq),
         session_ref: Some(pi_session()),

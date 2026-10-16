@@ -4,8 +4,9 @@ use clap::{ArgMatches, Command};
 
 use crate::api::schema::panes::*;
 use crate::api::schema::{
-    Method, OutputMatch, PaneAgentState, PaneDirection, PaneTarget, PaneWaitForOutputParams,
-    ReadFormat, ReadSource, Request, SplitDirection, READ_FORMATS, READ_SOURCES,
+    AgentBlockedReason, Method, OutputMatch, PaneAgentState, PaneDirection, PaneTarget,
+    PaneWaitForOutputParams, ReadFormat, ReadSource, Request, SplitDirection, READ_FORMATS,
+    READ_SOURCES,
 };
 pub(crate) use crate::cli::projection::parse_choice;
 use crate::cli::projection::{choices, choices_where, Choice};
@@ -30,6 +31,20 @@ const STATES: &[Choice<PaneAgentState>] = &[
     Choice::new("blocked", PaneAgentState::Blocked),
     Choice::new("unknown", PaneAgentState::Unknown),
 ];
+
+const BLOCKED_REASONS: &[Choice<AgentBlockedReason>] = &[
+    Choice::new("question", AgentBlockedReason::Question),
+    Choice::new("permission", AgentBlockedReason::Permission),
+    Choice::new("form", AgentBlockedReason::Form),
+];
+
+pub(crate) fn blocked_reason() -> Input<Option<AgentBlockedReason>> {
+    Input::value("blocked-reason", "REASON", |slot, value| {
+        *slot = Some(parse_choice(BLOCKED_REASONS, "blocked reason", value)?);
+        Ok(())
+    })
+    .configure(|arg| choices(arg, BLOCKED_REASONS))
+}
 
 pub(crate) fn state() -> Input<PaneAgentState> {
     Input::value("state", "STATE", |slot, value| {

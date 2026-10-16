@@ -1502,6 +1502,7 @@ impl AppState {
                 source,
                 agent_label,
                 state,
+                detail,
                 message,
                 seq,
                 session_ref,
@@ -1514,13 +1515,15 @@ impl AppState {
                     .collect()
                 } else {
                     self.update_terminal_state(pane_id, |terminal| {
-                        terminal.set_hook_authority_with_session_ref(
+                        terminal.set_detailed_hook_authority_at(
                             source,
                             agent_label,
                             state,
+                            detail,
                             message,
                             session_ref,
                             seq,
+                            std::time::Instant::now(),
                         )
                     })
                     .into_iter()
@@ -3362,6 +3365,7 @@ mod tests {
                 source: "custom:worker".into(),
                 agent_label: label.into(),
                 state,
+                detail: Default::default(),
                 message: None,
                 seq: Some(seq),
                 session_ref: None,
@@ -3728,6 +3732,7 @@ mod tests {
             source: "prime-agent".into(),
             agent_label: "prime-agent".into(),
             state: AgentState::Idle,
+            detail: Default::default(),
             message: None,
             seq: Some(1),
             session_ref: None,
@@ -3796,6 +3801,7 @@ mod tests {
             source: "custom:other".into(),
             agent_label: "other".into(),
             state: AgentState::Working,
+            detail: Default::default(),
             message: None,
             seq: None,
             session_ref: None,
@@ -3899,6 +3905,7 @@ mod tests {
             source: "herdr:pi".into(),
             agent_label: "pi".into(),
             state: AgentState::Working,
+            detail: Default::default(),
             message: None,
             seq: Some(1),
             session_ref: None,
@@ -3928,6 +3935,7 @@ mod tests {
             source: "custom:hermes".into(),
             agent_label: "hermes".into(),
             state: AgentState::Blocked,
+            detail: Default::default(),
             message: None,
             seq: None,
             session_ref: None,
@@ -3966,6 +3974,7 @@ mod tests {
             source: "herdr:codex".into(),
             agent_label: "codex".into(),
             state: AgentState::Working,
+            detail: Default::default(),
             message: None,
             seq: Some(1),
             session_ref: None,
@@ -4002,7 +4011,7 @@ mod tests {
 
         state.handle_app_event(AppEvent::StateChanged {
             pane_id,
-            agent: Some(Agent::Claude),
+            agent: Some(Agent::Codex),
             state: AgentState::Working,
             visible_blocker: false,
             visible_working: false,
@@ -4011,12 +4020,13 @@ mod tests {
         });
         state.handle_app_event(AppEvent::HookStateReported {
             pane_id,
-            source: "herdr:claude".into(),
-            agent_label: "claude".into(),
+            source: "herdr:codex".into(),
+            agent_label: "codex".into(),
             state: AgentState::Blocked,
+            detail: Default::default(),
             message: None,
             seq: Some(1),
-            session_ref: crate::agent_resume::AgentSessionRef::id("claude-session"),
+            session_ref: crate::agent_resume::AgentSessionRef::id("codex-session"),
         });
         let terminal = state.terminals.get(&terminal_id).unwrap();
         assert_eq!(terminal.state, AgentState::Working);
@@ -4025,7 +4035,7 @@ mod tests {
 
         state.handle_app_event(AppEvent::StateChanged {
             pane_id,
-            agent: Some(Agent::Claude),
+            agent: Some(Agent::Codex),
             state: AgentState::Idle,
             visible_blocker: false,
             visible_working: false,
@@ -4123,6 +4133,7 @@ mod tests {
             source: "herdr:devin".into(),
             agent_label: "devin".into(),
             state: AgentState::Working,
+            detail: Default::default(),
             message: None,
             seq: Some(1),
             session_ref: crate::agent_resume::AgentSessionRef::id("devin-session"),
@@ -4147,6 +4158,7 @@ mod tests {
             source: "custom:pi".into(),
             agent_label: "pi".into(),
             state: AgentState::Working,
+            detail: Default::default(),
             message: None,
             seq: Some(20),
             session_ref: crate::agent_resume::AgentSessionRef::path(first_session),
@@ -4159,6 +4171,7 @@ mod tests {
             source: "custom:pi".into(),
             agent_label: "pi".into(),
             state: AgentState::Working,
+            detail: Default::default(),
             message: None,
             seq: Some(21),
             session_ref: crate::agent_resume::AgentSessionRef::path(second_session),

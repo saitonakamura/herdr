@@ -7,8 +7,12 @@ use std::time::{Duration, Instant};
 // remains only for session-only/custom hook paths and fallback detection.
 // Process-exit updates clear matching hook authority before recomputing state.
 
-use crate::detect::{Agent, AgentState};
+use crate::detect::{Agent, AgentState, BlockedReason};
 use crate::terminal::TerminalId;
+
+/// How long a screen-assisted integration's live turn may read idle on screen
+/// before it counts as ended: an interrupt ends a turn without a stop hook.
+const SCREEN_IDLE_ENDS_LIVE_TURN_AFTER: Duration = Duration::from_secs(3);
 
 #[path = "metadata.rs"]
 mod metadata;
@@ -23,6 +27,19 @@ pub struct HookAuthority {
     #[serde(skip, default = "Instant::now")]
     pub reported_at: Instant,
     pub session_ref: Option<crate::agent_resume::AgentSessionRef>,
+    #[serde(default)]
+    pub detail: HookReportDetail,
+}
+
+/// What a state report says beyond the state itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct HookReportDetail {
+    /// Set with `blocked`: what the agent waits on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocked_reason: Option<BlockedReason>,
+    /// Set with `working`: the turn ended and work the agent started runs on.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub background: bool,
 }
 
 #[cfg(unix)]
@@ -135,6 +152,9 @@ pub struct TerminalState {
     pub fallback_state: AgentState,
     fallback_visible_blocker: bool,
     fallback_observed_at: Option<Instant>,
+    fallback_idle_since: Option<Instant>,
+    hook_dialog_seen: bool,
+    blocked_reason: Option<BlockedReason>,
     pub hook_authority: Option<HookAuthority>,
     pub agent_metadata: HashMap<String, AgentMetadata>,
     pub metadata_tokens: crate::metadata_tokens::MetadataTokens,
@@ -177,6 +197,9 @@ impl TerminalState {
             fallback_state: AgentState::Unknown,
             fallback_visible_blocker: false,
             fallback_observed_at: None,
+            fallback_idle_since: None,
+            hook_dialog_seen: false,
+            blocked_reason: None,
             hook_authority: None,
             agent_metadata: HashMap::new(),
             metadata_tokens: crate::metadata_tokens::MetadataTokens::default(),
@@ -450,6 +473,16 @@ impl TerminalState {
         self.fallback_state = fallback_state;
         self.fallback_visible_blocker = visible_blocker && fallback_state == AgentState::Blocked;
         self.fallback_observed_at = Some(now);
+        self.fallback_idle_since =
+            (fallback_state == AgentState::Idle).then(|| self.fallback_idle_since.unwrap_or(now));
+        if self.fallback_visible_blocker
+            && self
+                .hook_authority
+                .as_ref()
+                .is_some_and(|authority| authority.reported_at <= now)
+        {
+            self.hook_dialog_seen = true;
+        }
         if process_exited {
             if let Some(agent) = agent {
                 self.recent_agent_process_exit = Some(RecentAgentProcessExit {
@@ -682,6 +715,7 @@ impl TerminalState {
         .and_then(|mutation| mutation.effective_state_change)
     }
 
+    #[cfg(test)]
     pub fn set_hook_authority_with_session_ref(
         &mut self,
         source: String,
@@ -702,11 +736,36 @@ impl TerminalState {
         )
     }
 
+    #[cfg(test)]
     pub fn set_hook_authority_at(
         &mut self,
         source: String,
         agent_label: String,
         state: AgentState,
+        message: Option<String>,
+        session_ref: Option<crate::agent_resume::AgentSessionRef>,
+        seq: Option<u64>,
+        now: Instant,
+    ) -> Option<TerminalStateMutation> {
+        self.set_detailed_hook_authority_at(
+            source,
+            agent_label,
+            state,
+            HookReportDetail::default(),
+            message,
+            session_ref,
+            seq,
+            now,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)] // one report's fields, kept flat like set_hook_authority_at
+    pub fn set_detailed_hook_authority_at(
+        &mut self,
+        source: String,
+        agent_label: String,
+        state: AgentState,
+        detail: HookReportDetail,
         message: Option<String>,
         session_ref: Option<crate::agent_resume::AgentSessionRef>,
         seq: Option<u64>,
@@ -796,6 +855,7 @@ impl TerminalState {
             }
         }
         self.persisted_agent_session = None;
+        self.hook_dialog_seen = false;
         self.hook_authority = Some(HookAuthority {
             source,
             agent_label,
@@ -803,6 +863,7 @@ impl TerminalState {
             message,
             reported_at: now,
             session_ref,
+            detail,
         });
         let current_session = self.current_session_identity_for_persistence();
         let effective_state_change = self.recompute_effective_state(
@@ -1057,6 +1118,7 @@ impl TerminalState {
                     message: message.map(str::to_string),
                     reported_at,
                     session_ref: Some(session_ref),
+                    detail: HookReportDetail::default(),
                 },
                 seq,
             });
@@ -1680,6 +1742,17 @@ impl TerminalState {
         if self.managed_agent_launch_session.as_ref() == Some(&persisted_session) {
             self.managed_agent_launch_session = None;
         }
+        // The live state stays; only the session it belongs to moved on.
+        if let Some(authority) = self.hook_authority.as_mut().filter(|authority| {
+            authority.source == persisted_session.source
+                && authority.agent_label == persisted_session.agent
+                && crate::detect::screen_assisted_hook_authority(
+                    &authority.source,
+                    &authority.agent_label,
+                )
+        }) {
+            authority.session_ref = Some(persisted_session.session_ref.clone());
+        }
         self.persisted_agent_session = Some(persisted_session);
         let current_session = self.current_session_identity_for_persistence();
         if previous_session.is_some() && previous_session != current_session {
@@ -2086,10 +2159,86 @@ impl TerminalState {
         self.fallback_visible_blocker
             && self.fallback_not_older_than_hook()
             && self.hook_authority.as_ref().is_some_and(|authority| {
-                authority.state != AgentState::Blocked
+                let overridable = if crate::detect::screen_assisted_hook_authority(
+                    &authority.source,
+                    &authority.agent_label,
+                ) {
+                    // Its hooks announce every dialog raised after a turn ends.
+                    authority.state == AgentState::Working
+                } else {
+                    authority.state != AgentState::Blocked
+                };
+                overridable
                     && crate::detect::parse_agent_label(&authority.agent_label)
                         == self.detected_agent
             })
+    }
+
+    fn effective_state_and_blocked_reason(
+        &self,
+        now: Instant,
+    ) -> (AgentState, Option<BlockedReason>) {
+        if self.visible_blocker_overrides_hook() {
+            return (AgentState::Blocked, None);
+        }
+        let Some(authority) = self
+            .hook_authority
+            .as_ref()
+            .filter(|authority| self.hook_authority_is_effective(authority))
+        else {
+            return (self.fallback_state, None);
+        };
+        if crate::detect::screen_assisted_hook_authority(&authority.source, &authority.agent_label)
+        {
+            if let Some(state) = self.screen_ended_hook_state(authority, now) {
+                return (state, None);
+            }
+        }
+        let blocked_reason = authority
+            .detail
+            .blocked_reason
+            .filter(|_| authority.state == AgentState::Blocked);
+        (authority.state, blocked_reason)
+    }
+
+    /// The screen's state where it shows that the reported one has ended: a live
+    /// turn idle on screen since the report, or a reported dialog seen and gone.
+    fn screen_ended_hook_state(
+        &self,
+        authority: &HookAuthority,
+        now: Instant,
+    ) -> Option<AgentState> {
+        if self.fallback_visible_blocker || !self.fallback_not_older_than_hook() {
+            return None;
+        }
+        match authority.state {
+            AgentState::Working if !authority.detail.background => {
+                let idle_since = self.fallback_idle_since?.max(authority.reported_at);
+                (self.fallback_state == AgentState::Idle
+                    && now.saturating_duration_since(idle_since)
+                        >= SCREEN_IDLE_ENDS_LIVE_TURN_AFTER)
+                    .then_some(AgentState::Idle)
+            }
+            AgentState::Blocked
+                if self.hook_dialog_seen
+                    && matches!(
+                        authority.detail.blocked_reason,
+                        Some(BlockedReason::Permission | BlockedReason::Form)
+                    ) =>
+            {
+                Some(match self.fallback_state {
+                    AgentState::Idle => AgentState::Idle,
+                    _ => AgentState::Working,
+                })
+            }
+            _ => None,
+        }
+    }
+
+    /// What the agent waits on, while it is blocked and its integration said.
+    pub fn blocked_reason(&self) -> Option<BlockedReason> {
+        self.blocked_reason
+            .filter(|_| self.state == AgentState::Blocked)
     }
 
     fn live_full_lifecycle_hook_authority(&self) -> bool {
@@ -2413,15 +2562,8 @@ impl TerminalState {
         previous_presentation: EffectivePresentation,
         now: Instant,
     ) -> Option<EffectiveStateChange> {
-        let state = if self.visible_blocker_overrides_hook() {
-            AgentState::Blocked
-        } else {
-            self.hook_authority
-                .as_ref()
-                .filter(|authority| self.hook_authority_is_effective(authority))
-                .map(|authority| authority.state)
-                .unwrap_or(self.fallback_state)
-        };
+        let (state, blocked_reason) = self.effective_state_and_blocked_reason(now);
+        self.blocked_reason = blocked_reason;
         let agent_label = self.effective_agent_label().map(str::to_string);
         let known_agent = self.effective_known_agent();
 
@@ -6419,6 +6561,312 @@ mod tests {
         assert_eq!(
             terminal.hook_authority.as_ref().unwrap().source,
             "custom:pi"
+        );
+    }
+}
+
+#[cfg(test)]
+mod screen_assisted_tests {
+    use super::*;
+
+    const CLAUDE: &str = "herdr:claude";
+
+    fn claude_terminal(now: Instant) -> TerminalState {
+        let mut terminal = TerminalState::new(TerminalId::alloc(), "/tmp".into());
+        screen(&mut terminal, AgentState::Idle, false, now);
+        terminal
+    }
+
+    fn screen(terminal: &mut TerminalState, state: AgentState, blocker: bool, at: Instant) {
+        terminal.set_detected_state_with_screen_signals_at(
+            Some(Agent::Claude),
+            state,
+            blocker,
+            state == AgentState::Idle,
+            state == AgentState::Working,
+            false,
+            at,
+        );
+    }
+
+    fn report(
+        terminal: &mut TerminalState,
+        source: &str,
+        state: AgentState,
+        detail: HookReportDetail,
+        seq: u64,
+        at: Instant,
+    ) {
+        terminal.set_detailed_hook_authority_at(
+            source.into(),
+            "claude".into(),
+            state,
+            detail,
+            None,
+            crate::agent_resume::AgentSessionRef::id("claude-session"),
+            Some(seq),
+            at,
+        );
+    }
+
+    fn blocked_on(reason: BlockedReason) -> HookReportDetail {
+        HookReportDetail {
+            blocked_reason: Some(reason),
+            background: false,
+        }
+    }
+
+    fn after(now: Instant, millis: u64) -> Instant {
+        now + Duration::from_millis(millis)
+    }
+
+    #[test]
+    fn a_live_turn_ends_when_the_screen_settles_idle() {
+        let now = Instant::now();
+        let mut terminal = claude_terminal(now);
+        report(
+            &mut terminal,
+            CLAUDE,
+            AgentState::Working,
+            HookReportDetail::default(),
+            1,
+            after(now, 10),
+        );
+        screen(&mut terminal, AgentState::Working, false, after(now, 500));
+        screen(&mut terminal, AgentState::Idle, false, after(now, 1_000));
+        screen(&mut terminal, AgentState::Idle, false, after(now, 3_900));
+        assert_eq!(
+            terminal.state,
+            AgentState::Working,
+            "idle for less than the grace"
+        );
+
+        screen(&mut terminal, AgentState::Idle, false, after(now, 4_100));
+        assert_eq!(
+            terminal.state,
+            AgentState::Idle,
+            "an interrupt fires no stop hook"
+        );
+    }
+
+    #[test]
+    fn idle_before_the_report_counts_from_the_report() {
+        let now = Instant::now();
+        let mut terminal = claude_terminal(now);
+        report(
+            &mut terminal,
+            CLAUDE,
+            AgentState::Working,
+            HookReportDetail::default(),
+            1,
+            after(now, 2_000),
+        );
+        screen(&mut terminal, AgentState::Idle, false, after(now, 4_000));
+        assert_eq!(terminal.state, AgentState::Working);
+
+        screen(&mut terminal, AgentState::Idle, false, after(now, 5_100));
+        assert_eq!(terminal.state, AgentState::Idle);
+    }
+
+    #[test]
+    fn background_work_and_questions_hold_against_an_idle_screen() {
+        let now = Instant::now();
+        let mut terminal = claude_terminal(now);
+        let background = HookReportDetail {
+            blocked_reason: None,
+            background: true,
+        };
+        report(
+            &mut terminal,
+            CLAUDE,
+            AgentState::Working,
+            background,
+            1,
+            after(now, 10),
+        );
+        screen(&mut terminal, AgentState::Idle, false, after(now, 60_000));
+        assert_eq!(terminal.state, AgentState::Working);
+        assert_eq!(terminal.blocked_reason(), None);
+
+        report(
+            &mut terminal,
+            CLAUDE,
+            AgentState::Blocked,
+            blocked_on(BlockedReason::Question),
+            2,
+            after(now, 60_010),
+        );
+        screen(&mut terminal, AgentState::Idle, false, after(now, 120_000));
+        assert_eq!(terminal.state, AgentState::Blocked);
+        assert_eq!(terminal.blocked_reason(), Some(BlockedReason::Question));
+        assert_eq!(
+            terminal.effective_presentation().blocked_reason,
+            Some(BlockedReason::Question)
+        );
+    }
+
+    #[test]
+    fn a_screen_dialog_blocks_a_working_turn_without_a_reason() {
+        let now = Instant::now();
+        let mut terminal = claude_terminal(now);
+        report(
+            &mut terminal,
+            CLAUDE,
+            AgentState::Working,
+            HookReportDetail::default(),
+            1,
+            after(now, 10),
+        );
+        screen(&mut terminal, AgentState::Blocked, true, after(now, 100));
+        assert_eq!(terminal.state, AgentState::Blocked);
+        assert_eq!(terminal.blocked_reason(), None);
+
+        screen(&mut terminal, AgentState::Working, false, after(now, 200));
+        assert_eq!(terminal.state, AgentState::Working);
+
+        report(
+            &mut terminal,
+            CLAUDE,
+            AgentState::Idle,
+            HookReportDetail::default(),
+            2,
+            after(now, 300),
+        );
+        screen(&mut terminal, AgentState::Blocked, true, after(now, 400));
+        assert_eq!(
+            terminal.state,
+            AgentState::Idle,
+            "after a stop, a dialog would have come with its own hook; this one is stale"
+        );
+    }
+
+    #[test]
+    fn a_reported_dialog_ends_once_seen_and_gone() {
+        let now = Instant::now();
+        let mut terminal = claude_terminal(now);
+        report(
+            &mut terminal,
+            CLAUDE,
+            AgentState::Blocked,
+            blocked_on(BlockedReason::Permission),
+            1,
+            after(now, 10),
+        );
+        screen(&mut terminal, AgentState::Working, false, after(now, 50));
+        assert_eq!(terminal.state, AgentState::Blocked, "not drawn yet");
+        assert_eq!(terminal.blocked_reason(), Some(BlockedReason::Permission));
+
+        screen(&mut terminal, AgentState::Blocked, true, after(now, 100));
+        assert_eq!(terminal.blocked_reason(), Some(BlockedReason::Permission));
+
+        screen(&mut terminal, AgentState::Working, false, after(now, 2_000));
+        assert_eq!(
+            terminal.state,
+            AgentState::Working,
+            "approved: the tool runs"
+        );
+        assert_eq!(terminal.blocked_reason(), None);
+
+        report(
+            &mut terminal,
+            CLAUDE,
+            AgentState::Blocked,
+            blocked_on(BlockedReason::Form),
+            2,
+            after(now, 3_000),
+        );
+        assert_eq!(
+            terminal.state,
+            AgentState::Blocked,
+            "a new report forgets the old dialog"
+        );
+        screen(&mut terminal, AgentState::Blocked, true, after(now, 3_100));
+        screen(&mut terminal, AgentState::Idle, false, after(now, 4_000));
+        assert_eq!(
+            terminal.state,
+            AgentState::Idle,
+            "cancelled: the turn ended"
+        );
+    }
+
+    #[test]
+    fn other_hook_sources_keep_their_reported_state() {
+        let now = Instant::now();
+        let mut terminal = claude_terminal(now);
+        report(
+            &mut terminal,
+            "custom",
+            AgentState::Working,
+            HookReportDetail::default(),
+            1,
+            after(now, 10),
+        );
+        screen(&mut terminal, AgentState::Idle, false, after(now, 60_000));
+        assert_eq!(terminal.state, AgentState::Working);
+
+        report(
+            &mut terminal,
+            "custom",
+            AgentState::Blocked,
+            blocked_on(BlockedReason::Permission),
+            2,
+            after(now, 60_010),
+        );
+        screen(&mut terminal, AgentState::Blocked, true, after(now, 60_100));
+        screen(
+            &mut terminal,
+            AgentState::Working,
+            false,
+            after(now, 61_000),
+        );
+        assert_eq!(terminal.state, AgentState::Blocked);
+    }
+
+    #[test]
+    fn a_session_replacement_moves_the_live_authority_along() {
+        let now = Instant::now();
+        let mut terminal = claude_terminal(now);
+        report(
+            &mut terminal,
+            CLAUDE,
+            AgentState::Idle,
+            HookReportDetail::default(),
+            1,
+            after(now, 10),
+        );
+
+        terminal
+            .set_agent_session_ref_for_session_start(
+                CLAUDE.into(),
+                "claude".into(),
+                crate::agent_resume::AgentSessionRef::id("cleared-session"),
+                Some(2),
+                Some("clear".into()),
+            )
+            .expect("clear replaces the session");
+
+        assert_eq!(
+            terminal
+                .current_session_identity_for_persistence()
+                .map(|(_, _, _, value)| value),
+            Some("cleared-session".to_string())
+        );
+        terminal.set_detailed_hook_authority_at(
+            CLAUDE.into(),
+            "claude".into(),
+            AgentState::Working,
+            HookReportDetail::default(),
+            None,
+            crate::agent_resume::AgentSessionRef::id("cleared-session"),
+            Some(3),
+            after(now, 20),
+        );
+        assert_eq!(terminal.state, AgentState::Working);
+        assert_eq!(
+            terminal
+                .current_session_identity_for_persistence()
+                .map(|(_, _, _, value)| value),
+            Some("cleared-session".to_string())
         );
     }
 }

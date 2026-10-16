@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-fork-manifest-catalog
 title: Fork builds fetch detection manifests from the fork
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
-assignee:
-claimed_by:
+assignee: saitonakamura
+claimed_by: macos/w6:p8/55acd074-e6ce-40f8-8a24-6d068a41cbc3
 ---
 
 ## Question

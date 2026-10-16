@@ -106,7 +106,17 @@ pub(super) fn pane_agent_status(
     }
 }
 
+/// Returns the snapshot and the content revision it was read at.
 pub(super) fn read_terminal_snapshot(
+    terminal: &crate::terminal::TerminalRuntime,
+    source: crate::api::schema::ReadSource,
+    format: crate::api::schema::ReadFormat,
+    lines: Option<u32>,
+) -> (crate::pane::TerminalReadSnapshot, u64) {
+    terminal.read_at_content_seq(|| read_terminal_source(terminal, source, format, lines))
+}
+
+fn read_terminal_source(
     terminal: &crate::terminal::TerminalRuntime,
     source: crate::api::schema::ReadSource,
     format: crate::api::schema::ReadFormat,
@@ -117,6 +127,7 @@ pub(super) fn read_terminal_snapshot(
     let line_limit = lines.map(|lines| lines.min(1000) as usize);
     let recent_lines = line_limit.unwrap_or(80);
     match (format, source) {
+        (_, ReadSource::Screen) => terminal.screen_snapshot(line_limit, format),
         (ReadFormat::Text, ReadSource::Visible) => {
             limit_snapshot_lines(terminal.visible_text(), line_limit)
         }

@@ -3337,6 +3337,16 @@ impl PaneRuntime {
         self.content_seq.load(Ordering::Acquire)
     }
 
+    /// Runs `read` with content writers excluded, returning the content revision it saw.
+    pub(crate) fn read_at_content_seq<T>(&self, read: impl FnOnce() -> T) -> (T, u64) {
+        let _content_guard = self
+            .content_write_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let revision = self.content_seq();
+        (read(), revision)
+    }
+
     /// Resize if the dimensions actually changed.
     pub fn resize(&self, rows: u16, cols: u16, cell_width_px: u32, cell_height_px: u32) {
         let rows = rows.max(MIN_PANE_ROWS);
@@ -3540,6 +3550,16 @@ impl PaneRuntime {
 
     pub fn agent_osc_progress(&self) -> String {
         self.terminal.agent_osc_progress()
+    }
+
+    pub(crate) fn screen_snapshot(
+        &self,
+        lines: Option<usize>,
+        format: crate::api::schema::ReadFormat,
+    ) -> TerminalReadSnapshot {
+        let result = self.terminal.screen_snapshot(lines, format);
+        self.compression.wake();
+        result
     }
 
     pub(crate) fn recent_text_snapshot(&self, lines: usize) -> TerminalReadSnapshot {

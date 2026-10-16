@@ -27,3 +27,13 @@ Per ADR 0003: make Claude a full lifecycle integration. `herdr integration insta
 ## Blocked by
 
 - herdr-fork-state-consistency
+
+## Resolution
+
+Draft, pending [PR #12](https://github.com/saitonakamura/herdr/pull/12). Design and findings: [assets/006-claude-hooks-state.md](./assets/006-claude-hooks-state.md) (on the PR branch).
+
+- Claude integration v12: hooks report state with a blocked reason; the `Stop` hook reads the ⏳/🔄 sentinels off `last_assistant_message` and treats a running sub-agent as working.
+- `herdr:claude` is a screen-assisted hook authority: hook state wins; the screen ends an interrupted turn (3 s idle) and a dialog that was answered, and blocks a working turn on a visible dialog.
+- `blocked_reason` on AgentInfo, PaneInfo and `pane.agent_status_changed`. `agent prompt` answers a `question` into an empty composer and names every other refusal.
+- Dotfiles branch `herdr-fork/006-claude-hooks-state`: loom takes the named refusals as final and keeps its typing fallback for plain `agent_blocked` (0.9.4, pre-006); `docs/setup/herdr.md`; per-box reinstall tickets `.issues/herdr-fork/001`–`005`. `claude.toml`/`claude.v4.toml` stay unchanged (inert under hooks).
+- **Cleanup once every box runs a fork release with 006 and every profile has v12:** delete the dotfiles' `claude.toml` and `claude.v4.toml`, and drop loom's claude branch of `sentinel_only_blocked`.

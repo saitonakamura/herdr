@@ -1,14 +1,14 @@
 ---
 id: herdr-fork-claude-hooks-state
 title: Hooks decide Claude's state; blocked reason and delivery
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
   - herdr-fork-state-consistency
-assignee:
-claimed_by:
+assignee: saitonakamura
+claimed_by: macos/w6:pG/3cda3beb-8635-4e03-97cf-3dbf827aee72
 ---
 
 ## Question

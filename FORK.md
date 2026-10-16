@@ -47,7 +47,9 @@ git push origin master
 ## Commits
 
 - Upstream's style: lowercase conventional commits, no emojis, no AI co-author
-  lines. Propose the message before committing.
+  lines. Write the message and commit; don't stop to propose it first. This
+  overrides "propose the commit message and get alignment" in `AGENTS.md`'s
+  Maintainer Workflow and Commit Style.
 - Instead of GitHub issue refs, put the ticket in the body:
   `refs herdr-fork-<ticket-id>` (for example `refs herdr-fork-sync-and-branch`).
 - Run `just check` before committing; never bypass a failing check, fix it or
@@ -66,6 +68,27 @@ herdr runs every agent pane, including the one building it.
   or a throwaway named session.
 - Detection manifest work: the hot-reload loop in `AGENTS.md` still applies, but
   only against a throwaway session, never the live one.
+
+## Dogfooding
+
+On the primary mac, real work in the fork runs in a side session named `fork`.
+Its server is a fork build in `~/.local/opt/herdr-fork/bin`, and the other
+sessions stay on Homebrew's herdr. The user starts or attaches it with `hf` in
+a kitty tab; the dotfiles' `docs/setup/herdr.md` § the fork side session has the
+details. `scripts/dogfood.sh` installs the binary. It never touches
+`/opt/homebrew` or a running server:
+
+```sh
+scripts/dogfood.sh release [<tag>]        # a fork release asset, checked against SHA256SUMS
+scripts/dogfood.sh build [<pr|branch>...] # origin/master plus unmerged PRs, e.g. `build 4 5`
+scripts/dogfood.sh status                 # what is installed, and from where
+herdr --session fork server stop          # then `hf` starts it on the new binary
+```
+
+`build` merges the branches without committing, in its own worktree
+`../herdr-worktrees/dogfood-build`, and refuses branches that do not merge
+cleanly. The `fork` server is a live runtime too: the rule above applies to it,
+unless the agent's brief says otherwise.
 
 ## Break nothing
 

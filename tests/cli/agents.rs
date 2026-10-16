@@ -1254,6 +1254,8 @@ fn agent_wait_tolerates_detection_uncertainty_and_pane_target_rename() {
                 &wait_pane,
                 "--until",
                 "idle",
+                "--until",
+                "done",
                 "--timeout",
                 "2000",
             ],
@@ -1288,7 +1290,11 @@ fn agent_wait_tolerates_detection_uncertainty_and_pane_target_rename() {
         String::from_utf8_lossy(&waited.stderr)
     );
     let waited: serde_json::Value = serde_json::from_slice(&waited.stdout).unwrap();
-    assert_eq!(waited["result"]["agent"]["agent_status"], "idle");
+    // Without a client nothing acknowledges the finished turn, so it may read done.
+    assert!(matches!(
+        waited["result"]["agent"]["agent_status"].as_str(),
+        Some("idle" | "done")
+    ));
     assert_eq!(waited["result"]["agent"]["name"], "reviewer");
 
     cleanup_spawned_herdr(herdr, base);

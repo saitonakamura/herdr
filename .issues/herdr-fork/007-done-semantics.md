@@ -1,14 +1,14 @@
 ---
 id: herdr-fork-done-semantics
 title: Done is per pane and acknowledged once
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
   - herdr-fork-sync-and-branch
 assignee:
-claimed_by:
+claimed_by: macos/w6:pB/fd2813bb-a0d6-4d2a-8790-91188c78eda2
 ---
 
 ## Question

@@ -1,14 +1,14 @@
 ---
 id: herdr-fork-repo-facts-per-pane
 title: Repo facts belong to each pane
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
   - herdr-fork-workspace-is-effort
-assignee:
-claimed_by:
+assignee: saitonakamura
+claimed_by: macos/w6:pN/bac80b05-6698-4a2f-9636-35a71f8ca36b
 ---
 
 ## Question

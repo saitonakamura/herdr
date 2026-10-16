@@ -1,14 +1,14 @@
 ---
 id: herdr-fork-worktree-post-create
 title: Worktree post-create hook
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
   - herdr-fork-sync-and-branch
 assignee:
-claimed_by:
+claimed_by: macos/w6:pE/16c210d5-75bb-40ff-b9a8-ba8fec0d59c2
 ---
 
 ## Question

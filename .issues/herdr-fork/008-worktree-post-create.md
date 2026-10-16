@@ -24,3 +24,27 @@ Same change in the dotfiles: `scripts/herdr-work-config` sets `post_create` to t
 ## Blocked by
 
 - herdr-fork-sync-and-branch
+
+## Resolution
+
+Draft, pending merge of [PR #11](https://github.com/saitonakamura/herdr/pull/11).
+
+- herdr: `[worktrees] post_create = [argv]` runs in each checkout `worktree.create`
+  makes, before its workspace opens. The TUI, the CLI and the socket API share that
+  one path. The hook gets `HERDR_WORKTREE_PATH`, `HERDR_WORKTREE_SOURCE` and
+  `HERDR_WORKTREE_BRANCH`. If it fails, the request returns
+  `worktree_post_create_failed` with the hook output; the checkout is kept and not
+  opened. The new server capability `worktree_post_create` shows in
+  `herdr status server --json`.
+- dotfiles branch `herdr-fork/008-worktree-post-create` (`c8ef04f`), safe on stock
+  herdr:
+  - `herdr-work-config` writes `post_create` only when the binary accepts it and
+    the seeder has `--herdr-post-create`.
+  - The shim, loom `spawn --worktree` and the pi bridge (new
+    `#?requires <capability>: <pattern>` allowlist line) let `worktree create`
+    through only when the running server has the capability and the config sets
+    the hook.
+  - Docs updated.
+- agent-skills: `seed-worktree --existing <path>` / `--herdr-post-create`
+  (local `ed95fcc`, unpushed).
+- On-box steps: [023](./023-primary-mac-seeded-worktree-create.md).

@@ -1,14 +1,14 @@
 ---
 id: herdr-fork-resume-args-env
 title: Resume an agent with its spawn args and env
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
   - herdr-fork-agent-identity-parent
 assignee:
-claimed_by:
+claimed_by: macos/w6:pM/7477c398-abf3-46d0-8945-55619bf26ec2
 ---
 
 ## Question

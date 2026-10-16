@@ -87,6 +87,8 @@ struct LegacyWorkspaceSnapshot {
 pub struct TabSnapshot {
     #[serde(default)]
     pub custom_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub followed_name: Option<String>,
     pub layout: LayoutSnapshot,
     pub panes: HashMap<u32, PaneSnapshot>,
     pub zoomed: bool,
@@ -161,6 +163,7 @@ impl From<LegacyWorkspaceSnapshot> for WorkspaceSnapshot {
         let identity_cwd = legacy_identity_cwd(&snap);
         let tab = TabSnapshot {
             custom_name: None,
+            followed_name: None,
             layout: snap.layout,
             panes: snap.panes,
             zoomed: snap.zoomed,
@@ -399,6 +402,7 @@ fn capture_tab(
     }
     TabSnapshot {
         custom_name: tab.custom_name.clone(),
+        followed_name: tab.followed_name.clone(),
         layout: capture_node(tab.layout.root()),
         panes,
         zoomed: tab.zoomed,
@@ -744,6 +748,7 @@ mod tests {
                 next_public_tab_number: 2,
                 tabs: vec![TabSnapshot {
                     custom_name: Some("api".to_string()),
+                    followed_name: Some("review-the-api".to_string()),
                     layout: LayoutSnapshot::Split {
                         direction: DirectionSnapshot::Horizontal,
                         ratio: 0.5,
@@ -775,6 +780,10 @@ mod tests {
             Some("pi-mono")
         );
         assert_eq!(restored.workspaces[0].tabs.len(), 1);
+        assert_eq!(
+            restored.workspaces[0].tabs[0].followed_name.as_deref(),
+            Some("review-the-api")
+        );
         assert_eq!(restored.workspaces[0].tabs[0].panes.len(), 2);
         assert_eq!(
             restored.workspaces[0].tabs[0].panes[&0].cwd,
@@ -912,12 +921,17 @@ mod tests {
         let second_tab = state.workspaces[0].test_add_tab(Some("logs"));
         state.workspaces[0].switch_tab(second_tab);
         state.workspaces[0].tabs[0].set_custom_name("main".into());
+        state.workspaces[0].tabs[1].followed_name = Some("tail-the-logs".into());
 
         let snapshot = capture_from_state(&state);
         let workspace = &snapshot.workspaces[0];
         assert_eq!(workspace.custom_name.as_deref(), Some("renamed-workspace"));
         assert_eq!(workspace.active_tab, second_tab);
         assert_eq!(workspace.tabs[0].custom_name.as_deref(), Some("main"));
+        assert_eq!(
+            workspace.tabs[1].followed_name.as_deref(),
+            Some("tail-the-logs")
+        );
         assert_eq!(workspace.tabs[1].custom_name.as_deref(), Some("logs"));
     }
 
@@ -1508,6 +1522,7 @@ mod tests {
                 next_public_tab_number: 0,
                 tabs: vec![TabSnapshot {
                     custom_name: None,
+                    followed_name: None,
                     layout: LayoutSnapshot::Split {
                         direction: DirectionSnapshot::Horizontal,
                         ratio: 0.5,

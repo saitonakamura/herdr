@@ -819,6 +819,7 @@ fn worktree_request_and_response_round_trip() {
                 focused: true,
                 pane_count: 1,
                 agent_status: AgentStatus::Unknown,
+                label_source: None,
             },
             root_pane: PaneInfo {
                 blocked_reason: None,
@@ -1251,6 +1252,7 @@ fn create_response_round_trips_with_root_pane() {
                 focused: false,
                 pane_count: 1,
                 agent_status: AgentStatus::Unknown,
+                label_source: None,
             },
             root_pane: PaneInfo {
                 blocked_reason: None,

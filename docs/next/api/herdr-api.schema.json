@@ -1089,6 +1089,16 @@
             "label": {
               "type": "string"
             },
+            "label_source": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/event/$defs/TabLabelSource"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "number": {
               "format": "uint",
               "minimum": 0,
@@ -1116,6 +1126,16 @@
             "agent_status"
           ],
           "type": "object"
+        },
+        "TabLabelSource": {
+          "description": "Where a tab's label comes from: a pinned name set by hand, its one agent's\ntitle, or its number.",
+          "enum": [
+            "pinned",
+            "following",
+            "number",
+            "unknown"
+          ],
+          "type": "string"
         },
         "WorkspaceInfo": {
           "properties": {
@@ -10748,6 +10768,16 @@
             "label": {
               "type": "string"
             },
+            "label_source": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/success_response/$defs/TabLabelSource"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "number": {
               "format": "uint",
               "minimum": 0,
@@ -10775,6 +10805,16 @@
             "agent_status"
           ],
           "type": "object"
+        },
+        "TabLabelSource": {
+          "description": "Where a tab's label comes from: a pinned name set by hand, its one agent's\ntitle, or its number.",
+          "enum": [
+            "pinned",
+            "following",
+            "number",
+            "unknown"
+          ],
+          "type": "string"
         },
         "WorkspaceInfo": {
           "properties": {

@@ -139,7 +139,11 @@ impl App {
         encode_success(id, ResponseResult::TabInfo { tab })
     }
 
-    pub(super) fn handle_tab_rename(&mut self, id: String, params: TabRenameParams) -> String {
+    pub(in crate::app) fn handle_tab_rename(
+        &mut self,
+        id: String,
+        params: TabRenameParams,
+    ) -> String {
         let Some((ws_idx, tab_idx)) = self.parse_tab_id(&params.tab_id) else {
             return tab_not_found(id, &params.tab_id);
         };
@@ -155,18 +159,18 @@ impl App {
         else {
             return tab_not_found(id, &params.tab_id);
         };
-        tab.set_custom_name(params.label.clone());
+        tab.set_custom_name(params.label);
         crate::logging::tab_renamed(&workspace_id, &tab_id);
         self.schedule_session_save();
+        let tab = self.tab_info(ws_idx, tab_idx).unwrap();
         self.emit_event(EventEnvelope {
             event: EventKind::TabRenamed,
             data: EventData::TabRenamed {
-                tab_id: self.public_tab_id(ws_idx, tab_idx).unwrap(),
-                workspace_id: self.public_workspace_id(ws_idx),
-                label: params.label,
+                tab_id: tab.tab_id.clone(),
+                workspace_id: tab.workspace_id.clone(),
+                label: tab.label.clone(),
             },
         });
-        let tab = self.tab_info(ws_idx, tab_idx).unwrap();
 
         encode_success(id, ResponseResult::TabInfo { tab })
     }

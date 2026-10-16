@@ -700,6 +700,7 @@ impl App {
         }
 
         if update.previous_agent_label != update.agent_label || update.agent_released {
+            self.refresh_followed_tab_name(update.ws_idx, update.pane_id);
             self.emit_event(crate::api::schema::EventEnvelope {
                 event: crate::api::schema::EventKind::PaneAgentDetected,
                 data: crate::api::schema::EventData::PaneAgentDetected {

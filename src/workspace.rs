@@ -18,8 +18,10 @@ use crate::terminal::{TerminalId, TerminalRuntime, TerminalRuntimeRegistry, Term
 mod aggregate;
 mod git;
 mod tab;
+mod tab_name;
 
 use self::git::git_status_cache_key_for_space;
+pub(crate) use self::tab_name::{followed_tab_name, DEFAULT_TAB_NAME_MAX_LENGTH};
 pub(crate) use self::{git::git_status_snapshot_for_cwd_with_demand, tab::MovedPane};
 pub use self::{
     git::{
@@ -27,6 +29,7 @@ pub use self::{
         GitSpaceMetadata, GitStatusCacheEntry, GitStatusRefreshDemand,
     },
     tab::{NewPane, Tab},
+    tab_name::TabLabelSource,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -444,7 +447,9 @@ impl Workspace {
         let tab = self.tabs.get(tab_idx)?;
         Some(
             tab.custom_name
-                .clone()
+                .as_ref()
+                .or(tab.followed_name.as_ref())
+                .cloned()
                 .unwrap_or_else(|| (tab_idx + 1).to_string()),
         )
     }
@@ -1179,6 +1184,7 @@ impl Workspace {
         panes.insert(root_id, PaneState::new(terminal_id));
         let tab = Tab {
             custom_name: None,
+            followed_name: None,
             number: 1,
             root_pane: root_id,
             layout,
@@ -1235,6 +1241,7 @@ impl Workspace {
         panes.insert(root_id, PaneState::new(TerminalId::alloc()));
         let tab = Tab {
             custom_name: name.map(str::to_string),
+            followed_name: None,
             number: self.next_public_tab_number,
             root_pane: root_id,
             layout,

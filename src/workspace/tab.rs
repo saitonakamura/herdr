@@ -36,7 +36,10 @@ enum SplitCommand<'a> {
 }
 
 pub struct Tab {
+    /// A pinned name: set by hand, it stops the tab following its agent.
     pub custom_name: Option<String>,
+    /// The last name taken from the tab's one agent's title.
+    pub followed_name: Option<String>,
     pub number: usize,
     /// Identity source for this tab's pane tree.
     pub root_pane: PaneId,
@@ -181,6 +184,7 @@ impl Tab {
         Ok((
             Self {
                 custom_name: None,
+                followed_name: None,
                 number,
                 root_pane: root_id,
                 layout,
@@ -201,8 +205,19 @@ impl Tab {
         self.custom_name.is_none()
     }
 
+    /// Pins `name`, or unpins when it is empty or a bare number.
     pub fn set_custom_name(&mut self, name: String) {
-        self.custom_name = Some(name);
+        self.custom_name = (!super::tab_name::label_unpins(&name)).then_some(name);
+    }
+
+    pub fn label_source(&self) -> super::TabLabelSource {
+        if self.custom_name.is_some() {
+            super::TabLabelSource::Pinned
+        } else if self.followed_name.is_some() {
+            super::TabLabelSource::Following
+        } else {
+            super::TabLabelSource::Number
+        }
     }
 
     pub fn split_focused_command(
@@ -443,7 +458,8 @@ impl Tab {
         let pane_id = moved.pane_id;
         panes.insert(pane_id, moved.pane_state);
         Self {
-            custom_name,
+            custom_name: custom_name.filter(|name| !super::tab_name::label_unpins(name)),
+            followed_name: None,
             number,
             root_pane: pane_id,
             layout: TileLayout::from_saved(Node::Pane(pane_id), pane_id),

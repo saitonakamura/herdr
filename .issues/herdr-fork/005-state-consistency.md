@@ -1,14 +1,14 @@
 ---
 id: herdr-fork-state-consistency
 title: State consistency: server, detector and waits agree
-status: in-progress
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
   - herdr-fork-sync-and-branch
 assignee: saitonakamura
-claimed_by: macos/w6:p5/2c06d5cc-b134-4965-a44e-1c4c2bf815ad
+claimed_by: macos/2c06d5cc-b134-4965-a44e-1c4c2bf815ad
 ---
 
 ## Question
@@ -32,7 +32,7 @@ Add deterministic tests, not wall-clock ones. Re-check the dotfiles' `agent-dete
 
 ## Resolution
 
-Draft; the ticket closes when [PR #5](https://github.com/saitonakamura/herdr/pull/5) merges. Findings, design and verification: [assets/005-state-consistency.md](./assets/005-state-consistency.md) (on the PR branch).
+[PR #5](https://github.com/saitonakamura/herdr/pull/5), merged 2026-10-16 as `43664552`. Findings, design and verification: [assets/005-state-consistency.md](./assets/005-state-consistency.md) (on the PR branch).
 
 - `pane.closed` per pane on tab, workspace and layout-replace close (#4690). The done → idle acknowledgement emits a status change (#4473). With no client attached, active-tab completions stay done (#5222).
 - Manifest engine 4: wrap-tolerant `contains` (#2868) and a rule-level `after_last_line_regex` frame boundary (#4819). Claude dialog rules outrank the busy title (#3467).

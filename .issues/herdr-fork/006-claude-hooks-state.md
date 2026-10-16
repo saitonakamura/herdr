@@ -1,7 +1,7 @@
 ---
 id: herdr-fork-claude-hooks-state
 title: Hooks decide Claude's state; blocked reason and delivery
-status: blocked
+status: open
 labels:
   - wayfinder:task
 parent: herdr-fork-map

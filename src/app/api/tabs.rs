@@ -225,6 +225,7 @@ impl App {
             return tab_not_found(id, &target.tab_id);
         };
         let closes_workspace = ws.tabs.len() <= 1;
+        let public_pane_ids = self.public_pane_ids_in_tab(ws_idx, tab_idx);
         let terminal_ids = self.state.terminal_ids_for_tab(ws_idx, tab_idx);
         let pane_ids = ws
             .tabs
@@ -251,6 +252,7 @@ impl App {
             self.state.close_selected_workspace();
             self.state.remove_plugin_pane_records(pane_ids);
             self.shutdown_detached_terminal_runtimes();
+            self.emit_panes_closed(public_pane_ids, &workspace_id);
             self.emit_event(EventEnvelope {
                 event: EventKind::TabClosed,
                 data: EventData::TabClosed {
@@ -282,6 +284,7 @@ impl App {
         self.state.remove_unattached_terminal_ids(terminal_ids);
         self.shutdown_detached_terminal_runtimes();
         self.schedule_session_save();
+        self.emit_panes_closed(public_pane_ids, &workspace_id);
         self.emit_event(EventEnvelope {
             event: EventKind::TabClosed,
             data: EventData::TabClosed {
@@ -344,6 +347,7 @@ mod tests {
         app.state.selected = 0;
         let tab_id = app.public_tab_id(0, 0).unwrap();
         let workspace_id = app.public_workspace_id(0);
+        let pane_id = app.public_pane_ids_in_tab(0, 0).pop().unwrap();
 
         let response = app.handle_tab_close(
             "req".into(),
@@ -362,17 +366,28 @@ mod tests {
                 .iter()
                 .map(|(_, event)| event.event)
                 .collect::<Vec<_>>(),
-            [EventKind::TabClosed, EventKind::WorkspaceClosed]
+            [
+                EventKind::PaneClosed,
+                EventKind::TabClosed,
+                EventKind::WorkspaceClosed,
+            ]
         );
         assert!(matches!(
             &events[0].1.data,
+            EventData::PaneClosed {
+                pane_id: closed_pane_id,
+                workspace_id: closed_workspace_id,
+            } if closed_pane_id == &pane_id && closed_workspace_id == &workspace_id
+        ));
+        assert!(matches!(
+            &events[1].1.data,
             EventData::TabClosed {
                 tab_id: closed_tab_id,
                 workspace_id: closed_workspace_id,
             } if closed_tab_id == &tab_id && closed_workspace_id == &workspace_id
         ));
         assert!(matches!(
-            &events[1].1.data,
+            &events[2].1.data,
             EventData::WorkspaceClosed {
                 workspace_id: closed_workspace_id,
                 workspace: Some(workspace),

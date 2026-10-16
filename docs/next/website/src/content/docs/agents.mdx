@@ -91,6 +91,8 @@ Local overrides can replace a remote or bundled manifest from the platform confi
 ~/.config/herdr/agent-detection/<agent>.toml
 ```
 
+An override can also target a manifest engine version, as `<agent>.v<N>.toml` (for example `claude.v4.toml`). Herdr uses the file for the newest engine it supports and falls back to `<agent>.toml` when there is none. Builds that predate versioned overrides read only `<agent>.toml`, so a config directory shared by hosts on different Herdr versions can keep an older override beside one that uses newer manifest fields.
+
 Local overrides always win. Without a local override, Herdr uses the newer compatible manifest between the cached remote manifest and the bundled manifest in the running binary. On debug builds, the same config helper may use a development directory such as `herdr-dev`. Invalid override files are ignored with a warning and Herdr falls back to the cached remote or bundled manifest for that agent.
 
 Remote manifests patch detection rules for agents Herdr already knows how to identify. Adding a completely new agent still requires a Herdr binary update for process detection, labels, and integration behavior.

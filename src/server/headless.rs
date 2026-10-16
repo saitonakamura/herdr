@@ -342,6 +342,9 @@ impl HeadlessServer {
         #[cfg(windows)]
         spawn_windows_client_accept_thread(listener, should_quit.clone(), server_event_tx.clone())?;
 
+        let mut app = app;
+        // No client is attached until one connects and syncs.
+        app.state.viewer_attached = false;
         let server_keybindings = app_keybindings(&app);
         let headless_size = app.state.headless_size;
         let (server_config_diagnostic, server_config_diagnostic_without_keybindings) =
@@ -804,6 +807,7 @@ impl HeadlessServer {
         let Some(client_id) = self.foreground_client_id else {
             self.effective_size = self.headless_size;
             self.app.state.outer_terminal_focus = None;
+            self.app.state.viewer_attached = false;
             self.app.state.host_cell_size = crate::kitty_graphics::HostCellSize::default();
             self.sync_runtime_view_geometry();
             let server_keybindings = self.server_keybindings.clone();
@@ -815,6 +819,7 @@ impl HeadlessServer {
             self.foreground_client_id = None;
             self.effective_size = self.headless_size;
             self.app.state.outer_terminal_focus = None;
+            self.app.state.viewer_attached = false;
             self.app.state.host_cell_size = crate::kitty_graphics::HostCellSize::default();
             self.sync_runtime_view_geometry();
             let server_keybindings = self.server_keybindings.clone();
@@ -838,6 +843,7 @@ impl HeadlessServer {
         self.effective_size = terminal_size;
         self.sync_runtime_view_geometry();
         self.app.state.outer_terminal_focus = outer_terminal_focus;
+        self.app.state.viewer_attached = true;
         self.app.state.host_cell_size = host_cell_size;
         let server_keybindings = self.server_keybindings.clone();
         apply_keybindings(&mut self.app, &server_keybindings);
@@ -888,7 +894,7 @@ impl HeadlessServer {
 
     fn active_tab_suppresses_notifications(&self, is_active_tab: bool) -> bool {
         crate::app::actions::active_tab_suppresses_notifications(
-            is_active_tab,
+            is_active_tab && self.app.state.viewer_attached,
             self.foreground_client_outer_focus(),
         )
     }

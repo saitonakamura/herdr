@@ -81,3 +81,19 @@ jobs:
             scripts.test_config_reference_check \
             scripts.test_docs_translation_parity \
             scripts.test_preview
+
+  # The fork serves its own detection catalog but lacks upstream's release tags the docs checks need.
+  fork-agent-detection:
+    if: github.repository == 'saitonakamura/herdr'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Validate published agent detection catalog
+        run: |
+          python3 scripts/agent_detection_manifest_check.py --require-published
+          python3 -m unittest scripts.test_agent_detection_manifest_check

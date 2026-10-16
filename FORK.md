@@ -36,6 +36,7 @@ git switch master
 git merge --ff-only origin/master
 git merge upstream/master          # fast-forwards while the fork has no own commits
 just check
+python3 scripts/agent_detection_manifest_check.py --require-published
 git push origin master
 ```
 
@@ -43,6 +44,25 @@ git push origin master
   change now exists upstream, drop the fork's copy and say so in the merge body.
 - A merge commit's subject: `chore: merge upstream/master (<short-sha>)`.
 - After syncing, re-check `vendor/libghostty-vt.patches.md` per `AGENTS.md`.
+- The sync is how upstream's detection manifest changes reach fork builds (see
+  below), so it must leave `distribution/agent-detection/` current: the check
+  above fails otherwise.
+
+## Detection manifests
+
+Fork builds fetch remote detection manifests from the fork, not herdr.dev: the
+default catalog is `distribution/agent-detection/index.toml` on fork `master`,
+served as raw GitHub files. Pushing to `master` publishes it; there is no
+generation step.
+
+- A fork change to `src/detect/manifests/<agent>.toml` bumps its `version` and
+  copies the file to `distribution/agent-detection/` in the same PR. The
+  `fork-agent-detection` CI job enforces this.
+- When an upstream sync conflicts on a manifest both sides changed, resolve it
+  in both copies with a version higher than either side's.
+- `HERDR_AGENT_DETECTION_MANIFEST_CATALOG_URL` still overrides the catalog, and a
+  local override in `~/.config/herdr/agent-detection/` still beats any remote
+  manifest.
 
 ## Commits
 

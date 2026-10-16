@@ -520,6 +520,14 @@ impl PaneTerminal {
             .try_compress_incremental_if_activity(expected_activity)
     }
 
+    pub(crate) fn screen_snapshot(
+        &self,
+        lines: Option<usize>,
+        format: crate::api::schema::ReadFormat,
+    ) -> TerminalReadSnapshot {
+        self.ghostty.screen_snapshot(lines, format)
+    }
+
     pub(crate) fn recent_text_snapshot(&self, lines: usize) -> TerminalReadSnapshot {
         self.ghostty.recent_text_snapshot(lines)
     }
@@ -2220,6 +2228,18 @@ impl GhosttyPaneTerminal {
             .map(TerminalCompressionStep::Compressed)
     }
 
+    pub(crate) fn screen_snapshot(
+        &self,
+        lines: Option<usize>,
+        format: crate::api::schema::ReadFormat,
+    ) -> TerminalReadSnapshot {
+        self.core
+            .lock()
+            .ok()
+            .and_then(|mut core| ghostty_screen_snapshot(&mut core, lines, format).ok())
+            .unwrap_or_default()
+    }
+
     #[cfg(test)]
     pub fn recent_text(&self, lines: usize) -> String {
         self.recent_text_snapshot(lines).text
@@ -2964,6 +2984,28 @@ fn ghostty_recent_ansi_snapshot(
     Ok(finish_recent_snapshot(core, text, lines, unwrap))
 }
 
+fn ghostty_screen_snapshot(
+    core: &mut GhosttyPaneCore,
+    lines: Option<usize>,
+    format: crate::api::schema::ReadFormat,
+) -> Result<TerminalReadSnapshot, crate::ghostty::Error> {
+    let rows = usize::from(core.terminal.rows()?);
+    let lines = lines.map_or(rows, |lines| lines.min(rows));
+    let text = match format {
+        crate::api::schema::ReadFormat::Text => {
+            ghostty_anchored_text_for_terminal(&core.terminal, lines, true)?
+        }
+        crate::api::schema::ReadFormat::Ansi => {
+            ghostty_anchored_ansi_for_terminal(&core.terminal, lines, false, true)?
+        }
+    };
+    let snapshot = finish_recent_snapshot(core, text, lines, false);
+    Ok(TerminalReadSnapshot {
+        truncated: lines < rows,
+        ..snapshot
+    })
+}
+
 fn finish_recent_snapshot(
     core: &mut GhosttyPaneCore,
     text: String,
@@ -2995,7 +3037,15 @@ fn ghostty_recent_text_for_terminal(
     terminal: &crate::ghostty::Terminal,
     lines: usize,
 ) -> Result<String, crate::ghostty::Error> {
-    let Some((start, end, _)) = ghostty_recent_read_range(terminal, lines)? else {
+    ghostty_anchored_text_for_terminal(terminal, lines, false)
+}
+
+fn ghostty_anchored_text_for_terminal(
+    terminal: &crate::ghostty::Terminal,
+    lines: usize,
+    screen_only: bool,
+) -> Result<String, crate::ghostty::Error> {
+    let Some((start, end, _)) = ghostty_anchored_read_range(terminal, lines, screen_only)? else {
         return Ok(String::new());
     };
     let mut rows = Vec::with_capacity(end.saturating_sub(start).saturating_add(1));
@@ -3010,7 +3060,7 @@ fn ghostty_recent_text_unwrapped_for_terminal(
     terminal: &crate::ghostty::Terminal,
     lines: usize,
 ) -> Result<String, crate::ghostty::Error> {
-    let Some((start, end, cols)) = ghostty_recent_read_range(terminal, lines)? else {
+    let Some((start, end, cols)) = ghostty_anchored_read_range(terminal, lines, false)? else {
         return Ok(String::new());
     };
     terminal.read_text_screen(
@@ -3025,7 +3075,17 @@ fn ghostty_recent_ansi_for_terminal(
     lines: usize,
     unwrap: bool,
 ) -> Result<String, crate::ghostty::Error> {
-    let Some((start, end, cols)) = ghostty_recent_read_range(terminal, lines)? else {
+    ghostty_anchored_ansi_for_terminal(terminal, lines, unwrap, false)
+}
+
+fn ghostty_anchored_ansi_for_terminal(
+    terminal: &crate::ghostty::Terminal,
+    lines: usize,
+    unwrap: bool,
+    screen_only: bool,
+) -> Result<String, crate::ghostty::Error> {
+    let Some((start, end, cols)) = ghostty_anchored_read_range(terminal, lines, screen_only)?
+    else {
         return Ok(String::new());
     };
     terminal.read_ansi_screen(
@@ -3036,41 +3096,44 @@ fn ghostty_recent_ansi_for_terminal(
     )
 }
 
-fn ghostty_recent_read_range(
+/// Rows ending at the live screen's last content row; with `screen_only`, never above the
+/// screen's top row. A scrolled viewport never moves the range.
+fn ghostty_anchored_read_range(
     terminal: &crate::ghostty::Terminal,
     lines: usize,
+    screen_only: bool,
 ) -> Result<Option<(usize, usize, u16)>, crate::ghostty::Error> {
     let total_rows = terminal.total_rows()?;
     let cols = terminal.cols()?;
-    if total_rows == 0 || cols == 0 || lines == 0 {
-        return Ok(None);
-    }
-
-    let physical_end = total_rows.saturating_sub(1);
-    if terminal.active_screen()? != crate::ghostty::ActiveScreen::Primary {
-        let start = physical_end.saturating_add(1).saturating_sub(lines);
-        return Ok(Some((start, physical_end, cols)));
-    }
-
     let rows = usize::from(terminal.rows()?);
-    if rows == 0 {
+    if total_rows == 0 || cols == 0 || lines == 0 || rows == 0 {
         return Ok(None);
     }
-    let viewport_start = total_rows.saturating_sub(rows);
-    let cursor_row = viewport_start
+
+    let screen_start = total_rows.saturating_sub(rows);
+    let cursor_row = screen_start
         .saturating_add(usize::from(terminal.cursor_y()?))
         .min(total_rows.saturating_sub(1));
     let mut last_content_row = None;
-    for row in (viewport_start..total_rows).rev() {
+    for row in (screen_start..total_rows).rev() {
         if !ghostty_screen_row(terminal, row as u32)?.trim().is_empty() {
             last_content_row = Some(row);
             break;
         }
     }
-    let end = last_content_row
-        .map(|row| row.max(cursor_row))
-        .unwrap_or_else(|| total_rows.saturating_sub(1));
-    let start = end.saturating_add(1).saturating_sub(lines);
+    // Full-screen apps park the cursor anywhere, so only the primary screen's prompt line
+    // extends the range down to the cursor.
+    let primary = terminal.active_screen()? == crate::ghostty::ActiveScreen::Primary;
+    let end = match last_content_row {
+        Some(row) if primary => row.max(cursor_row),
+        Some(row) => row,
+        None if primary => total_rows.saturating_sub(1),
+        None => cursor_row,
+    };
+    let mut start = end.saturating_add(1).saturating_sub(lines);
+    if screen_only {
+        start = start.max(screen_start);
+    }
     Ok(Some((start, end, cols)))
 }
 
@@ -5915,14 +5978,72 @@ mod tests {
     }
 
     #[test]
-    fn alternate_screen_recent_reads_keep_physical_row_ranges() {
+    fn alternate_screen_recent_reads_end_at_last_content_row() {
         let (tx, _rx) = mpsc::channel(4);
         let mut terminal = crate::ghostty::Terminal::new(20, 20, 100).unwrap();
-        terminal.write(b"\x1b[?1049hhello123");
+        terminal.write(b"\x1b[?1049hone\r\ntwo\r\nhello123\x1b[20;20H");
+        let pane = GhosttyPaneTerminal::new(terminal, tx).unwrap();
+
+        assert_eq!(pane.recent_text(2), "two\nhello123\n");
+        assert_eq!(pane.recent_unwrapped_text(1), "hello123");
+        assert!(pane.recent_ansi(1).contains("hello123"));
+        assert_eq!(pane.detection_text(), "one\ntwo\nhello123\n");
+    }
+
+    #[test]
+    fn blank_alternate_screen_recent_reads_are_empty() {
+        let (tx, _rx) = mpsc::channel(4);
+        let mut terminal = crate::ghostty::Terminal::new(20, 5, 100).unwrap();
+        terminal.write(b"\x1b[?1049h");
         let pane = GhosttyPaneTerminal::new(terminal, tx).unwrap();
 
         assert_eq!(pane.recent_text(3), "");
-        assert_eq!(pane.recent_unwrapped_text(3), "");
+        assert_eq!(
+            pane.screen_snapshot(None, crate::api::schema::ReadFormat::Text)
+                .text,
+            ""
+        );
+    }
+
+    #[test]
+    fn screen_reads_stay_pinned_to_the_bottom_when_viewport_is_scrolled() {
+        let (tx, _rx) = mpsc::channel(4);
+        let mut terminal = crate::ghostty::Terminal::new(80, 3, 100).unwrap();
+        write_numbered_lines(&mut terminal, 10);
+        terminal.write(b"$");
+        let pane = GhosttyPaneTerminal::new(terminal, tx).unwrap();
+        let screen = |lines| pane.screen_snapshot(lines, crate::api::schema::ReadFormat::Text);
+
+        let bottom = screen(None);
+        assert_eq!(bottom.text, "000008\n000009\n$\n");
+        assert!(!bottom.truncated);
+
+        let before = pane.scroll_metrics().expect("scroll metrics before scroll");
+        pane.set_scroll_offset_from_bottom(before.max_offset_from_bottom);
+        assert!(pane.visible_text().contains("000000"));
+
+        assert_eq!(screen(None), bottom);
+        let last_two = screen(Some(2));
+        assert_eq!(last_two.text, "000009\n$\n");
+        assert!(last_two.truncated);
+        assert_eq!(screen(Some(500)), bottom);
+        assert!(pane
+            .screen_snapshot(None, crate::api::schema::ReadFormat::Ansi)
+            .text
+            .contains("000009"));
+    }
+
+    #[test]
+    fn screen_reads_never_include_scrollback() {
+        let (tx, _rx) = mpsc::channel(4);
+        let mut terminal = crate::ghostty::Terminal::new(80, 3, 100).unwrap();
+        write_numbered_lines(&mut terminal, 10);
+        terminal.write(b"\x1b[2J\x1b[Hfresh");
+        let pane = GhosttyPaneTerminal::new(terminal, tx).unwrap();
+
+        let screen = pane.screen_snapshot(Some(3), crate::api::schema::ReadFormat::Text);
+        assert_eq!(screen.text, "fresh\n");
+        assert!(pane.recent_text(10).contains("000007"));
     }
 
     #[test]

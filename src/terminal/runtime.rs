@@ -384,6 +384,14 @@ impl TerminalRuntime {
         self.0.agent_osc_progress()
     }
 
+    pub(crate) fn screen_snapshot(
+        &self,
+        lines: Option<usize>,
+        format: crate::api::schema::ReadFormat,
+    ) -> crate::pane::TerminalReadSnapshot {
+        self.0.screen_snapshot(lines, format)
+    }
+
     pub(crate) fn recent_text_snapshot(&self, lines: usize) -> crate::pane::TerminalReadSnapshot {
         self.0.recent_text_snapshot(lines)
     }
@@ -600,6 +608,10 @@ impl TerminalRuntime {
 
     pub(crate) fn content_seq(&self) -> u64 {
         self.0.content_seq()
+    }
+
+    pub(crate) fn read_at_content_seq<T>(&self, read: impl FnOnce() -> T) -> (T, u64) {
+        self.0.read_at_content_seq(read)
     }
 }
 

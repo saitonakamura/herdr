@@ -84,10 +84,13 @@ pub enum SplitDirection {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ReadSource {
+    // The rows a client currently shows, following its scrollback position.
     Visible,
     Recent,
     RecentUnwrapped,
     Detection,
+    // The live screen's rows, pinned to the bottom whatever any client has scrolled to.
+    Screen,
 }
 
 pub(crate) const READ_SOURCES: &[crate::cli::projection::Choice<ReadSource>] = &[
@@ -96,6 +99,7 @@ pub(crate) const READ_SOURCES: &[crate::cli::projection::Choice<ReadSource>] = &
     crate::cli::projection::Choice::new("recent-unwrapped", ReadSource::RecentUnwrapped),
     crate::cli::projection::Choice::hidden("recent_unwrapped", ReadSource::RecentUnwrapped),
     crate::cli::projection::Choice::new("detection", ReadSource::Detection),
+    crate::cli::projection::Choice::new("screen", ReadSource::Screen),
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

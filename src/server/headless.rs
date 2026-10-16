@@ -2723,7 +2723,7 @@ impl HeadlessServer {
         Some(api::schema::ErrorBody {
             code: "agent_not_idle".into(),
             message: format!(
-                "cannot read {requested} lines while {} is {status}: its alternate-screen history can only be captured by scrolling while idle. Wait and retry, or use --source visible",
+                "cannot read {requested} lines while {} is {status}: its alternate-screen history can only be captured by scrolling while idle. Wait and retry, or use --source screen",
                 params.target
             ),
         })

@@ -109,7 +109,9 @@ impl PendingAltScreenRead {
                     self.initial.rows.len() > limit,
                 )
             }
-            crate::api::schema::ReadSource::Visible | crate::api::schema::ReadSource::Detection => {
+            crate::api::schema::ReadSource::Visible
+            | crate::api::schema::ReadSource::Detection
+            | crate::api::schema::ReadSource::Screen => {
                 let snapshot = crate::terminal::snapshot_text(
                     &self.initial.rows,
                     self.initial.rows.len(),

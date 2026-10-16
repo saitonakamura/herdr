@@ -849,10 +849,15 @@ herdr pane read w1:p1 --source visible --lines 80
 herdr pane read w1:p1 --source recent --lines 120
 herdr pane read w1:p1 --source recent-unwrapped --lines 120
 herdr pane read w1:p1 --source detection
+herdr pane read w1:p1 --source screen --lines 40
 ```
 
 `recent-unwrapped` is useful for logs because it ignores soft wrapping.
 `detection` returns the bottom-buffer snapshot used by agent screen detection.
+`visible` follows a client's scrollback position; `screen` is the live screen
+pinned to the bottom regardless of scrolling, and is the one to poll from scripts.
+`.result.read.revision` is the pane's content revision: equal revisions mean no
+output arrived in between.
 
 ## Waiting for state
 

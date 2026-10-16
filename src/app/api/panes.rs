@@ -1527,7 +1527,7 @@ impl App {
         else {
             return pane_not_found(id, &params.pane_id);
         };
-        let snapshot = crate::app::api_helpers::read_terminal_snapshot(
+        let (snapshot, revision) = crate::app::api_helpers::read_terminal_snapshot(
             pane,
             params.source,
             params.format,
@@ -1544,7 +1544,7 @@ impl App {
                     source: params.source,
                     format: params.format,
                     text: snapshot.text,
-                    revision: 0,
+                    revision,
                     truncated: snapshot.truncated,
                 },
             },
@@ -2814,6 +2814,51 @@ mod tests {
         };
         assert!(read.text.contains("line 19"));
         assert!(read.truncated);
+    }
+
+    fn read_pane(
+        app: &mut App,
+        pane_id: &str,
+        source: crate::api::schema::ReadSource,
+    ) -> crate::api::schema::PaneReadResult {
+        let response = app.handle_pane_read(
+            "req".into(),
+            PaneReadParams {
+                pane_id: pane_id.to_owned(),
+                source,
+                lines: None,
+                format: crate::api::schema::ReadFormat::Text,
+                strip_ansi: true,
+                intent: crate::api::schema::ReadIntent::Interactive,
+            },
+        );
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        let ResponseResult::PaneRead { read } = success.result else {
+            panic!("expected pane read response");
+        };
+        read
+    }
+
+    #[tokio::test]
+    async fn api_pane_read_returns_the_content_revision_it_read() {
+        use crate::api::schema::ReadSource;
+        let (mut app, public_pane_id, pane_id) = app_with_scrollback_runtime();
+
+        let first = read_pane(&mut app, &public_pane_id, ReadSource::Screen);
+        let unchanged = read_pane(&mut app, &public_pane_id, ReadSource::Recent);
+        assert_eq!(unchanged.revision, first.revision);
+
+        let runtime = app
+            .state
+            .runtime_for_pane_in_workspace(&app.terminal_runtimes, 0, pane_id)
+            .unwrap();
+        runtime.test_process_pty_bytes(b"\r\nline 20");
+        let expected = runtime.content_seq();
+
+        let changed = read_pane(&mut app, &public_pane_id, ReadSource::Screen);
+        assert_ne!(changed.revision, first.revision);
+        assert_eq!(changed.revision, expected);
+        assert!(changed.text.ends_with("line 20\n"), "{:?}", changed.text);
     }
 
     #[tokio::test]

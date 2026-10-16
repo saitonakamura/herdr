@@ -77,6 +77,20 @@ generation step.
 - Commits are signed through 1Password; a signing failure means the app is
   locked or not running. Never `--no-gpg-sign`.
 
+## Fork config overlay
+
+Fork builds read an optional `config.fork.toml` beside `config.toml` (beside
+`$HERDR_CONFIG_PATH`, when set) and merge it over the base file: tables merge
+key by key, while scalars, arrays, sidebar row lists and `[[...]]` arrays of
+tables replace. Stock herdr never reads it. A config shared with stock builds
+therefore keeps fork-only keys and tokens in the overlay, where they cannot make
+stock reject the whole file and fall back to defaults.
+
+- `herdr config check` and config reload check the merged result. An invalid
+  overlay is ignored with a diagnostic, and the base file still applies.
+- The settings UI and `herdr channel set` still write only `config.toml`. A key
+  the overlay also sets keeps the overlay's value.
+
 ## The live runtime
 
 herdr runs every agent pane, including the one building it.

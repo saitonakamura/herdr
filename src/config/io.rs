@@ -127,15 +127,90 @@ pub(super) fn read_optional_config(path: &Path) -> std::io::Result<Option<String
     }
 }
 
+/// Fork-only: the optional overlay beside the config file, `config.fork.toml`
+/// for `config.toml`. Stock herdr never reads it, so a config shared with stock
+/// builds can keep fork-only settings there.
+pub fn fork_overlay_path(path: &Path) -> PathBuf {
+    path.with_extension("fork.toml")
+}
+
+/// Merges `overlay` over `base`: tables merge key by key, anything else
+/// (scalars, arrays, sidebar row lists, arrays of tables) replaces.
+fn merge_config_overlay(base: &mut toml::Table, overlay: toml::Table) {
+    for (key, value) in overlay {
+        match (base.get_mut(&key), value) {
+            (Some(toml::Value::Table(base)), toml::Value::Table(overlay)) => {
+                merge_config_overlay(base, overlay)
+            }
+            (_, value) => {
+                base.insert(key, value);
+            }
+        }
+    }
+}
+
+/// Reads the config file with its fork overlay merged over it. Without an
+/// overlay the base text is returned untouched, so its diagnostics keep their
+/// line numbers. An unreadable or invalid overlay is ignored with a diagnostic.
+fn read_config_with_overlay(path: &Path) -> std::io::Result<(Option<String>, Vec<String>)> {
+    let base = read_optional_config(path)?;
+    let overlay_path = fork_overlay_path(path);
+    let overlay = match read_optional_config(&overlay_path) {
+        Ok(Some(overlay)) => overlay,
+        Ok(None) => return Ok((base, Vec::new())),
+        Err(err) => {
+            return Ok((
+                base,
+                vec![format!(
+                    "fork config overlay read error: {err}; ignoring {}",
+                    overlay_path.display()
+                )],
+            ))
+        }
+    };
+    let overlay = match overlay.parse::<toml::Table>() {
+        Ok(overlay) => overlay,
+        Err(err) => {
+            return Ok((
+                base,
+                vec![format!(
+                    "fork config overlay parse error: {err}; ignoring {}",
+                    overlay_path.display()
+                )],
+            ))
+        }
+    };
+    let mut merged = match base.as_deref().map(str::parse::<toml::Table>) {
+        None => toml::Table::new(),
+        Some(Ok(base)) => base,
+        // Let the normal load report the base file's own parse error.
+        Some(Err(_)) => return Ok((base, Vec::new())),
+    };
+    merge_config_overlay(&mut merged, overlay);
+    match toml::to_string(&merged) {
+        Ok(merged) => Ok((Some(merged), Vec::new())),
+        Err(err) => Ok((
+            base,
+            vec![format!(
+                "fork config overlay merge error: {err}; ignoring {}",
+                overlay_path.display()
+            )],
+        )),
+    }
+}
+
 impl Config {
     pub fn load() -> LoadedConfig {
-        let path = config_path();
-        let content = match read_optional_config(&path) {
-            Ok(Some(content)) => content,
-            Ok(None) => {
+        Self::load_from_path(&config_path())
+    }
+
+    fn load_from_path(path: &Path) -> LoadedConfig {
+        let (content, overlay_diagnostics) = match read_config_with_overlay(path) {
+            Ok((Some(content), overlay_diagnostics)) => (content, overlay_diagnostics),
+            Ok((None, overlay_diagnostics)) => {
                 return LoadedConfig {
                     config: Self::default(),
-                    diagnostics: Vec::new(),
+                    diagnostics: overlay_diagnostics,
                     invalid_sections: Vec::new(),
                 };
             }
@@ -163,6 +238,7 @@ impl Config {
                     None,
                 ));
                 diagnostics.extend(config.collect_diagnostics());
+                diagnostics.extend(overlay_diagnostics);
                 LoadedConfig {
                     config,
                     diagnostics,
@@ -171,9 +247,11 @@ impl Config {
             }
             Err(err) => {
                 warn!(err = %err, "config parse error, using defaults");
+                let mut diagnostics = vec![format!("config parse error: {err}; using defaults")];
+                diagnostics.extend(overlay_diagnostics);
                 LoadedConfig {
                     config: Self::default(),
-                    diagnostics: vec![format!("config parse error: {err}; using defaults")],
+                    diagnostics,
                     invalid_sections: Vec::new(),
                 }
             }
@@ -243,13 +321,16 @@ pub fn config_diagnostic_summary(diagnostics: &[String]) -> Option<String> {
 }
 
 pub fn load_live_config() -> Result<LoadedConfig, Vec<String>> {
-    let path = config_path();
-    let content = match read_optional_config(&path) {
-        Ok(Some(content)) => content,
-        Ok(None) => {
+    load_live_config_from_path(&config_path())
+}
+
+fn load_live_config_from_path(path: &Path) -> Result<LoadedConfig, Vec<String>> {
+    let (content, overlay_diagnostics) = match read_config_with_overlay(path) {
+        Ok((Some(content), overlay_diagnostics)) => (content, overlay_diagnostics),
+        Ok((None, overlay_diagnostics)) => {
             return Ok(LoadedConfig {
                 config: Config::default(),
-                diagnostics: Vec::new(),
+                diagnostics: overlay_diagnostics,
                 invalid_sections: Vec::new(),
             });
         }
@@ -259,7 +340,9 @@ pub fn load_live_config() -> Result<LoadedConfig, Vec<String>> {
             )]);
         }
     };
-    load_live_config_from_str(&content)
+    let mut loaded = load_live_config_from_str(&content)?;
+    loaded.diagnostics.extend(overlay_diagnostics);
+    Ok(loaded)
 }
 
 fn load_live_config_from_str(content: &str) -> Result<LoadedConfig, Vec<String>> {
@@ -750,6 +833,120 @@ fn upsert_section_raw(content: &str, section: &str, key: &str, value: &str) -> S
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn overlay_test_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "herdr-config-overlay-{name}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn fork_overlay_sits_beside_the_config_file() {
+        assert_eq!(
+            fork_overlay_path(Path::new("/cfg/herdr/config.toml")),
+            PathBuf::from("/cfg/herdr/config.fork.toml")
+        );
+    }
+
+    #[test]
+    fn fork_overlay_merges_tables_and_replaces_arrays() {
+        let mut base: toml::Table = r#"
+[ui]
+accent = "cyan"
+agent_panel_sort = "spaces"
+[ui.sidebar.spaces]
+rows = [["state_icon", "workspace"], ["branch", "git_status"]]
+row_gap = 1
+"#
+        .parse()
+        .unwrap();
+        let overlay: toml::Table = r#"
+[ui]
+accent = "blue"
+[ui.sidebar.spaces]
+rows = [["state_icon", "workspace"]]
+"#
+        .parse()
+        .unwrap();
+
+        merge_config_overlay(&mut base, overlay);
+
+        let expected: toml::Table = r#"
+[ui]
+accent = "blue"
+agent_panel_sort = "spaces"
+[ui.sidebar.spaces]
+rows = [["state_icon", "workspace"]]
+row_gap = 1
+"#
+        .parse()
+        .unwrap();
+        assert_eq!(base, expected);
+    }
+
+    #[test]
+    fn fork_overlay_applies_on_load_and_live_reload() {
+        let dir = overlay_test_dir("applies");
+        let path = dir.join("config.toml");
+        std::fs::write(
+            &path,
+            "[ui]\naccent = \"cyan\"\n[ui.sidebar.spaces]\nrows = [[\"workspace\"], [\"branch\"]]\n",
+        )
+        .unwrap();
+        std::fs::write(
+            fork_overlay_path(&path),
+            "[ui.sidebar.spaces]\nrows = [[\"state_icon\", \"workspace\"]]\n",
+        )
+        .unwrap();
+
+        let loaded = Config::load_from_path(&path);
+        let live = load_live_config_from_path(&path).unwrap();
+
+        for loaded in [loaded, live] {
+            assert!(loaded.diagnostics.is_empty(), "{:?}", loaded.diagnostics);
+            assert_eq!(loaded.config.ui.accent, "cyan");
+            assert_eq!(
+                loaded.config.ui.sidebar.spaces.rows,
+                vec![vec![
+                    crate::config::SpaceSidebarToken::StateIcon,
+                    crate::config::SpaceSidebarToken::Workspace,
+                ]]
+            );
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn fork_overlay_without_base_config_still_applies() {
+        let dir = overlay_test_dir("no-base");
+        let path = dir.join("config.toml");
+        std::fs::write(fork_overlay_path(&path), "[ui]\naccent = \"blue\"\n").unwrap();
+
+        let loaded = Config::load_from_path(&path);
+
+        assert!(loaded.diagnostics.is_empty(), "{:?}", loaded.diagnostics);
+        assert_eq!(loaded.config.ui.accent, "blue");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn invalid_fork_overlay_is_ignored_with_a_diagnostic() {
+        let dir = overlay_test_dir("invalid");
+        let path = dir.join("config.toml");
+        std::fs::write(&path, "[ui]\naccent = \"cyan\"\n").unwrap();
+        std::fs::write(fork_overlay_path(&path), "[ui\naccent = ").unwrap();
+
+        let loaded = Config::load_from_path(&path);
+
+        assert_eq!(loaded.config.ui.accent, "cyan");
+        assert_eq!(loaded.diagnostics.len(), 1);
+        assert!(loaded.diagnostics[0].starts_with("fork config overlay parse error"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn upsert_top_level_bool_replaces_existing_value() {

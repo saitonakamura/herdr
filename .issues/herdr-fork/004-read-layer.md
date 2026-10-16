@@ -28,3 +28,13 @@ Leave the wheel-scroll alt-screen history read alone. Switch loom's reads (`lib/
 ## Blocked by
 
 - herdr-fork-sync-and-branch
+
+## Resolution
+
+_Draft, until [PR #4](https://github.com/saitonakamura/herdr/pull/4) merges._
+
+- `--source screen` on `pane read` / `agent read`: the live screen, bottom-pinned whatever a client has scrolled to. `visible` still follows the client's scroll, and docs/next, the CLI help and the API schema now say so and point agents at `screen`.
+- **No default changed**, which corrects the question's "make it the default for agent-facing reads" (and the map's wording). `agent read` keeps `recent`, because that is how agents read another agent's reply: it needs the scrollback and the alt-screen history read, and `recent` was already bottom-anchored, so it was never the #2900 bug.
+- `revision` is the terminal content sequence, read under the content write lock so it matches the returned text (#2805).
+- Alt-screen `recent` ends at the last content row, or at the cursor on a blank screen. The wheel-scroll history harvest is untouched.
+- loom: `pane_screen` in `lib/core.sh`, used by `spawn.sh` and `report.sh`, falls back to `visible` where herdr refuses `screen` (dotfiles `a976679`). On-box: each box gets `screen` once a fork build carrying this is installed and its server restarted. Until then loom reads `visible`, as before.

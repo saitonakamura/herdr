@@ -55,4 +55,7 @@ pub struct ServerCapabilities {
     /// Supports connection-scoped `server.ssh_agent.register` on the local JSON API.
     #[serde(default)]
     pub ssh_agent_registration: bool,
+    /// Runs `[worktrees] post_create` in each new checkout before opening it.
+    #[serde(default)]
+    pub worktree_post_create: bool,
 }

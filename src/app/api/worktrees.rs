@@ -844,6 +844,96 @@ mod tests {
         let _ = std::fs::remove_dir_all(repo);
     }
 
+    #[cfg(unix)]
+    fn create_worktree_with_post_create(
+        name: &str,
+        post_create: Vec<String>,
+    ) -> (App, PathBuf, PathBuf, String) {
+        let repo = create_committed_repo(&format!("{name}-repo"));
+        let worktree_root = unique_temp_path(&format!("{name}-root"));
+        let mut app = app_with_parent(&repo);
+        app.state.worktree_directory = worktree_root.clone();
+        app.state.worktree_post_create = post_create;
+        let workspace_id = app.state.workspaces[0].id.clone();
+        let response = run_deferred_api_request(
+            &mut app,
+            Request {
+                id: "req".into(),
+                method: crate::api::schema::Method::WorktreeCreate(WorktreeCreateParams {
+                    workspace_id: Some(workspace_id),
+                    branch: Some("worktree/post-create".into()),
+                    ..WorktreeCreateParams::default()
+                }),
+            },
+        );
+        (app, repo, worktree_root, response)
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn api_worktree_create_runs_post_create_in_checkout_before_opening() {
+        let (app, repo, worktree_root, response) = create_worktree_with_post_create(
+            "api-worktree-post-create",
+            vec![
+                "sh".into(),
+                "-c".into(),
+                r#"printf '%s\n' "$PWD" "$HERDR_WORKTREE_PATH" "$HERDR_WORKTREE_SOURCE" "$HERDR_WORKTREE_BRANCH" > seeded"#.into(),
+            ],
+        );
+
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        let ResponseResult::WorktreeCreated { worktree, .. } = success.result else {
+            panic!("expected worktree_created response");
+        };
+        let checkout = PathBuf::from(&worktree.path);
+        let seeded = std::fs::read_to_string(checkout.join("seeded")).unwrap();
+        let lines: Vec<&str> = seeded.lines().collect();
+        let canonical = |path: &str| crate::worktree::canonical_or_original(Path::new(path));
+        assert_eq!(canonical(lines[0]), canonical(&worktree.path));
+        assert_eq!(canonical(lines[1]), canonical(&worktree.path));
+        assert_eq!(
+            canonical(lines[2]),
+            crate::worktree::canonical_or_original(&repo)
+        );
+        assert_eq!(lines[3], "worktree/post-create");
+        assert_eq!(app.state.workspaces.len(), 2);
+
+        let _ = std::fs::remove_dir_all(worktree_root);
+        let _ = std::fs::remove_dir_all(repo);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn api_worktree_create_post_create_failure_keeps_checkout_unopened() {
+        let (app, repo, worktree_root, response) = create_worktree_with_post_create(
+            "api-worktree-post-create-failure",
+            vec![
+                "sh".into(),
+                "-c".into(),
+                "echo seeding broke >&2; exit 3".into(),
+            ],
+        );
+
+        let error: ErrorResponse = serde_json::from_str(&response).unwrap();
+        assert_eq!(error.error.code, "worktree_post_create_failed");
+        assert!(error.error.message.contains("seeding broke"));
+        let checkout = crate::worktree::default_checkout_path(
+            &worktree_root,
+            &repo.file_name().unwrap().to_string_lossy(),
+            "worktree/post-create",
+        );
+        assert!(error
+            .error
+            .message
+            .contains(&checkout.display().to_string()));
+        assert!(checkout.join("README.md").exists());
+        assert_eq!(app.state.workspaces.len(), 1);
+        assert!(app.pending_api_worktree_creates.is_empty());
+
+        let _ = std::fs::remove_dir_all(worktree_root);
+        let _ = std::fs::remove_dir_all(repo);
+    }
+
     #[tokio::test]
     async fn deferred_api_worktree_create_preserves_event_and_plugin_context() {
         let repo = create_committed_repo("api-worktree-create-deferred-repo");
@@ -1152,6 +1242,7 @@ mod tests {
                 respond_to,
             }),
             result: Ok(()),
+            post_create: Ok(()),
         });
 
         let response = response_rx

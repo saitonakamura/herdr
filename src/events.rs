@@ -30,6 +30,8 @@ pub struct WorktreeAddResult {
     pub path: std::path::PathBuf,
     pub api_request: Option<ApiWorktreeAddRequest>,
     pub result: Result<(), String>,
+    /// `[worktrees] post_create` outcome; only run once `result` is `Ok`.
+    pub post_create: Result<(), String>,
 }
 
 #[derive(Debug)]

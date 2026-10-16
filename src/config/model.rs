@@ -870,6 +870,8 @@ pub struct IndexedKeysConfig {
 pub struct WorktreesConfig {
     /// Root directory under which Herdr creates <repo>/<branch-slug> checkouts.
     pub directory: String,
+    /// Command (argv) run in each new checkout before its workspace opens.
+    pub post_create: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
@@ -1191,6 +1193,7 @@ impl Default for WorktreesConfig {
     fn default() -> Self {
         Self {
             directory: "~/.herdr/worktrees".into(),
+            post_create: Vec::new(),
         }
     }
 }
@@ -1578,6 +1581,18 @@ directory = "~/Projects/herdr-worktrees"
 "#;
         let config: Config = toml::from_str(toml).unwrap();
         assert_eq!(config.worktrees.directory, "~/Projects/herdr-worktrees");
+    }
+
+    #[test]
+    fn worktrees_post_create_defaults_empty_and_parses() {
+        assert!(Config::default().worktrees.post_create.is_empty());
+
+        let toml = r#"
+[worktrees]
+post_create = ["~/bin/seed", "--quiet"]
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.worktrees.post_create, ["~/bin/seed", "--quiet"]);
     }
 
     #[test]

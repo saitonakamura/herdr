@@ -343,6 +343,57 @@ pub(crate) fn run_worktree_command(command: &WorktreeCommand) -> Result<(), Stri
     })
 }
 
+/// Lines of hook output kept in the error, so a chatty hook still fits a notice.
+const POST_CREATE_ERROR_LINES: usize = 20;
+
+/// Runs `[worktrees] post_create` in a fresh checkout. An empty argv runs nothing.
+pub(crate) fn run_post_create_hook(
+    argv: &[String],
+    checkout: &Path,
+    source_checkout: &Path,
+    branch: &str,
+) -> Result<(), String> {
+    let Some((program, args)) = argv.split_first() else {
+        return Ok(());
+    };
+    let output = crate::noninteractive_process::command(expand_tilde_path(program))
+        .args(args)
+        .current_dir(checkout)
+        .env("HERDR_WORKTREE_PATH", checkout)
+        .env("HERDR_WORKTREE_SOURCE", source_checkout)
+        .env("HERDR_WORKTREE_BRANCH", branch)
+        .output()
+        .map_err(|err| {
+            format!(
+                "post_create hook {program} could not start: {err}; the checkout was kept at {}",
+                checkout.display()
+            )
+        })?;
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let text = if stderr.trim().is_empty() {
+        stdout.trim()
+    } else {
+        stderr.trim()
+    };
+    let lines: Vec<&str> = text.lines().collect();
+    let tail = lines[lines.len().saturating_sub(POST_CREATE_ERROR_LINES)..].join("\n");
+    let mut message = format!(
+        "post_create hook {program} failed with {}; the checkout was kept at {}",
+        output.status,
+        checkout.display()
+    );
+    if !tail.is_empty() {
+        message.push('\n');
+        message.push_str(&tail);
+    }
+    Err(message)
+}
+
 pub(crate) fn run_worktree_remove_command_with_recovery(
     command: &WorktreeCommand,
     repo_root: &Path,

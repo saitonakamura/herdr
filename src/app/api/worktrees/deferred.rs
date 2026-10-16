@@ -196,7 +196,9 @@ impl App {
             path: checkout_path,
             api_request: Some(api_request),
             result: Ok(()),
+            post_create: Ok(()),
         };
+        let post_create = self.state.worktree_post_create.clone();
         let spawned = crate::thread_spawn::spawn_named_with(
             "herdr-worktree-add",
             finished,
@@ -215,6 +217,14 @@ impl App {
                         params.trust_repository,
                     )
                 });
+                if finished.result.is_ok() {
+                    finished.post_create = crate::worktree::run_post_create_hook(
+                        &post_create,
+                        &finished.path,
+                        &source_checkout_path,
+                        &branch,
+                    );
+                }
                 let _ = event_tx.blocking_send(AppEvent::WorktreeAddFinished(Box::new(finished)));
             },
         );
@@ -432,6 +442,15 @@ impl App {
             Self::send_api_response(
                 api.respond_to,
                 encode_error(api.id, "worktree_create_failed", err),
+            );
+            return;
+        }
+        // The checkout stays on disk but is not opened: an unprepared tree is
+        // what the hook exists to prevent.
+        if let Err(err) = result.post_create {
+            Self::send_api_response(
+                api.respond_to,
+                encode_error(api.id, "worktree_post_create_failed", err),
             );
             return;
         }

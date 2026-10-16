@@ -57,7 +57,7 @@ generation step.
 
 - A fork change to `src/detect/manifests/<agent>.toml` bumps its `version` and
   copies the file to `distribution/agent-detection/` in the same PR. The
-  distribution contract CI job enforces this.
+  `fork-agent-detection` CI job enforces this.
 - When an upstream sync conflicts on a manifest both sides changed, resolve it
   in both copies with a version higher than either side's.
 - `HERDR_AGENT_DETECTION_MANIFEST_CATALOG_URL` still overrides the catalog, and a

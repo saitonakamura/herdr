@@ -1,14 +1,14 @@
 ---
 id: herdr-fork-agent-identity-parent
 title: Stable agent identity and Parent
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
   - herdr-fork-sync-and-branch
 assignee:
-claimed_by:
+claimed_by: macos/w6:p9/facaa136-9db1-4343-8a94-9172fc3f376b
 ---
 
 ## Question

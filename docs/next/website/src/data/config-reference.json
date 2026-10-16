@@ -961,7 +961,7 @@
         {
           "key": "ui.prompt_new_workspace_name",
           "type": "boolean",
-          "default": "false",
+          "default": "true",
           "description": "Ask for a workspace name before interactive TUI creation."
         },
         {

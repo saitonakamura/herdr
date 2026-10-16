@@ -1415,6 +1415,45 @@ mod tests {
         assert!(parse_snapshot(json).is_err());
     }
 
+    // Upstream writes an automatically named workspace as `custom_name: null`;
+    // the fork names it after its first Git refresh, so the snapshot must load as is.
+    #[test]
+    fn upstream_snapshot_with_unnamed_workspace_loads() {
+        let json = r#"{
+            "version": 3,
+            "workspaces": [{
+                "id": "w1",
+                "custom_name": null,
+                "identity_cwd": "/tmp",
+                "public_pane_numbers": {"1": 1},
+                "next_public_pane_number": 2,
+                "public_tab_numbers": [1],
+                "next_public_tab_number": 2,
+                "tabs": [{
+                    "custom_name": null,
+                    "layout": {"Pane": 1},
+                    "panes": {"1": {"cwd": "/tmp", "agent_name": null,
+                                    "agent_session": null, "agent_resume": null}},
+                    "zoomed": false,
+                    "focused": 1,
+                    "root_pane": 1
+                }],
+                "active_tab": 0
+            }],
+            "active": 0,
+            "selected": 0,
+            "sidebar_width": 26,
+            "sidebar_section_split": 0.5,
+            "collapsed_space_keys": []
+        }"#;
+
+        let snapshot = parse_snapshot(json).unwrap();
+
+        assert_eq!(snapshot.workspaces.len(), 1);
+        assert_eq!(snapshot.workspaces[0].custom_name, None);
+        assert_eq!(snapshot.workspaces[0].identity_cwd, PathBuf::from("/tmp"));
+    }
+
     #[test]
     fn active_tab_default_is_zero() {
         let json = r#"{"custom_name":"test","identity_cwd":"/tmp","tabs":[]}"#;

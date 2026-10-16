@@ -23,8 +23,8 @@ use self::git::git_status_cache_key_for_space;
 pub(crate) use self::{git::git_status_snapshot_for_cwd_with_demand, tab::MovedPane};
 pub use self::{
     git::{
-        derive_label_from_cwd, fallback_label_from_cwd, git_branch, git_space_metadata,
-        git_status_cache_key, GitSpaceMetadata, GitStatusCacheEntry, GitStatusRefreshDemand,
+        fallback_label_from_cwd, git_branch, git_space_metadata, git_status_cache_key,
+        GitSpaceMetadata, GitStatusCacheEntry, GitStatusRefreshDemand,
     },
     tab::{NewPane, Tab},
 };
@@ -176,7 +176,8 @@ pub(crate) fn reserve_workspace_ids(workspaces: &[Workspace]) {
 pub struct Workspace {
     /// Stable public workspace identity, independent of display order.
     pub id: String,
-    /// User-provided override. If set, auto-derived identity stops updating.
+    /// The workspace's name, set once and changed only by a rename. `None` only
+    /// for an upstream snapshot's workspace until its first Git refresh names it.
     pub custom_name: Option<String>,
     /// Fallback workspace identity source for tests, old snapshots, or missing runtimes.
     pub identity_cwd: PathBuf,
@@ -251,7 +252,7 @@ impl Workspace {
             discover_workspace_git_identity(&identity_cwd);
         Self {
             id,
-            custom_name: label,
+            custom_name: label.or_else(|| Some(fallback_label_from_cwd(&identity_cwd))),
             identity_cwd: identity_cwd.clone(),
             cached_identity_cwd: identity_cwd.clone(),
             cached_auto_label,
@@ -403,7 +404,7 @@ impl Workspace {
         Ok((
             Self {
                 id,
-                custom_name: None,
+                custom_name: Some(fallback_label_from_cwd(&initial_cwd)),
                 identity_cwd: initial_cwd.clone(),
                 cached_identity_cwd: initial_cwd.clone(),
                 cached_auto_label,

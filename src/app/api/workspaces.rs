@@ -559,6 +559,68 @@ mod tests {
         let _ = std::fs::remove_dir_all(&source_cwd);
     }
 
+    #[tokio::test]
+    async fn workspace_create_freezes_name_from_starting_cwd_basename() {
+        use super::super::test_support::{exiting_test_command, shutdown_test_runtimes};
+        use crate::config::ShellModeConfig;
+
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        app.state.default_shell = exiting_test_command().into();
+        app.state.shell_mode = ShellModeConfig::NonLogin;
+        app.state.workspaces = vec![Workspace::test_new("first")];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.ensure_test_terminals();
+        shutdown_test_runtimes(&mut app);
+
+        let base = std::env::temp_dir().join(format!("herdr-ws-frozen-{}", std::process::id()));
+        let start_cwd = base.join("nested");
+        std::fs::create_dir_all(&start_cwd).unwrap();
+
+        for (label, expected) in [(None, "nested"), (Some("effort"), "effort")] {
+            let response = app.handle_workspace_create(
+                "req".into(),
+                WorkspaceCreateParams {
+                    source_workspace_id: None,
+                    cwd: Some(start_cwd.display().to_string()),
+                    focus: false,
+                    label: label.map(str::to_owned),
+                    env: Default::default(),
+                },
+            );
+            let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+            assert!(matches!(
+                success.result,
+                ResponseResult::WorkspaceCreated { .. }
+            ));
+            let ws_idx = app.state.workspaces.len() - 1;
+            assert_eq!(
+                app.state.workspaces[ws_idx].custom_name.as_deref(),
+                Some(expected)
+            );
+            assert_eq!(app.workspace_info(ws_idx).label, expected);
+        }
+        shutdown_test_runtimes(&mut app);
+
+        // The root pane leaving its starting directory does not rename the workspace.
+        let ws_idx = 1;
+        let root = app.state.workspaces[ws_idx].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[ws_idx]
+            .terminal_id(root)
+            .cloned()
+            .unwrap();
+        app.state.terminals.get_mut(&terminal_id).unwrap().cwd = base.clone();
+        assert_eq!(app.workspace_info(ws_idx).label, "nested");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     fn app_with_linked_worktree() -> App {
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
         let mut app = App::new(

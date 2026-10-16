@@ -289,7 +289,8 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # prompt_new_tab_name = true
 
 # Ask for a workspace name before interactive creation.
-# prompt_new_workspace_name = false
+# Set false to name new workspaces after their starting directory.
+# prompt_new_workspace_name = true
 
 # Draw borders around split panes.
 # "auto" draws them only for split panes, "always" also frames a lone pane

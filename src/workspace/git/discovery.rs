@@ -21,6 +21,7 @@ pub struct GitWorktreeInfo {
     pub is_linked_worktree: bool,
 }
 
+#[cfg(test)]
 pub fn derive_label_from_cwd(cwd: &Path) -> String {
     git_repo_root(cwd)
         .map(|repo_root| automatic_workspace_label(cwd, &repo_root))

@@ -1,7 +1,7 @@
 ---
 id: herdr-fork-repo-facts-per-pane
 title: Repo facts belong to each pane
-status: blocked
+status: open
 labels:
   - wayfinder:task
 parent: herdr-fork-map

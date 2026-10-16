@@ -1,7 +1,7 @@
 ---
 id: herdr-fork-agent-messages
 title: Messages between agents
-status: blocked
+status: open
 labels:
   - wayfinder:task
 parent: herdr-fork-map

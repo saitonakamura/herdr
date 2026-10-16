@@ -1,7 +1,7 @@
 ---
 id: herdr-fork-worktree-as-tab
 title: A worktree opens as a tab
-status: blocked
+status: open
 labels:
   - wayfinder:task
 parent: herdr-fork-map

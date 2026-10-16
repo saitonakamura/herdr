@@ -1,7 +1,7 @@
 ---
 id: herdr-fork-task-status-subtree-close
 title: Task status and closing a subtree
-status: blocked
+status: open
 labels:
   - wayfinder:task
 parent: herdr-fork-map

@@ -1,7 +1,7 @@
 ---
 id: herdr-fork-resume-args-env
 title: Resume an agent with its spawn args and env
-status: blocked
+status: open
 labels:
   - wayfinder:task
 parent: herdr-fork-map

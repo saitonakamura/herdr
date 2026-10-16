@@ -1,14 +1,14 @@
 ---
 id: herdr-fork-workspace-is-effort
 title: A workspace is an effort
-status: in-progress
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
   - herdr-fork-sync-and-branch
 assignee: saitonakamura
-claimed_by: macos/w6:pH/3d87f24a-ba58-420f-b5ef-157cbd75ec48
+claimed_by: macos/3d87f24a-ba58-420f-b5ef-157cbd75ec48
 ---
 
 ## Question
@@ -25,7 +25,7 @@ Per ADR 0001. A workspace is a named container with no cwd of its own and never 
 
 ## Resolution
 
-Draft, pending [saitonakamura/herdr#13](https://github.com/saitonakamura/herdr/pull/13); the ticket closes when it merges.
+Merged 2026-10-16 as `1490aded`: [saitonakamura/herdr#13](https://github.com/saitonakamura/herdr/pull/13).
 
 - Every `Workspace` constructor names the workspace: the label, or else the starting cwd's basename (`fallback_label_from_cwd`, `~` for home), not the repo name. That covers `workspace create`, the TUI with the prompt off, the startup workspace, `pane move` into a new workspace and worktree workspaces opened without `--label`. The name no longer follows the root pane's cwd.
 - Upstream snapshots write an auto-named workspace as `custom_name: null`. The format is unchanged and still loads. On its first Git identity refresh after restore or handoff, such a workspace takes the label it was showing (the repo name) as its name and marks the session dirty. Smoke-tested in a throwaway session.

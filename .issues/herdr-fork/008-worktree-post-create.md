@@ -1,14 +1,14 @@
 ---
 id: herdr-fork-worktree-post-create
 title: Worktree post-create hook
-status: in-progress
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
   - herdr-fork-sync-and-branch
 assignee:
-claimed_by: macos/w6:pE/16c210d5-75bb-40ff-b9a8-ba8fec0d59c2
+claimed_by: macos/16c210d5-75bb-40ff-b9a8-ba8fec0d59c2
 ---
 
 ## Question
@@ -27,7 +27,7 @@ Same change in the dotfiles: `scripts/herdr-work-config` sets `post_create` to t
 
 ## Resolution
 
-Draft, pending merge of [PR #11](https://github.com/saitonakamura/herdr/pull/11).
+Merged 2026-10-16 as `4d378967`: [PR #11](https://github.com/saitonakamura/herdr/pull/11).
 
 - herdr: `[worktrees] post_create = [argv]` runs in each checkout `worktree.create`
   makes, before its workspace opens. The TUI, the CLI and the socket API share that

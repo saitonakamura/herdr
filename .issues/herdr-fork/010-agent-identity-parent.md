@@ -1,14 +1,14 @@
 ---
 id: herdr-fork-agent-identity-parent
 title: Stable agent identity and Parent
-status: in-progress
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
   - herdr-fork-sync-and-branch
 assignee:
-claimed_by: macos/w6:p9/facaa136-9db1-4343-8a94-9172fc3f376b
+claimed_by: macos/facaa136-9db1-4343-8a94-9172fc3f376b
 ---
 
 ## Question
@@ -27,7 +27,7 @@ Same change in loom: loom's node id is the agent id (`spawn`, `attach`, `move` s
 
 ## Resolution
 
-Draft, pending merge of [PR #8](https://github.com/saitonakamura/herdr/pull/8) (branch
+Merged 2026-10-16 as `917ca180`: [PR #8](https://github.com/saitonakamura/herdr/pull/8) (branch
 `fork/010-agent-identity-parent`) and dotfiles branch `herdr-fork/010-agent-identity-parent`
 (673ac7d).
 

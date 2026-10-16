@@ -1,14 +1,14 @@
 ---
 id: herdr-fork-done-semantics
 title: Done is per pane and acknowledged once
-status: in-progress
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
   - herdr-fork-sync-and-branch
 assignee:
-claimed_by: macos/w6:pB/fd2813bb-a0d6-4d2a-8790-91188c78eda2
+claimed_by: macos/fd2813bb-a0d6-4d2a-8790-91188c78eda2
 ---
 
 ## Question
@@ -31,7 +31,7 @@ loom's attention view and `$fold` `+N!` read herdr's status: check them.
 
 ## Resolution
 
-Draft, pending merge of [PR #10](https://github.com/saitonakamura/herdr/pull/10).
+Merged 2026-10-16 as `31f567a3`: [PR #10](https://github.com/saitonakamura/herdr/pull/10).
 
 - The server owns acknowledgement: `AppState::acknowledging_panes` is the focused pane of every shell client whose outer terminal reports focus (`Some(true)`; unknown focus does not count), synced once per loop tick. Entering it sets `seen` and emits `pane.agent_status_changed` `idle`, once, for every client and the API.
 - `switch_tab`, `mark_active_tab_seen` and the `pane focus` / `agent focus` acknowledgement are gone. The client's `EndpointAgentPresentation` no longer projects or acknowledges done; it trusts the server's `agent_status`. No wire change.

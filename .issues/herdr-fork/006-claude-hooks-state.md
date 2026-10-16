@@ -1,14 +1,14 @@
 ---
 id: herdr-fork-claude-hooks-state
 title: Hooks decide Claude's state; blocked reason and delivery
-status: in-progress
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
   - herdr-fork-state-consistency
 assignee: saitonakamura
-claimed_by: macos/w6:pG/3cda3beb-8635-4e03-97cf-3dbf827aee72
+claimed_by: macos/3cda3beb-8635-4e03-97cf-3dbf827aee72
 ---
 
 ## Question
@@ -30,7 +30,7 @@ Per ADR 0003: make Claude a full lifecycle integration. `herdr integration insta
 
 ## Resolution
 
-Draft, pending [PR #12](https://github.com/saitonakamura/herdr/pull/12). Design and findings: [assets/006-claude-hooks-state.md](./assets/006-claude-hooks-state.md) (on the PR branch).
+Merged 2026-10-16 as `24bbd74e`: [PR #12](https://github.com/saitonakamura/herdr/pull/12). Design and findings: [assets/006-claude-hooks-state.md](./assets/006-claude-hooks-state.md) (on the PR branch).
 
 - Claude integration v12: hooks report state with a blocked reason; the `Stop` hook reads the ⏳/🔄 sentinels off `last_assistant_message` and treats a running sub-agent as working.
 - `herdr:claude` is a screen-assisted hook authority: hook state wins; the screen ends an interrupted turn (3 s idle) and a dialog that was answered, and blocks a working turn on a visible dialog.

@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-fork-manifest-catalog
 title: Fork builds fetch detection manifests from the fork
-status: in-progress
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee: saitonakamura
-claimed_by: macos/w6:p8/55acd074-e6ce-40f8-8a24-6d068a41cbc3
+claimed_by: macos/55acd074-e6ce-40f8-8a24-6d068a41cbc3
 ---
 
 ## Question
@@ -34,7 +34,7 @@ manifests come from: upstream's still arrive, through the sync.
 
 ## Resolution
 
-Draft, pending merge of [saitonakamura/herdr#7](https://github.com/saitonakamura/herdr/pull/7).
+Merged 2026-10-16 as `e23c5e2b`: [saitonakamura/herdr#7](https://github.com/saitonakamura/herdr/pull/7).
 
 - Fork builds' default catalog is
   `https://raw.githubusercontent.com/saitonakamura/herdr/master/distribution/agent-detection/index.toml`.

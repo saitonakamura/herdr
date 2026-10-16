@@ -472,8 +472,8 @@ fn unavailable_restored_terminal(
     terminal
 }
 
-/// Agent identity outlives the process, so it is restored whether or not the
-/// agent itself is resumed.
+/// Agent identity and how the agent was started outlive the process, so they
+/// are restored whether or not the agent itself is resumed.
 fn restore_agent_identity(
     terminal: &mut TerminalState,
     pane: Option<&super::snapshot::PaneSnapshot>,
@@ -481,6 +481,9 @@ fn restore_agent_identity(
     if let Some(pane) = pane {
         terminal.agent_id = pane.agent_id.clone();
         terminal.parent_agent_id = pane.parent_agent_id.clone();
+        terminal.launch_env = pane.launch_env.clone();
+        terminal.agent_launch = pane.agent_launch.clone();
+        terminal.agent_home = pane.agent_home.clone();
     }
 }
 
@@ -560,13 +563,25 @@ fn restore_tab(
                 enabled: runtime_context.resume_agents_on_restore,
                 resumed_sessions: resumed_agent_sessions,
             };
-            pane_restore_startup(
+            let mut startup = pane_restore_startup(
                 saved_agent_session,
                 saved_agent_resume,
                 &cwd,
                 saved_history,
                 &mut agent_restore,
-            )
+            );
+            // A reported resume command is complete; Herdr's own gets the agent's start args.
+            if saved_agent_resume.is_none() {
+                let user_home = crate::integration::home_dir().ok();
+                startup.restore_plan = startup.restore_plan.map(|plan| {
+                    plan.with_launch(
+                        saved_pane.and_then(|pane| pane.agent_launch.as_ref()),
+                        saved_pane.and_then(|pane| pane.agent_home.as_ref()),
+                        user_home.as_deref(),
+                    )
+                });
+            }
+            startup
         };
         let restored_agent_resume = saved_agent_resume
             .filter(|_| !startup.duplicate_agent_session)
@@ -584,7 +599,12 @@ fn restore_tab(
             .map(String::as_str);
         let launch_env = public_pane_id
             .map(|pane_id| {
-                PaneLaunchEnv::from_extra(Vec::new()).with_identity(
+                PaneLaunchEnv::from_extra(
+                    saved_pane
+                        .map(|pane| pane.launch_env.clone())
+                        .unwrap_or_default(),
+                )
+                .with_identity(
                     workspace_id.to_string(),
                     crate::workspace::public_tab_id_for_number(workspace_id, number),
                     pane_id.to_string(),
@@ -1573,6 +1593,9 @@ mod tests {
                             launch_argv: None,
                             agent_id: crate::terminal::AgentId::parse("1234abcd"),
                             parent_agent_id: crate::terminal::AgentId::parse("2345bcde"),
+                            launch_env: Vec::new(),
+                            agent_launch: None,
+                            agent_home: None,
                         },
                     )]),
                     zoomed: false,
@@ -1667,6 +1690,9 @@ mod tests {
                                 launch_argv: None,
                                 agent_id: None,
                                 parent_agent_id: None,
+                                launch_env: Vec::new(),
+                                agent_launch: None,
+                                agent_home: None,
                             },
                         ),
                         (
@@ -1681,6 +1707,9 @@ mod tests {
                                 launch_argv: None,
                                 agent_id: None,
                                 parent_agent_id: None,
+                                launch_env: Vec::new(),
+                                agent_launch: None,
+                                agent_home: None,
                             },
                         ),
                     ]),
@@ -1737,6 +1766,9 @@ mod tests {
                     launch_argv: None,
                     agent_id: None,
                     parent_agent_id: None,
+                    launch_env: Vec::new(),
+                    agent_launch: None,
+                    agent_home: None,
                 },
             )
         };
@@ -1755,6 +1787,9 @@ mod tests {
             launch_argv: None,
             agent_id: None,
             parent_agent_id: None,
+            launch_env: Vec::new(),
+            agent_launch: None,
+            agent_home: None,
         };
         let snapshot = SessionSnapshot {
             version: super::super::snapshot::SNAPSHOT_VERSION,
@@ -1915,6 +1950,9 @@ mod tests {
                             launch_argv: None,
                             agent_id: None,
                             parent_agent_id: None,
+                            launch_env: Vec::new(),
+                            agent_launch: None,
+                            agent_home: None,
                         },
                     )]),
                     zoomed: false,
@@ -1985,6 +2023,94 @@ mod tests {
             handoff_runtimes.is_empty(),
             "handoff restore should not replace pending native agent resume with a shell runtime"
         );
+    }
+
+    #[tokio::test]
+    async fn native_agent_restore_resumes_with_start_args_env_and_profile() {
+        let cwd = std::env::current_dir().unwrap();
+        let profile = cwd.join("codex-profile").display().to_string();
+        let pane = super::super::snapshot::PaneSnapshot {
+            cwd: cwd.clone(),
+            label: None,
+            agent_name: None,
+            managed_agent_kind: None,
+            agent_session: Some(super::super::snapshot::PaneAgentSessionSnapshot {
+                source: "herdr:codex".into(),
+                agent: "codex".into(),
+                kind: crate::agent_resume::AgentSessionRefKind::Id,
+                value: "codex-session".into(),
+            }),
+            agent_resume: None,
+            launch_argv: None,
+            agent_id: None,
+            parent_agent_id: None,
+            launch_env: vec![("LOOM_PARENT".into(), "1234abcd".into())],
+            agent_launch: Some(crate::agent_resume::AgentLaunch {
+                agent: "codex".into(),
+                args: vec!["-c".into(), "x=y".into(), "--worktree".into()],
+            }),
+            agent_home: Some(crate::agent_resume::AgentHome {
+                agent: "codex".into(),
+                path: profile.clone(),
+            }),
+        };
+        let snapshot = SessionSnapshot {
+            version: super::super::snapshot::SNAPSHOT_VERSION,
+            workspaces: vec![WorkspaceSnapshot {
+                id: Some("workspace".into()),
+                custom_name: None,
+                identity_cwd: cwd.clone(),
+                worktree_space: None,
+                public_pane_numbers: HashMap::new(),
+                next_public_pane_number: 0,
+                public_tab_numbers: Vec::new(),
+                next_public_tab_number: 0,
+                tabs: vec![TabSnapshot {
+                    custom_name: None,
+                    followed_name: None,
+                    layout: LayoutSnapshot::Pane(0),
+                    panes: HashMap::from([(0, pane)]),
+                    zoomed: false,
+                    focused: Some(0),
+                    root_pane: Some(0),
+                }],
+                active_tab: 0,
+            }],
+            active: Some(0),
+            selected: 0,
+            sidebar_width: None,
+            sidebar_section_split: None,
+            collapsed_space_keys: Default::default(),
+        };
+
+        let (_workspaces, terminals, _runtimes) = restore(
+            &snapshot,
+            None,
+            24,
+            80,
+            0,
+            test_restore_shell(),
+            crate::config::ShellModeConfig::NonLogin,
+            true,
+            mpsc::channel(4).0,
+            Arc::new(Notify::new()),
+            Arc::new(RenderSignal::new()),
+        );
+
+        let terminal = terminals.values().next().unwrap();
+        let plan = terminal.pending_agent_resume_plan.as_ref().unwrap();
+        assert_eq!(
+            plan.argv,
+            ["codex", "resume", "codex-session", "-c", "x=y"].map(String::from)
+        );
+        assert_eq!(plan.env, vec![("CODEX_HOME".to_string(), Some(profile))]);
+        // carried on, so the next restart resumes the same way
+        assert_eq!(
+            terminal.launch_env,
+            vec![("LOOM_PARENT".to_string(), "1234abcd".to_string())]
+        );
+        assert!(terminal.agent_launch.is_some());
+        assert!(terminal.agent_home.is_some());
     }
 
     #[tokio::test]
@@ -2223,6 +2349,9 @@ mod tests {
                 launch_argv: None,
                 agent_id: None,
                 parent_agent_id: None,
+                launch_env: Vec::new(),
+                agent_launch: None,
+                agent_home: None,
             },
         );
         let mut history = SessionHistorySnapshot {

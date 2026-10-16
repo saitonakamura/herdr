@@ -498,4 +498,45 @@ mod tests {
         );
         shutdown_test_runtimes(&mut app);
     }
+
+    #[tokio::test]
+    async fn tab_create_keeps_its_env_for_the_restored_shell() {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        app.state.default_shell = exiting_test_command().into();
+        app.state.shell_mode = ShellModeConfig::NonLogin;
+        app.state.workspaces = vec![Workspace::test_new("tabs")];
+        app.state.active = Some(0);
+        app.state.ensure_test_terminals();
+
+        let response = app.handle_tab_create(
+            "req".into(),
+            TabCreateParams {
+                workspace_id: None,
+                cwd: Some(std::env::temp_dir().display().to_string()),
+                focus: false,
+                label: None,
+                env: std::collections::HashMap::from([(
+                    "LOOM_PARENT".to_string(),
+                    "1234abcd".to_string(),
+                )]),
+            },
+        );
+
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        assert!(matches!(success.result, ResponseResult::TabCreated { .. }));
+        let created = &app.state.workspaces[0].tabs[1];
+        let terminal_id = created.terminal_id(created.root_pane).unwrap();
+        assert_eq!(
+            app.state.terminals[terminal_id].launch_env,
+            vec![("LOOM_PARENT".to_string(), "1234abcd".to_string())]
+        );
+        shutdown_test_runtimes(&mut app);
+    }
 }

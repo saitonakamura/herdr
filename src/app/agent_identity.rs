@@ -196,7 +196,7 @@ impl App {
     }
 
     /// An agent id, a pane id (with or without an agent), or an agent name.
-    fn resolve_agent_identity_target(
+    pub(super) fn resolve_agent_identity_target(
         &self,
         target: &str,
     ) -> Result<(usize, crate::layout::PaneId, TerminalId), AgentParentError> {

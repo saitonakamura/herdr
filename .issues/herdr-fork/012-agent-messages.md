@@ -1,7 +1,7 @@
 ---
 id: herdr-fork-agent-messages
 title: Messages between agents
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
@@ -9,7 +9,7 @@ blocked_by:
   - herdr-fork-agent-identity-parent
   - herdr-fork-claude-hooks-state
 assignee:
-claimed_by:
+claimed_by: macos/w6:pK/0f6c6ace-950b-4cb4-92b1-47dbae692b2b
 ---
 
 ## Question

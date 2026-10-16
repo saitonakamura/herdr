@@ -69,6 +69,19 @@ cli_params! {
 
 cli_params! {
     #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+    pub struct AgentSetArgsParams => AgentSetArgsProjection {
+        /// Agent id, agent name, or pane id.
+        pub target: String => Field::new(String::new()).input(bindings::target()),
+        /// Agent kind the args are for, such as claude, codex or pi.
+        pub kind: String => Field::new(String::new()).input(bindings::kind()),
+        /// Replaces the args a resume starts the agent with.
+        #[serde(default)]
+        pub args: Vec<String> => Field::new(Vec::new()).input(bindings::agent_args()),
+    }
+}
+
+cli_params! {
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
     pub struct AgentSetParentParams => AgentSetParentProjection {
         /// Agent id, agent name, or pane id. A pane without an agent gets an agent id too.
         pub target: String => Field::new(String::new()).input(bindings::target()),
@@ -254,6 +267,13 @@ pub struct AgentInfo {
     /// The agent that started this one; absent for a top-level agent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_agent_id: Option<String>,
+    /// Args the agent was started with through Herdr; a resume reuses them,
+    /// minus those that select a session or run headless.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch_args: Option<Vec<String>>,
+    /// Profile directory the agent's session is written to; a resume selects it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_home: Option<String>,
     pub workspace_id: String,
     pub tab_id: String,
     pub pane_id: String,

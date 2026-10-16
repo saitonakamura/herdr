@@ -197,6 +197,8 @@ fn pane_scroll_result(
             agent_session: None,
             agent_id: None,
             parent_agent_id: None,
+            launch_args: None,
+            agent_home: None,
             scroll: Some(crate::api::schema::PaneScrollInfo {
                 offset_from_bottom,
                 max_offset_from_bottom,

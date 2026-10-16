@@ -68,6 +68,7 @@ struct PanePresentationSnapshot {
     title: Option<String>,
     display_agent: Option<String>,
     state_labels: std::collections::HashMap<String, String>,
+    blocked_reason: Option<crate::api::schema::AgentBlockedReason>,
 }
 
 impl PanePresentationSnapshot {
@@ -76,6 +77,7 @@ impl PanePresentationSnapshot {
             title: pane.title.clone(),
             display_agent: pane.display_agent.clone(),
             state_labels: pane.state_labels.clone(),
+            blocked_reason: pane.blocked_reason,
         }
     }
 
@@ -83,11 +85,13 @@ impl PanePresentationSnapshot {
         title: &Option<String>,
         display_agent: &Option<String>,
         state_labels: &std::collections::HashMap<String, String>,
+        blocked_reason: Option<crate::api::schema::AgentBlockedReason>,
     ) -> Self {
         Self {
             title: title.clone(),
             display_agent: display_agent.clone(),
             state_labels: state_labels.clone(),
+            blocked_reason,
         }
     }
 }
@@ -217,6 +221,7 @@ impl ActiveSubscription {
                         pane_id: probe.pane_id.clone(),
                         workspace_id: probe.workspace_id,
                         agent_status: probe.agent_status,
+                        blocked_reason: probe.blocked_reason,
                         agent: probe.agent,
                         title: probe.title,
                         display_agent: probe.display_agent,
@@ -429,6 +434,7 @@ impl ActiveAgentStatusChangedSubscription {
             pane_id,
             workspace_id,
             agent_status,
+            blocked_reason,
             agent,
             title,
             display_agent,
@@ -445,6 +451,7 @@ impl ActiveAgentStatusChangedSubscription {
             &title,
             &display_agent,
             &state_labels,
+            blocked_reason,
         ));
         self.initial_event = None;
         if self
@@ -460,6 +467,7 @@ impl ActiveAgentStatusChangedSubscription {
                 pane_id,
                 workspace_id,
                 agent_status,
+                blocked_reason,
                 agent,
                 title,
                 display_agent,
@@ -529,6 +537,7 @@ impl ActiveAgentStatusChangedSubscription {
                 pane_id: pane.pane_id,
                 workspace_id: pane.workspace_id,
                 agent_status: current_status,
+                blocked_reason: pane.blocked_reason,
                 agent: pane.agent,
                 title: pane.title,
                 display_agent: pane.display_agent,
@@ -672,6 +681,7 @@ mod tests {
         EventEnvelope {
             event: EventKind::PaneAgentStatusChanged,
             data: EventData::PaneAgentStatusChanged {
+                blocked_reason: None,
                 pane_id: "pane_1".into(),
                 workspace_id: "workspace_1".into(),
                 agent_status: AgentStatus::Working,
@@ -694,6 +704,7 @@ mod tests {
 
     fn pane_info_with_scroll(scroll: Option<PaneScrollInfo>) -> PaneInfo {
         PaneInfo {
+            blocked_reason: None,
             pane_id: "pane_1".into(),
             terminal_id: "terminal_1".into(),
             workspace_id: "workspace_1".into(),
@@ -813,6 +824,7 @@ mod tests {
                     last_presentation: None,
                     last_sequence: event_hub.current_sequence(),
                     initial_event: Some(PaneAgentStatusChangedEvent {
+                        blocked_reason: None,
                         pane_id: "pane_1".into(),
                         workspace_id: "workspace_1".into(),
                         agent_status: AgentStatus::Working,
@@ -901,6 +913,7 @@ mod tests {
             status_filter: None,
             last_status: Some(AgentStatus::Working),
             last_presentation: Some(PanePresentationSnapshot {
+                blocked_reason: None,
                 title: None,
                 display_agent: None,
                 state_labels: HashMap::new(),
@@ -938,12 +951,14 @@ mod tests {
             status_filter: Some(AgentStatus::Working),
             last_status: Some(AgentStatus::Working),
             last_presentation: Some(PanePresentationSnapshot {
+                blocked_reason: None,
                 title: None,
                 display_agent: None,
                 state_labels: HashMap::new(),
             }),
             last_sequence: event_hub.current_sequence(),
             initial_event: Some(PaneAgentStatusChangedEvent {
+                blocked_reason: None,
                 pane_id: "pane_1".into(),
                 workspace_id: "workspace_1".into(),
                 agent_status: AgentStatus::Working,
@@ -983,12 +998,14 @@ mod tests {
             status_filter: Some(AgentStatus::Working),
             last_status: Some(AgentStatus::Working),
             last_presentation: Some(PanePresentationSnapshot {
+                blocked_reason: None,
                 title: Some("short lived".into()),
                 display_agent: None,
                 state_labels: HashMap::new(),
             }),
             last_sequence: event_hub.current_sequence(),
             initial_event: Some(PaneAgentStatusChangedEvent {
+                blocked_reason: None,
                 pane_id: "pane_1".into(),
                 workspace_id: "workspace_1".into(),
                 agent_status: AgentStatus::Working,

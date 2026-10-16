@@ -165,16 +165,43 @@ impl App {
         let Some(terminal) = self.state.terminals.get(&terminal_id) else {
             return Err(agent_not_found(id, &params.target));
         };
-        if terminal.state == crate::detect::AgentState::Blocked {
-            return Err(encode_error(
-                id,
-                "agent_blocked",
-                format!(
-                    "agent {} is blocked and requires interactive input",
-                    params.target
-                ),
-            ));
-        }
+        let blocked_on_question = if terminal.state == crate::detect::AgentState::Blocked {
+            match terminal.blocked_reason() {
+                Some(crate::detect::BlockedReason::Question) => true,
+                Some(crate::detect::BlockedReason::Permission) => {
+                    return Err(encode_error(
+                        id,
+                        "agent_blocked_permission",
+                        format!(
+                            "agent {} is blocked on a tool permission and requires interactive input",
+                            params.target
+                        ),
+                    ));
+                }
+                Some(crate::detect::BlockedReason::Form) => {
+                    return Err(encode_error(
+                        id,
+                        "agent_blocked_form",
+                        format!(
+                            "agent {} is blocked on a form and requires interactive input",
+                            params.target
+                        ),
+                    ));
+                }
+                None => {
+                    return Err(encode_error(
+                        id,
+                        "agent_blocked",
+                        format!(
+                            "agent {} is blocked and requires interactive input",
+                            params.target
+                        ),
+                    ));
+                }
+            }
+        } else {
+            false
+        };
         let Some(expected_agent) = terminal.effective_known_agent() else {
             return Err(agent_not_ready(id, &params.target));
         };
@@ -193,6 +220,41 @@ impl App {
                     params.target
                 ),
             ));
+        }
+        if blocked_on_question {
+            // A question is answered in the composer, so only an empty one takes the prompt.
+            let Some((pane, _)) = self.lookup_runtime(resolved.ws_idx, resolved.pane_id) else {
+                return Err(agent_not_found(id, &params.target));
+            };
+            let (screen, _) = crate::app::api_helpers::read_terminal_snapshot(
+                pane,
+                crate::api::schema::ReadSource::Screen,
+                crate::api::schema::ReadFormat::Ansi,
+                None,
+            );
+            match crate::detect::composer::composer_state(&screen.text) {
+                crate::detect::composer::Composer::Empty => {}
+                crate::detect::composer::Composer::Draft => {
+                    return Err(encode_error(
+                        id,
+                        "agent_composer_not_empty",
+                        format!(
+                            "agent {} waits on a question but something is typed in its composer",
+                            params.target
+                        ),
+                    ));
+                }
+                crate::detect::composer::Composer::Missing => {
+                    return Err(encode_error(
+                        id,
+                        "agent_composer_not_found",
+                        format!(
+                            "agent {} waits on a question but no composer is on its screen",
+                            params.target
+                        ),
+                    ));
+                }
+            }
         }
         let Some(agent) = self.agent_info(resolved.ws_idx, resolved.pane_id) else {
             return Err(agent_not_found(id, &params.target));
@@ -947,6 +1009,99 @@ mod tests {
                 app.state.terminals[&terminal_id].manual_label.as_deref(),
                 Some("shell-pane")
             );
+        }
+    }
+
+    #[tokio::test]
+    async fn agent_prompt_answers_only_a_question_with_an_empty_composer() {
+        use crate::detect::BlockedReason;
+
+        let rule = "\u{2500}".repeat(40);
+        let prompt_box = |row: &str| {
+            format!("\u{25cf} Which one?\r\n\r\n{rule}\r\n{row}\r\n{rule}\r\n  ~/repo\r\n")
+        };
+        let cases = [
+            (
+                BlockedReason::Permission,
+                prompt_box("\u{276f} "),
+                Some("agent_blocked_permission"),
+            ),
+            (
+                BlockedReason::Form,
+                prompt_box("\u{276f} "),
+                Some("agent_blocked_form"),
+            ),
+            (
+                BlockedReason::Question,
+                prompt_box("\u{276f} half typed"),
+                Some("agent_composer_not_empty"),
+            ),
+            (
+                BlockedReason::Question,
+                "plain output\r\n".to_string(),
+                Some("agent_composer_not_found"),
+            ),
+            (
+                BlockedReason::Question,
+                prompt_box("\u{276f} \x1b[2msuggested prompt\x1b[0m"),
+                None,
+            ),
+        ];
+        for (reason, screen, refusal) in cases {
+            let mut app = app_with_agent();
+            let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+            let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+                .attached_terminal_id
+                .clone();
+            let terminal = app.state.terminals.get_mut(&terminal_id).unwrap();
+            terminal.set_agent_name("reviewer".into());
+            terminal.set_detected_state(Some(Agent::Claude), AgentState::Idle);
+            terminal.set_detailed_hook_authority_at(
+                "herdr:claude".into(),
+                "claude".into(),
+                AgentState::Blocked,
+                crate::terminal::HookReportDetail {
+                    blocked_reason: Some(reason),
+                    background: false,
+                },
+                None,
+                crate::agent_resume::AgentSessionRef::id("claude-session"),
+                Some(1),
+                std::time::Instant::now(),
+            );
+            assert_eq!(terminal.blocked_reason(), Some(reason));
+            let (runtime, mut rx) = crate::terminal::TerminalRuntime::test_with_channel(80, 24);
+            runtime.test_process_pty_bytes(screen.as_bytes());
+            app.state.insert_test_runtime(pane_id, runtime);
+
+            let response = run_deferred_agent_prompt(
+                &mut app,
+                "req",
+                AgentPromptParams {
+                    target: "reviewer".into(),
+                    text: "the answer".into(),
+                    wait: None,
+                },
+            );
+
+            match refusal {
+                Some(code) => {
+                    let error: crate::api::schema::ErrorResponse =
+                        serde_json::from_str(&response).unwrap();
+                    assert_eq!(error.error.code, code, "{reason:?} {screen:?}");
+                    assert!(rx.try_recv().is_err(), "a refused prompt wrote input");
+                }
+                None => {
+                    let success: SuccessResponse = serde_json::from_str(&response)
+                        .unwrap_or_else(|_| panic!("{reason:?} {screen:?}: {response}"));
+                    assert!(matches!(
+                        success.result,
+                        crate::api::schema::ResponseResult::AgentPrompted { .. }
+                    ));
+                    let written = rx.recv().await.unwrap();
+                    assert!(String::from_utf8_lossy(&written).contains("the answer"));
+                }
+            }
         }
     }
 }

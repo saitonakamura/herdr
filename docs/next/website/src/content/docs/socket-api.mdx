@@ -111,7 +111,7 @@ Raw socket method names use dot notation:
 | Integrations | `integration.install`, `integration.uninstall` |
 | Plugins | `plugin.link`, `plugin.list`, `plugin.unlink`, `plugin.enable`, `plugin.disable`, `plugin.action.list`, `plugin.action.invoke`, `plugin.log.list`, `plugin.pane.open`, `plugin.pane.focus`, `plugin.pane.close` |
 
-`agent.wait` is server-owned and event-driven. It pins the resolved pane occupant so a replacement cannot satisfy the wait. `agent.prompt` accepts an optional `wait` object with `until` and `timeout_ms`; this submits the prompt and starts the wait in one request, avoiding a race between separate calls. If the resolved agent is already `blocked`, `agent.prompt` returns `agent_blocked` without sending input or starting the wait.
+`agent.wait` is server-owned and event-driven. It pins the resolved pane occupant so a replacement cannot satisfy the wait. `agent.prompt` accepts an optional `wait` object with `until` and `timeout_ms`; this submits the prompt and starts the wait in one request, avoiding a race between separate calls. If the resolved agent is already `blocked`, `agent.prompt` returns `agent_blocked_permission`, `agent_blocked_form` or `agent_blocked` without sending input or starting the wait. An agent blocked with `blocked_reason` `question` takes the prompt when its composer is empty, and returns `agent_composer_not_empty` or `agent_composer_not_found` otherwise.
 
 `workspace.move_block` atomically moves the ordered `workspace_ids` before `before_workspace_id`; omit the anchor to move the block to the end. The ids must be unique and the anchor cannot be part of the block. The response contains the authoritative ordered workspace list.
 
@@ -673,6 +673,14 @@ Integrations report agent state with `pane.report_agent`.
 
 `state` carries semantic agent state and affects waits, notifications, and
 rollups. Report display-only values separately through metadata.
+
+With `"state": "blocked"`, an optional `blocked_reason` says what the agent
+waits on: `question` (asked in prose, answered in the composer), `permission`
+(a tool permission dialog) or `form` (a form or selection dialog). Agent and
+pane info and `pane.agent_status_changed` events carry it as `blocked_reason`
+while the agent is blocked for that reason; a blocked agent without one omits
+it. With `"state": "working"`, `"background": true` says the turn ended while
+work the agent started still runs.
 
 Session-only official integrations report native session references with `pane.report_agent_session`. State-reporting integrations can still include native session references in `pane.report_agent`. State-independent session reports do not affect waits, notifications, or rollups.
 

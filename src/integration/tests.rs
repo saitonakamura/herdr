@@ -967,13 +967,28 @@ fn install_claude_writes_hook_and_updates_settings() {
         .as_str()
         .unwrap()
         .contains(" session"));
-    assert!(settings["hooks"].get("UserPromptSubmit").is_none());
-    assert!(settings["hooks"].get("PreToolUse").is_none());
+    for (event, matcher) in [
+        ("UserPromptSubmit", None),
+        ("PreToolUse", Some("AskUserQuestion")),
+        ("PostToolUse", Some("*")),
+        ("Notification", Some("permission_prompt|elicitation_dialog")),
+        ("Stop", None),
+        ("StopFailure", None),
+    ] {
+        let entries = settings["hooks"][event].as_array().unwrap();
+        assert_eq!(entries.len(), 1, "{event}");
+        assert_eq!(entries[0]["matcher"].as_str(), matcher, "{event}");
+        assert!(
+            entries[0]["hooks"][0]["command"]
+                .as_str()
+                .unwrap()
+                .ends_with(" state"),
+            "{event}"
+        );
+    }
     assert!(settings["hooks"].get("PermissionRequest").is_none());
-    assert!(settings["hooks"].get("PostToolUse").is_none());
     assert!(settings["hooks"].get("PostToolUseFailure").is_none());
     assert!(settings["hooks"].get("SubagentStop").is_none());
-    assert!(settings["hooks"].get("Stop").is_none());
     assert!(settings["hooks"].get("SessionEnd").is_none());
 
     std::env::remove_var("HOME");
@@ -1015,17 +1030,24 @@ fn install_claude_is_idempotent_for_hook_entries() {
     let settings: Value =
         serde_json::from_str(&fs::read_to_string(claude_dir.join("settings.json")).unwrap())
             .unwrap();
-    assert_eq!(
-        settings["hooks"]["SessionStart"].as_array().unwrap().len(),
-        1
-    );
-    assert!(settings["hooks"].get("UserPromptSubmit").is_none());
-    assert!(settings["hooks"].get("PreToolUse").is_none());
+    for event in [
+        "SessionStart",
+        "UserPromptSubmit",
+        "PreToolUse",
+        "PostToolUse",
+        "Notification",
+        "Stop",
+        "StopFailure",
+    ] {
+        assert_eq!(
+            settings["hooks"][event].as_array().unwrap().len(),
+            1,
+            "{event}"
+        );
+    }
     assert!(settings["hooks"].get("PermissionRequest").is_none());
-    assert!(settings["hooks"].get("PostToolUse").is_none());
     assert!(settings["hooks"].get("PostToolUseFailure").is_none());
     assert!(settings["hooks"].get("SubagentStop").is_none());
-    assert!(settings["hooks"].get("Stop").is_none());
     assert!(settings["hooks"].get("SessionEnd").is_none());
 
     std::env::remove_var("HOME");
@@ -1101,9 +1123,13 @@ fn install_claude_removes_deprecated_completion_hooks_and_preserves_user_hooks()
         settings["hooks"]["SessionEnd"][0]["hooks"][0]["command"],
         "echo keep-session-end"
     );
-    assert!(settings["hooks"].get("UserPromptSubmit").is_none());
-    assert!(settings["hooks"].get("PreToolUse").is_none());
-    assert!(settings["hooks"].get("Stop").is_none());
+    let post_tool_use = settings["hooks"]["PostToolUse"].as_array().unwrap();
+    assert_eq!(post_tool_use.len(), 2);
+    assert_eq!(post_tool_use[0]["hooks"].as_array().unwrap().len(), 1);
+    assert!(post_tool_use[1]["hooks"][0]["command"]
+        .as_str()
+        .unwrap()
+        .ends_with(" state"));
 
     std::env::remove_var("HOME");
     let _ = fs::remove_dir_all(base);
@@ -1132,7 +1158,7 @@ fn claude_v9_integration_status_is_outdated_until_reinstalled() {
 
     assert_eq!(claude.path, hook_path);
     assert_eq!(claude.installed_version, Some(9));
-    assert_eq!(claude.expected_version, 11);
+    assert_eq!(claude.expected_version, 12);
     assert_eq!(claude.state, IntegrationStatusKind::Outdated);
 
     install_claude().unwrap();
@@ -1141,7 +1167,7 @@ fn claude_v9_integration_status_is_outdated_until_reinstalled() {
         hook_path,
         CLAUDE_INTEGRATION_VERSION,
     );
-    assert_eq!(status.installed_version, Some(11));
+    assert_eq!(status.installed_version, Some(12));
     assert_eq!(status.state, IntegrationStatusKind::Current);
 
     std::env::remove_var("HOME");
@@ -1171,7 +1197,7 @@ fn claude_v2_integration_status_is_outdated() {
 
     assert_eq!(claude.path, hook_path);
     assert_eq!(claude.installed_version, Some(2));
-    assert_eq!(claude.expected_version, 11);
+    assert_eq!(claude.expected_version, 12);
     assert_eq!(claude.state, IntegrationStatusKind::Outdated);
 
     std::env::remove_var("HOME");
@@ -1251,7 +1277,7 @@ fn claude_windows_hook_reports_utf8_session_path() {
     let fake_herdr = base.join("herdr-capture.ps1");
     fs::write(
         &fake_herdr,
-        "$capture = $env:HERDR_TEST_CAPTURE\n[System.IO.File]::WriteAllText($capture, ($args -join \"`n\"), [System.Text.UTF8Encoding]::new($false))\n",
+        "$capture = $env:HERDR_TEST_CAPTURE\n[System.IO.File]::AppendAllText($capture, ($args -join \"`n\") + \"`n\", [System.Text.UTF8Encoding]::new($false))\n",
     )
     .unwrap();
 
@@ -1346,6 +1372,18 @@ fn uninstall_claude_removes_herdr_hooks_and_preserves_others() {
             "Stop": [{
                 "matcher": "*",
                 "hooks": [{"type": "command", "command": format!("bash '{}' idle", hook_path.display()), "timeout": 10}]
+            }, {
+                "hooks": [{"type": "command", "command": format!("bash '{}' state", hook_path.display()), "timeout": 10}]
+            }],
+            "Notification": [{
+                "matcher": "permission_prompt|elicitation_dialog",
+                "hooks": [
+                    {"type": "command", "command": format!("bash '{}' state", hook_path.display()), "timeout": 10},
+                    {"type": "command", "command": "echo keep-notification", "timeout": 10}
+                ]
+            }],
+            "StopFailure": [{
+                "hooks": [{"type": "command", "command": format!("bash '{}' state", hook_path.display()), "timeout": 10}]
             }],
             "SessionEnd": [{
                 "matcher": "*",
@@ -1385,6 +1423,11 @@ fn uninstall_claude_removes_herdr_hooks_and_preserves_others() {
     assert!(settings["hooks"].get("PostToolUseFailure").is_none());
     assert!(settings["hooks"].get("SubagentStop").is_none());
     assert!(settings["hooks"].get("Stop").is_none());
+    assert!(settings["hooks"].get("StopFailure").is_none());
+    assert_eq!(
+        settings["hooks"]["Notification"][0]["hooks"][0]["command"],
+        "echo keep-notification"
+    );
     assert!(settings["hooks"].get("SessionEnd").is_none());
 
     std::env::remove_var("HOME");
@@ -5190,4 +5233,244 @@ fn grok_dir_honors_grok_home_after_config_dir_seam() {
     std::env::remove_var(GROK_HOME_ENV_VAR);
     clear_integration_path_env();
     let _ = fs::remove_dir_all(base);
+}
+
+#[cfg(unix)]
+fn run_claude_hook(action: &str, payload: &serde_json::Value) -> Vec<serde_json::Value> {
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::{UnixListener, UnixStream};
+    use std::process::{Command, Stdio};
+
+    let dir = unique_base();
+    fs::create_dir_all(&dir).unwrap();
+    let hook_path = dir.join("herdr-agent-state.sh");
+    fs::write(
+        &hook_path,
+        include_str!("assets/claude/herdr-agent-state.sh"),
+    )
+    .unwrap();
+    // sun_path is short on macOS, so the socket lives under /tmp.
+    let socket_path = PathBuf::from(format!(
+        "/tmp/hcl-{}-{}.sock",
+        std::process::id(),
+        dir.file_name().unwrap().to_string_lossy().len() + payload.to_string().len()
+    ));
+    let _ = fs::remove_file(&socket_path);
+    let listener = UnixListener::bind(&socket_path).unwrap();
+    let server = std::thread::spawn(move || {
+        let mut requests = Vec::new();
+        for stream in listener.incoming() {
+            let mut stream = stream.unwrap();
+            let mut line = String::new();
+            BufReader::new(&stream).read_line(&mut line).unwrap();
+            if line.trim() == "stop" {
+                break;
+            }
+            let _ = stream.write_all(b"{}\n");
+            requests.push(serde_json::from_str::<serde_json::Value>(&line).unwrap());
+        }
+        requests
+    });
+
+    let mut child = Command::new("sh")
+        .arg(&hook_path)
+        .arg(action)
+        .env("HERDR_ENV", "1")
+        .env("HERDR_PANE_ID", "w1:p2")
+        .env("HERDR_SOCKET_PATH", &socket_path)
+        .env_remove("CURSOR_VERSION")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(payload.to_string().as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "hook failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    UnixStream::connect(&socket_path)
+        .unwrap()
+        .write_all(b"stop\n")
+        .unwrap();
+    let requests = server.join().unwrap();
+    let _ = fs::remove_file(&socket_path);
+    let _ = fs::remove_dir_all(dir);
+    requests
+}
+
+#[cfg(unix)]
+fn reported_state(requests: &[serde_json::Value]) -> Option<(String, Option<String>, bool)> {
+    let reports: Vec<_> = requests
+        .iter()
+        .filter(|request| request["method"] == "pane.report_agent")
+        .collect();
+    assert!(
+        reports.len() <= 1,
+        "one state report per hook: {requests:?}"
+    );
+    reports.first().map(|request| {
+        let params = &request["params"];
+        assert_eq!(params["source"], "herdr:claude");
+        assert_eq!(params["agent"], "claude");
+        assert_eq!(params["agent_session_id"], "claude-session");
+        (
+            params["state"].as_str().unwrap().to_string(),
+            params["blocked_reason"].as_str().map(str::to_string),
+            params["background"].as_bool().unwrap_or(false),
+        )
+    })
+}
+
+#[cfg(unix)]
+#[test]
+fn claude_state_hook_maps_events_to_states() {
+    let _lock = integration_env_lock();
+    let stop = |message: &str, tasks: serde_json::Value| {
+        json!({
+            "hook_event_name": "Stop",
+            "session_id": "claude-session",
+            "last_assistant_message": message,
+            "background_tasks": tasks,
+        })
+    };
+    let state = |payload: serde_json::Value| reported_state(&run_claude_hook("state", &payload));
+    let owned = |state: &str, reason: Option<&str>, background: bool| {
+        Some((state.to_string(), reason.map(str::to_string), background))
+    };
+
+    assert_eq!(
+        state(
+            json!({"hook_event_name": "UserPromptSubmit", "session_id": "claude-session", "prompt": "hi"})
+        ),
+        owned("working", None, false)
+    );
+    assert_eq!(
+        state(
+            json!({"hook_event_name": "PostToolUse", "session_id": "claude-session", "tool_name": "Bash"})
+        ),
+        owned("working", None, false)
+    );
+    assert_eq!(
+        state(
+            json!({"hook_event_name": "PreToolUse", "session_id": "claude-session", "tool_name": "AskUserQuestion"})
+        ),
+        owned("blocked", Some("form"), false)
+    );
+    assert_eq!(
+        state(
+            json!({"hook_event_name": "Notification", "session_id": "claude-session", "notification_type": "permission_prompt"})
+        ),
+        owned("blocked", Some("permission"), false)
+    );
+    assert_eq!(
+        state(
+            json!({"hook_event_name": "Notification", "session_id": "claude-session", "notification_type": "idle_prompt"})
+        ),
+        None
+    );
+    assert_eq!(
+        state(stop("Which one?\n\n⏳ awaiting your answer\n", json!([]))),
+        owned("blocked", Some("question"), false)
+    );
+    assert_eq!(
+        state(stop(
+            "Started it.\n\n🔄 awaiting background work",
+            json!([])
+        )),
+        owned("working", None, true)
+    );
+    assert_eq!(
+        state(stop(
+            "Delegated.",
+            json!([{"id": "a1", "type": "subagent", "status": "running"}])
+        )),
+        owned("working", None, true)
+    );
+    assert_eq!(
+        state(stop(
+            "Left a dev server running.",
+            json!([{"id": "b1", "type": "shell", "status": "running"}])
+        )),
+        owned("idle", None, false)
+    );
+    assert_eq!(
+        state(stop("⏳ awaiting your answer\nthen more text", json!([]))),
+        owned("idle", None, false)
+    );
+    assert_eq!(
+        state(json!({"hook_event_name": "StopFailure", "session_id": "claude-session"})),
+        owned("idle", None, false)
+    );
+    // A sub-agent's tool use is not the main turn.
+    assert_eq!(
+        state(
+            json!({"hook_event_name": "PostToolUse", "session_id": "claude-session", "agent_id": "a1", "tool_name": "Bash"})
+        ),
+        None
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn claude_state_hook_reads_the_transcript_without_last_assistant_message() {
+    let _lock = integration_env_lock();
+    let dir = unique_base();
+    fs::create_dir_all(&dir).unwrap();
+    let transcript = dir.join("transcript.jsonl");
+    let lines = [
+        json!({"type": "user", "message": {"content": "hi"}}),
+        json!({"type": "assistant", "message": {"content": [{"type": "text", "text": "Which?\n⏳ awaiting your answer"}]}}),
+        json!({"type": "assistant", "isSidechain": true, "message": {"content": [{"type": "text", "text": "sub-agent text"}]}}),
+    ];
+    fs::write(
+        &transcript,
+        lines
+            .iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+    .unwrap();
+
+    let requests = run_claude_hook(
+        "state",
+        &json!({"hook_event_name": "Stop", "session_id": "claude-session", "transcript_path": transcript}),
+    );
+
+    assert_eq!(
+        reported_state(&requests),
+        Some(("blocked".into(), Some("question".into()), false))
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn claude_session_hook_reports_idle_only_outside_compaction() {
+    let _lock = integration_env_lock();
+    for (source, expect_idle) in [("startup", true), ("clear", true), ("compact", false)] {
+        let requests = run_claude_hook(
+            "session",
+            &json!({"hook_event_name": "SessionStart", "session_id": "claude-session", "source": source}),
+        );
+        let session = requests
+            .iter()
+            .find(|request| request["method"] == "pane.report_agent_session")
+            .unwrap_or_else(|| panic!("{source}: no session report in {requests:?}"));
+        assert_eq!(session["params"]["session_start_source"], source);
+        let state = reported_state(&requests);
+        assert_eq!(
+            state,
+            expect_idle.then(|| ("idle".to_string(), None, false)),
+            "{source}"
+        );
+    }
 }

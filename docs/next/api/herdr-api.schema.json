@@ -39,6 +39,15 @@
     },
     "event": {
       "$defs": {
+        "AgentBlockedReason": {
+          "description": "What a blocked agent waits on.",
+          "enum": [
+            "question",
+            "permission",
+            "form"
+          ],
+          "type": "string"
+        },
         "AgentSessionInfo": {
           "properties": {
             "agent": {
@@ -671,6 +680,16 @@
                 "agent_status": {
                   "$ref": "#/schemas/event/$defs/AgentStatus"
                 },
+                "blocked_reason": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/schemas/event/$defs/AgentBlockedReason"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
                 "display_agent": {
                   "type": [
                     "string",
@@ -777,6 +796,16 @@
             },
             "agent_status": {
               "$ref": "#/schemas/event/$defs/AgentStatus"
+            },
+            "blocked_reason": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/event/$defs/AgentBlockedReason"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "cwd": {
               "type": [
@@ -1228,6 +1257,15 @@
     },
     "request": {
       "$defs": {
+        "AgentBlockedReason": {
+          "description": "What a blocked agent waits on.",
+          "enum": [
+            "question",
+            "permission",
+            "form"
+          ],
+          "type": "string"
+        },
         "AgentPromptParams": {
           "properties": {
             "target": {
@@ -2899,6 +2937,21 @@
                 "string",
                 "null"
               ]
+            },
+            "background": {
+              "description": "With `working`: the turn ended and work the agent started runs on.",
+              "type": "boolean"
+            },
+            "blocked_reason": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/request/$defs/AgentBlockedReason"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "With `blocked`: what the agent waits on."
             },
             "message": {
               "type": [
@@ -6328,6 +6381,15 @@
     },
     "subscription_event": {
       "$defs": {
+        "AgentBlockedReason": {
+          "description": "What a blocked agent waits on.",
+          "enum": [
+            "question",
+            "permission",
+            "form"
+          ],
+          "type": "string"
+        },
         "AgentStatus": {
           "enum": [
             "idle",
@@ -6348,6 +6410,16 @@
             },
             "agent_status": {
               "$ref": "#/schemas/subscription_event/$defs/AgentStatus"
+            },
+            "blocked_reason": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/subscription_event/$defs/AgentBlockedReason"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "display_agent": {
               "type": [
@@ -6542,6 +6614,15 @@
     },
     "success_response": {
       "$defs": {
+        "AgentBlockedReason": {
+          "description": "What a blocked agent waits on.",
+          "enum": [
+            "question",
+            "permission",
+            "form"
+          ],
+          "type": "string"
+        },
         "AgentInfo": {
           "properties": {
             "agent": {
@@ -6562,6 +6643,16 @@
             },
             "agent_status": {
               "$ref": "#/schemas/success_response/$defs/AgentStatus"
+            },
+            "blocked_reason": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/success_response/$defs/AgentBlockedReason"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "completion_seq": {
               "description": "The current idle transition completed work, independently of who has viewed it.",
@@ -7386,6 +7477,16 @@
                 "agent_status": {
                   "$ref": "#/schemas/success_response/$defs/AgentStatus"
                 },
+                "blocked_reason": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/schemas/success_response/$defs/AgentBlockedReason"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
                 "display_agent": {
                   "type": [
                     "string",
@@ -7887,6 +7988,16 @@
             },
             "agent_status": {
               "$ref": "#/schemas/success_response/$defs/AgentStatus"
+            },
+            "blocked_reason": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/success_response/$defs/AgentBlockedReason"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "cwd": {
               "type": [

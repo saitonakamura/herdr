@@ -3,6 +3,7 @@
 //! Each pane's live bottom-of-buffer text is read periodically and matched
 //! against known agent output patterns to determine state.
 
+pub(crate) mod composer;
 pub mod manifest;
 pub mod manifest_update;
 
@@ -17,6 +18,18 @@ pub enum AgentState {
     Blocked,
     /// Plain shell or unrecognized program.
     Unknown,
+}
+
+/// What a blocked agent waits on, when its integration says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BlockedReason {
+    /// A question asked in prose; the composer takes the answer.
+    Question,
+    /// A tool permission dialog.
+    Permission,
+    /// A form or selection dialog to fill in.
+    Form,
 }
 
 /// Screen-derived agent state plus confidence metadata used for source arbitration.
@@ -337,6 +350,12 @@ pub(crate) fn full_lifecycle_hook_authority(source: &str, agent_label: &str) -> 
             | ("herdr:kilo", "kilo")
             | ("herdr:kimi", "kimi")
     )
+}
+
+/// Integrations whose hooks decide the state while the screen still covers what
+/// hooks cannot see: dialogs, and a live turn that ended without a stop hook.
+pub(crate) fn screen_assisted_hook_authority(source: &str, agent_label: &str) -> bool {
+    matches!((source, agent_label), ("herdr:claude", "claude"))
 }
 
 pub(crate) fn session_identity_only_integration(source: &str, agent_label: &str) -> bool {

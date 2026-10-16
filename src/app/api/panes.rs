@@ -1580,6 +1580,10 @@ impl App {
             source: params.source.clone(),
             agent_label: agent_label.clone(),
             state: detect_state_from_api(params.state),
+            detail: crate::terminal::HookReportDetail {
+                blocked_reason: params.blocked_reason.map(Into::into),
+                background: params.background,
+            },
             message: params.message,
             seq: params.seq,
         });

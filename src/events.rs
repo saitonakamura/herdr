@@ -107,6 +107,7 @@ pub enum AppEvent {
         source: String,
         agent_label: String,
         state: AgentState,
+        detail: crate::terminal::HookReportDetail,
         message: Option<String>,
         seq: Option<u64>,
         session_ref: Option<crate::agent_resume::AgentSessionRef>,

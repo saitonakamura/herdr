@@ -1619,7 +1619,7 @@ fn prompt_box_top_border_index(lines: &[&str]) -> Option<usize> {
     None
 }
 
-fn is_horizontal_rule(line: &str) -> bool {
+pub(super) fn is_horizontal_rule(line: &str) -> bool {
     let trimmed = line.trim();
     if trimmed.is_empty() {
         return false;

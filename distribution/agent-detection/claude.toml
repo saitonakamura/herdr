@@ -1,7 +1,7 @@
 id = "claude"
-version = "2026.10.11.1"
-min_engine_version = 2
-updated_at = "2026-10-11T00:00:00Z"
+version = "2026.10.15.1"
+min_engine_version = 4
+updated_at = "2026-10-15T00:00:00Z"
 aliases = ["claude-code"]
 
 [[rules]]
@@ -19,6 +19,9 @@ state = "working"
 priority = 970
 region = "bottom_non_empty_lines(12)"
 visible_working = true
+# A completed turn (`✻ Cogitated for 17s`) ends the frame; a spinner left above
+# it is redraw residue, not a live turn (#4819).
+after_last_line_regex = ['^\s*[\x{002A}\x{00B7}\x{2722}\x{2733}\x{2736}\x{273B}\x{273D}]\s+\p{L}+ for \d+[hms](?:\s+\d+[hms])*(?:\s|·|$)']
 any = [
   { line_regex = ['^\s*[⏸⏵].*esc to interrupt(?:\s|·|$)'] },
   { line_regex = ['^\s*[\x{002A}\x{00B7}\x{2722}\x{2733}\x{2736}\x{273B}\x{273D}]\s+\S.*…(?:\s+\(\d+[smh](?:\s|·)|\s*$)'] },
@@ -64,7 +67,8 @@ line_regex = [
 [[rules]]
 id = "transcript_viewer"
 state = "unknown"
-priority = 1000
+# Above the dialog rules: a transcript can replay an answered dialog.
+priority = 1160
 region = "bottom_non_empty_lines(3)"
 skip_state_update = true
 contains = ["showing detailed transcript"]
@@ -79,7 +83,8 @@ any = [
 [[rules]]
 id = "live_blocked_form"
 state = "blocked"
-priority = 980
+# A dialog after the last rule is on screen now; the busy title can be stale (#3467).
+priority = 1150
 region = "after_last_horizontal_rule"
 visible_blocker = true
 contains = ["esc to cancel"]
@@ -97,7 +102,7 @@ any = [
 [[rules]]
 id = "live_blocked_form_named_session"
 state = "blocked"
-priority = 980
+priority = 1150
 region = "whole_recent"
 visible_blocker = true
 
@@ -112,6 +117,7 @@ state = "blocked"
 priority = 980
 region = "whole_recent"
 visible_blocker = true
+after_last_line_regex = ['^\s*[\x{002A}\x{00B7}\x{2722}\x{2733}\x{2736}\x{273B}\x{273D}]\s+\p{L}+ for \d+[hms](?:\s+\d+[hms])*(?:\s|·|$)']
 contains = ["run a dynamic workflow?", "esc to cancel"]
 
 [[rules]]
@@ -120,6 +126,7 @@ state = "blocked"
 priority = 980
 region = "whole_recent"
 visible_blocker = true
+after_last_line_regex = ['^\s*[\x{002A}\x{00B7}\x{2722}\x{2733}\x{2736}\x{273B}\x{273D}]\s+\p{L}+ for \d+[hms](?:\s+\d+[hms])*(?:\s|·|$)']
 # MCP elicitation dialogs (elicitation/create) show Accept/Decline controls
 # with an "Esc to cancel" footer but no Enter hint, so live_blocked_form
 # cannot see them (issue #3283). Gate on the invariant header line, the
@@ -166,6 +173,7 @@ state = "blocked"
 priority = 850
 region = "whole_recent"
 visible_blocker = true
+after_last_line_regex = ['^\s*[\x{002A}\x{00B7}\x{2722}\x{2733}\x{2736}\x{273B}\x{273D}]\s+\p{L}+ for \d+[hms](?:\s+\d+[hms])*(?:\s|·|$)']
 contains = ["do you want to proceed?"]
 any = [
   { contains = ["bash command"] },
@@ -193,7 +201,7 @@ all = [
 [[rules]]
 id = "generic_permission_prompt"
 state = "blocked"
-priority = 840
+priority = 1140
 region = "after_last_horizontal_rule"
 visible_blocker = true
 contains = ["do you want to proceed?", "esc to cancel"]
@@ -211,6 +219,7 @@ id = "legacy_no_prompt_blocker"
 state = "blocked"
 priority = 300
 region = "whole_recent"
+after_last_line_regex = ['^\s*[\x{002A}\x{00B7}\x{2722}\x{2733}\x{2736}\x{273B}\x{273D}]\s+\p{L}+ for \d+[hms](?:\s+\d+[hms])*(?:\s|·|$)']
 any = [
   { contains = ["do you want to"], any = [{ contains = ["yes"] }, { contains = ["❯"] }] },
   { contains = ["would you like to"], any = [{ contains = ["yes"] }, { contains = ["❯"] }] },

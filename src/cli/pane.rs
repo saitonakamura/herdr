@@ -816,6 +816,13 @@ mod tests {
                 true,
             ),
             (
+                vec!["issue-1", "--source", "screen", "--lines", "40"],
+                ReadSource::Screen,
+                Some(40),
+                ReadFormat::Text,
+                true,
+            ),
+            (
                 vec![
                     "--raw",
                     "issue-1",

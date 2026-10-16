@@ -51,3 +51,29 @@ server is in scope. Touching any other session's server is not.
 ## Parent
 
 [000-map](./000-map.md)
+
+## Resolution
+
+Draft, pending [PR #6](https://github.com/saitonakamura/herdr/pull/6) (`scripts/dogfood.sh` + FORK.md § Dogfooding).
+
+- **Binary**: `~/.local/opt/herdr-fork/bin/herdr`, installed by `scripts/dogfood.sh release|build|status`
+  (copy + rename, never `target/`, never `/opt/homebrew`). Installed now: `build 4 5` =
+  origin/master@2d4c4ada + fork/004-read-layer@45c0f1f3 + fork/005-state-consistency@f45dcbe2.
+  `--version` reads `0.9.5+fork.1` either way; `dogfood.sh status` tells builds apart.
+- **Launcher**: `hf` in the dotfiles `.zshrc` (07c89e2) attaches session `fork` with that binary.
+  It exports `HERDR_DOGFOOD_BIN`, which the end of `.zshrc` re-prepends in the session's panes,
+  because `.zprofile`'s `brew shellenv` puts `/opt/homebrew/bin` back in front. Other sessions
+  never set it, so their PATH is unchanged.
+- **loom lane**: already separate. loom names the lane after the session owning
+  `$HERDR_SOCKET_PATH`, so `loom doctor` in a `fork` pane says `lane: fork`. Efforts still file
+  under `pt:`.
+- **Override**: dotfiles `herdr-fork/005-state-consistency` merged into master (4475490). A
+  throwaway 0.9.4 session still loaded `claude.toml` 2026.08.13.3, and the fork build loads
+  `claude.v4.toml` 2026.10.15.2.
+- **Verified in `fork`**: `herdr config check` ok, `server agent-manifests`, `loom doctor` 15 ok,
+  and a claude pane went working → blocked (`awaiting_user_answer`) → done. `agent read --source
+  screen` works, and the brew CLI's `reload-agent-manifests` reaches the fork server.
+- **Shared with the 0.9.4 sessions**: the config root and the remote-manifest cache/status in
+  `~/.local/state/herdr` (the fork server refreshes the same upstream catalog; see 021).
+- **Gotcha**: a `fork` server started with a bare PATH runs loom's startup hook under
+  `/bin/bash` 3.2, which fails to parse `restore.sh`. `hf` from a kitty tab is fine.

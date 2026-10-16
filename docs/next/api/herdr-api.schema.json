@@ -3841,7 +3841,8 @@
             "visible",
             "recent",
             "recent_unwrapped",
-            "detection"
+            "detection",
+            "screen"
           ],
           "type": "string"
         },
@@ -6496,7 +6497,8 @@
             "visible",
             "recent",
             "recent_unwrapped",
-            "detection"
+            "detection",
+            "screen"
           ],
           "type": "string"
         },
@@ -9161,7 +9163,8 @@
             "visible",
             "recent",
             "recent_unwrapped",
-            "detection"
+            "detection",
+            "screen"
           ],
           "type": "string"
         },

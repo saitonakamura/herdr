@@ -717,6 +717,11 @@ impl App {
             .and_then(|ws| ws.pane_state(update.pane_id))
             .map(|pane| pane_agent_status(update.state, pane.seen))
             .unwrap_or_else(|| pane_agent_status(update.state, update.seen));
+        if agent_status == crate::api::schema::AgentStatus::Done {
+            self.published_done_panes.insert(update.pane_id);
+        } else {
+            self.published_done_panes.remove(&update.pane_id);
+        }
 
         if previous_agent_status != agent_status
             || update.previous_presentation != update.presentation
@@ -797,6 +802,20 @@ impl App {
         self.event_hub.push(event);
     }
 
+    /// Closing a tab or workspace closes its panes too; waiters and
+    /// subscribers watch panes, so each one gets its own `pane.closed`.
+    pub(super) fn emit_panes_closed(&mut self, pane_ids: Vec<String>, workspace_id: &str) {
+        for pane_id in pane_ids {
+            self.emit_event(crate::api::schema::EventEnvelope {
+                event: crate::api::schema::EventKind::PaneClosed,
+                data: crate::api::schema::EventData::PaneClosed {
+                    pane_id,
+                    workspace_id: workspace_id.to_string(),
+                },
+            });
+        }
+    }
+
     pub(crate) fn emit_pane_updated(&mut self, ws_idx: usize, pane_id: crate::layout::PaneId) {
         if let Some(pane) = self.pane_info(ws_idx, pane_id) {
             self.emit_event(crate::api::schema::EventEnvelope {
@@ -819,6 +838,25 @@ impl App {
 
     pub(crate) fn sync_focus_events(&mut self) {
         self.sync_focus_events_with_outer_event(None);
+    }
+
+    fn emit_acknowledged_done_panes(&mut self) {
+        if self.published_done_panes.is_empty() {
+            return;
+        }
+        let candidates: Vec<_> = self.published_done_panes.iter().copied().collect();
+        for pane_id in candidates {
+            let Some((ws_idx, pane)) = self.find_pane(pane_id) else {
+                self.published_done_panes.remove(&pane_id);
+                continue;
+            };
+            if !pane.seen {
+                continue;
+            }
+            if let Some(update) = self.state.acknowledged_done_update(ws_idx, pane_id) {
+                self.emit_pane_state_update(&update);
+            }
+        }
     }
 
     pub(crate) fn accept_current_focus_without_events(&mut self) {
@@ -877,6 +915,7 @@ impl App {
         &mut self,
         outer_event: Option<crate::ghostty::FocusEvent>,
     ) {
+        self.emit_acknowledged_done_panes();
         let current_focus = self.state.active.and_then(|idx| {
             self.state
                 .workspaces
@@ -2134,6 +2173,72 @@ mod tests {
                 }
             )));
         }
+    }
+
+    #[test]
+    fn acknowledging_a_done_pane_emits_its_idle_status() {
+        let event_hub = crate::api::EventHub::default();
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &crate::config::Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            event_hub.clone(),
+        );
+        let background = crate::workspace::Workspace::test_new("background");
+        let pane_id = background.tabs[0].root_pane;
+        let terminal_id = background.terminal_id(pane_id).cloned().unwrap();
+        app.state.workspaces = vec![crate::workspace::Workspace::test_new("active"), background];
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.outer_terminal_focus = Some(true);
+        app.state.terminals.get_mut(&terminal_id).unwrap().state = AgentState::Working;
+        let public_pane_id = app.public_pane_id(1, pane_id).unwrap();
+        let status_changes = |since: u64| {
+            event_hub
+                .events_after(since)
+                .into_iter()
+                .filter_map(|(_, event)| match event.data {
+                    crate::api::schema::EventData::PaneAgentStatusChanged {
+                        pane_id,
+                        agent_status,
+                        ..
+                    } if pane_id == public_pane_id => Some(agent_status),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+
+        app.handle_internal_event(AppEvent::StateChanged {
+            pane_id,
+            agent: Some(Agent::Pi),
+            state: AgentState::Idle,
+            visible_blocker: false,
+            visible_working: false,
+            process_exited: false,
+            observed_at: std::time::Instant::now(),
+        });
+        assert_eq!(status_changes(0), [crate::api::schema::AgentStatus::Done]);
+        let after_done = event_hub
+            .events_after(0)
+            .last()
+            .map_or(0, |(sequence, _)| *sequence);
+
+        app.state.switch_workspace(1);
+        app.sync_focus_events();
+
+        assert_eq!(
+            status_changes(after_done),
+            [crate::api::schema::AgentStatus::Idle]
+        );
+        app.sync_focus_events();
+        assert_eq!(
+            status_changes(after_done),
+            [crate::api::schema::AgentStatus::Idle],
+            "an acknowledgement is reported once"
+        );
     }
 
     #[test]

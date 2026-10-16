@@ -231,6 +231,34 @@ class AgentDetectionManifestCheckTests(unittest.TestCase):
             with self.assertRaisesRegex(check.CheckError, "requires min_engine_version 3"):
                 check.load_manifest_dir(bundled, engine_version=3)
 
+    def test_after_last_line_regex_requires_engine_four(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bundled = Path(tmp) / "bundled"
+            bundled.mkdir()
+            content = manifest("codex", "2026.06.10.1").replace(
+                'contains = ["ready"]',
+                "after_last_line_regex = ['^done$']\ncontains = [\"ready\"]",
+            )
+            (bundled / "codex.toml").write_text(content)
+
+            with self.assertRaisesRegex(check.CheckError, "requires min_engine_version 4"):
+                check.load_manifest_dir(bundled, engine_version=4)
+
+            (bundled / "codex.toml").write_text(
+                content.replace("min_engine_version = 1", "min_engine_version = 4")
+            )
+            check.load_manifest_dir(bundled, engine_version=4)
+
+    def test_after_last_line_regex_must_be_strings(self):
+        rule = {
+            "id": "test",
+            "state": "working",
+            "contains": ["ready"],
+            "after_last_line_regex": [1],
+        }
+        with self.assertRaisesRegex(check.CheckError, "array of strings"):
+            check.validate_rule(Path("test.toml"), 0, rule, {"gates": 0, "matchers": 0})
+
     def test_top_non_empty_lines_requires_canonical_positive_bounded_count(self):
         base_rule = {
             "id": "test",

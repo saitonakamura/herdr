@@ -179,6 +179,10 @@ struct ManifestRule {
     regex: Vec<String>,
     #[serde(default)]
     line_regex: Vec<String>,
+    /// Lines that start a new frame. The region is cut to the text after the
+    /// last such line, so output a newer frame replaced cannot match.
+    #[serde(default)]
+    after_last_line_regex: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -201,6 +205,9 @@ struct ManifestGate {
 #[derive(Debug, Clone)]
 struct CompiledRule {
     gate: CompiledGate,
+    after_last_line: Vec<Regex>,
+    // Folding costs a pass over the region; most rules match by regex alone.
+    uses_contains: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -443,7 +450,8 @@ fn evaluate_loaded_manifest(
         .iter()
         .zip(loaded.compiled_rules.iter())
     {
-        let region_text = region(input, &rule.region);
+        let region_text =
+            after_last_matching_line(region(input, &rule.region), &compiled_rule.after_last_line);
         let matched_rule = compiled_rule_matches(compiled_rule, region_text);
         evaluated_rules.push(EvaluatedRule {
             id: rule.id.clone(),
@@ -956,9 +964,46 @@ fn validate_manifest(manifest: &AgentManifest) -> Result<(), String> {
         }
         validate_rule_gate(rule, &mut complexity)
             .map_err(|err| format!("rule {} has invalid matcher gates: {err}", rule.id))?;
+        validate_after_last_line(rule, manifest.min_engine_version)?;
     }
 
     Ok(())
+}
+
+const AFTER_LAST_LINE_REGEX_ENGINE_VERSION: u32 = 4;
+
+fn validate_after_last_line(
+    rule: &ManifestRule,
+    min_engine_version: Option<u32>,
+) -> Result<(), String> {
+    let patterns = &rule.after_last_line_regex;
+    if patterns.is_empty() {
+        return Ok(());
+    }
+    if min_engine_version.is_some_and(|version| version < AFTER_LAST_LINE_REGEX_ENGINE_VERSION) {
+        return Err(format!(
+            "rule {} uses after_last_line_regex but min_engine_version is below {}",
+            rule.id, AFTER_LAST_LINE_REGEX_ENGINE_VERSION
+        ));
+    }
+    if patterns.len() > MAX_MATCHERS_PER_GATE {
+        return Err(format!(
+            "rule {} has {} after_last_line_regex patterns, max is {MAX_MATCHERS_PER_GATE}",
+            rule.id,
+            patterns.len()
+        ));
+    }
+    if patterns
+        .iter()
+        .any(|pattern| pattern.chars().count() > MAX_MATCHER_CHARS)
+    {
+        return Err(format!(
+            "rule {} after_last_line_regex pattern exceeds max length {MAX_MATCHER_CHARS}",
+            rule.id
+        ));
+    }
+    validate_regex_patterns(patterns, "rule", "after_last_line_regex")
+        .map_err(|err| format!("rule {} is invalid: {err}", rule.id))
 }
 
 #[derive(Default)]
@@ -1117,11 +1162,21 @@ fn validate_region_name(spec: &str) -> Result<(), String> {
 }
 
 fn override_path(agent: Agent) -> Option<PathBuf> {
-    Some(
-        crate::config::config_dir()
-            .join("agent-detection")
-            .join(format!("{}.toml", agent_label(agent))),
-    )
+    let dir = crate::config::config_dir().join("agent-detection");
+    Some(override_path_in(&dir, agent_label(agent), |path| {
+        path.exists()
+    }))
+}
+
+/// `<agent>.v<N>.toml` is an override for engine N and newer. One config tree
+/// can then serve hosts on different engines: each takes the newest file its
+/// engine can read, and older builds only ever read `<agent>.toml`.
+fn override_path_in(dir: &Path, label: &str, exists: impl Fn(&Path) -> bool) -> PathBuf {
+    (1..=super::manifest_update::MANIFEST_ENGINE_VERSION)
+        .rev()
+        .map(|engine| dir.join(format!("{label}.v{engine}.toml")))
+        .find(|path| exists(path))
+        .unwrap_or_else(|| dir.join(format!("{label}.toml")))
 }
 
 fn remote_update_status(agent: Agent) -> Option<super::manifest_update::AgentRemoteStatus> {
@@ -1154,10 +1209,20 @@ fn compile_manifest(manifest: &AgentManifest) -> Result<Vec<CompiledRule>, Strin
     manifest
         .rules
         .iter()
-        .map(|rule| {
-            compile_gate(&manifest_gate_from_rule(rule))
-                .map(|gate| CompiledRule { gate })
-                .map_err(|err| format!("rule {} could not be compiled: {err}", rule.id))
+        .map(|rule| -> Result<CompiledRule, String> {
+            let gate = compile_gate(&manifest_gate_from_rule(rule))
+                .map_err(|err| format!("rule {} could not be compiled: {err}", rule.id))?;
+            let after_last_line = rule
+                .after_last_line_regex
+                .iter()
+                .map(|pattern| Regex::new(pattern).map_err(|err| err.to_string()))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|err| format!("rule {} could not be compiled: {err}", rule.id))?;
+            Ok(CompiledRule {
+                uses_contains: gate_uses_contains(&gate),
+                gate,
+                after_last_line,
+            })
         })
         .collect()
 }
@@ -1182,7 +1247,7 @@ fn compile_gate(gate: &ManifestGate) -> Result<CompiledGate, String> {
         contains: gate
             .contains
             .iter()
-            .map(|needle| needle.to_lowercase())
+            .map(|needle| fold_for_contains(needle))
             .collect(),
         regex: gate
             .regex
@@ -1198,8 +1263,64 @@ fn compile_gate(gate: &ManifestGate) -> Result<CompiledGate, String> {
 }
 
 fn compiled_rule_matches(rule: &CompiledRule, text: &str) -> bool {
-    let lower_text = text.to_lowercase();
-    compiled_gate_matches(&rule.gate, text, &lower_text)
+    let folded_text = if rule.uses_contains {
+        fold_for_contains(text)
+    } else {
+        String::new()
+    };
+    compiled_gate_matches(&rule.gate, text, &folded_text)
+}
+
+fn gate_uses_contains(gate: &CompiledGate) -> bool {
+    !gate.contains.is_empty()
+        || gate
+            .all
+            .iter()
+            .chain(&gate.any)
+            .chain(&gate.not_gate)
+            .any(gate_uses_contains)
+}
+
+/// Lowercases and collapses every whitespace run, line breaks included, to one
+/// space, so a `contains` phrase still matches after the agent wraps it.
+fn fold_for_contains(text: &str) -> String {
+    let mut folded = String::with_capacity(text.len());
+    let mut in_whitespace = false;
+    for ch in text.chars() {
+        if ch.is_whitespace() {
+            if !in_whitespace {
+                folded.push(' ');
+                in_whitespace = true;
+            }
+            continue;
+        }
+        in_whitespace = false;
+        if ch.is_ascii() {
+            folded.push(ch.to_ascii_lowercase());
+        } else {
+            folded.extend(ch.to_lowercase());
+        }
+    }
+    folded
+}
+
+fn after_last_matching_line<'a>(text: &'a str, frame_starts: &[Regex]) -> &'a str {
+    if frame_starts.is_empty() {
+        return text;
+    }
+    // Walk up from the bottom: the newest frame start is usually close to it.
+    let mut line_end = text.len();
+    loop {
+        let line_start = text[..line_end].rfind('\n').map_or(0, |index| index + 1);
+        let line = text[line_start..line_end].trim_end_matches('\r');
+        if frame_starts.iter().any(|regex| regex.is_match(line)) {
+            return text.get(line_end + 1..).unwrap_or("");
+        }
+        if line_start == 0 {
+            return text;
+        }
+        line_end = line_start - 1;
+    }
 }
 
 fn rule_evidence(rule: &ManifestRule, region_text: &str) -> RuleEvidence {

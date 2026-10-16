@@ -31,3 +31,23 @@ manifests come from: upstream's still arrive, through the sync.
 ## Parent
 
 [000-map](./000-map.md)
+
+## Resolution
+
+Draft, pending merge of [saitonakamura/herdr#7](https://github.com/saitonakamura/herdr/pull/7).
+
+- Fork builds' default catalog is
+  `https://raw.githubusercontent.com/saitonakamura/herdr/master/distribution/agent-detection/index.toml`.
+  No generation step: upstream already publishes `distribution/agent-detection/`, and
+  `scripts/agent_detection_manifest_check.py` keeps it in step with
+  `src/detect/manifests/` (published ≥ bundled, same version ⇒ same bytes).
+- A fork-only `fork-agent-detection` job in `distribution.yml` (upstream's `validate`
+  job needs upstream release tags the fork lacks) runs that check, so a fork manifest fix
+  must bump the version and update both copies.
+- FORK.md: the sync recipe runs the manifest check; a new "Detection manifests" section
+  covers both copies, sync conflicts and override precedence.
+- The env var still overrides the URL. Local overrides still win: precedence doesn't
+  depend on the URL, and `local_override_shadows_cached_remote_manifest` covers it.
+- Live check: an isolated debug build fetched all 22 manifests from the raw URL,
+  byte-identical to the catalog.
+- Nothing in loom or the dotfiles references the catalog URL; no on-box steps.

@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-dogfood-side-session
 title: Dogfood the fork in a side session on the primary mac
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee:
-claimed_by:
+claimed_by: macos/w6:p7/887cbe33-85f2-4472-9564-edde9c7fabab
 ---
 
 ## Question

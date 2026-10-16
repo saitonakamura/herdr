@@ -24,6 +24,7 @@ mod api;
 mod completion;
 mod integration;
 mod machine;
+pub(crate) mod message;
 pub(crate) mod notification;
 pub(crate) mod pane;
 pub(crate) mod plugin;
@@ -131,6 +132,7 @@ pub fn maybe_run(args: &[String]) -> std::io::Result<CommandOutcome> {
         "tab" => tab::run_tab_command(&args[2..])?,
         "notification" => notification::run_notification_command(&args[2..])?,
         "agent" => agent::run_agent_command(&args[2..])?,
+        "message" => message::run_message_command(&args[2..])?,
         "terminal" => run_terminal_command(&args[2..])?,
         "pane" => pane::run_pane_command(&args[2..])?,
         "plugin" => plugin::run_plugin_command(&args[2..])?,
@@ -150,6 +152,7 @@ fn api_group(name: &str) -> Option<clap::Command> {
         "tab" => tab::command(),
         "notification" => notification::command(),
         "agent" => agent::command(),
+        "message" => message::command(),
         "pane" => pane::command(),
         "plugin" => plugin::command(),
         _ => return None,

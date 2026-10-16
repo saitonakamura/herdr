@@ -5,6 +5,7 @@ pub mod commands;
 pub mod common;
 pub mod events;
 pub mod integrations;
+pub mod messages;
 pub(crate) mod operations;
 pub mod panes;
 pub mod plugins;
@@ -20,6 +21,7 @@ pub use commands::*;
 pub use common::*;
 pub use events::*;
 pub use integrations::*;
+pub use messages::*;
 pub use panes::*;
 pub use plugins::*;
 pub use response::*;
@@ -146,6 +148,10 @@ operations::define_operations! {
     PluginPaneOpen(PluginPaneOpenParams) => "plugin.pane.open", true, false;
     PluginPaneFocus(PluginPaneFocusParams) => "plugin.pane.focus", true, false;
     PluginPaneClose(PluginPaneCloseParams) => "plugin.pane.close", true, false;
+    MessageSend(MessageSendParams) => "message.send", false, false;
+    MessageList(MessageListParams) => "message.list", false, false;
+    MessageGet(MessageTarget) => "message.get", false, false;
+    MessageWithdraw(MessageTarget) => "message.withdraw", false, false;
 }
 
 #[cfg(test)]

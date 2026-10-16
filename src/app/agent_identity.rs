@@ -62,6 +62,12 @@ impl App {
                 changed.push(terminal_id.clone());
             }
         }
+        let dropped = self.state.messages.retain_recipients(&live);
+        if dropped > 0 {
+            tracing::info!(dropped, "dropped messages to agents that are gone");
+            self.state.mark_session_dirty();
+            self.schedule_session_save();
+        }
         if changed.is_empty() {
             return;
         }
@@ -196,7 +202,7 @@ impl App {
     }
 
     /// An agent id, a pane id (with or without an agent), or an agent name.
-    fn resolve_agent_identity_target(
+    pub(super) fn resolve_agent_identity_target(
         &self,
         target: &str,
     ) -> Result<(usize, crate::layout::PaneId, TerminalId), AgentParentError> {

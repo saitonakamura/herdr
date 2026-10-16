@@ -26,6 +26,11 @@ pub struct SessionSnapshot {
     pub sidebar_section_split: Option<f32>,
     #[serde(default)]
     pub collapsed_space_keys: std::collections::HashSet<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::app::messages::MessageStore::is_empty"
+    )]
+    pub messages: crate::app::messages::MessageStore,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -202,6 +207,8 @@ struct RawSessionSnapshot {
     sidebar_section_split: Option<f32>,
     #[serde(default)]
     collapsed_space_keys: std::collections::HashSet<String>,
+    #[serde(default)]
+    messages: crate::app::messages::MessageStore,
 }
 
 fn migrate_snapshot(raw: RawSessionSnapshot) -> Result<SessionSnapshot, String> {
@@ -217,6 +224,7 @@ fn migrate_snapshot(raw: RawSessionSnapshot) -> Result<SessionSnapshot, String> 
         sidebar_width: raw.sidebar_width,
         sidebar_section_split: raw.sidebar_section_split,
         collapsed_space_keys: raw.collapsed_space_keys,
+        messages: raw.messages,
     })
 }
 
@@ -288,6 +296,7 @@ pub fn capture(
         sidebar_width: None,
         sidebar_section_split: None,
         collapsed_space_keys: std::collections::HashSet::new(),
+        messages: Default::default(),
     }
 }
 
@@ -419,6 +428,10 @@ pub(super) fn layout_fingerprint(snapshot: &SessionSnapshot) -> Option<String> {
     let mut collapsed: Vec<_> = snapshot.collapsed_space_keys.iter().collect();
     collapsed.sort_unstable();
     value["collapsed_space_keys"] = serde_json::to_value(collapsed).ok()?;
+    // Messages are not layout; a message arriving must not orphan saved pane history.
+    if let Some(object) = value.as_object_mut() {
+        object.remove("messages");
+    }
     let bytes = serde_json::to_vec(&value).ok()?;
     Some(format!("{:x}", Sha256::digest(bytes)))
 }
@@ -664,6 +677,34 @@ mod tests {
     }
 
     #[test]
+    fn messages_round_trip_and_leave_the_layout_fingerprint_alone() {
+        let mut snapshot = parse_snapshot(include_str!(
+            "../../tests/fixtures/session/current-herdr-session.json"
+        ))
+        .unwrap();
+        let without_messages = layout_fingerprint(&snapshot).unwrap();
+        snapshot.messages.push(crate::app::messages::NewMessage {
+            kind: crate::api::schema::MessageKind::Report,
+            from: crate::terminal::AgentId::parse("1234abcd"),
+            from_name: "worker".into(),
+            to: crate::terminal::AgentId::parse("2345bcde").unwrap(),
+            summary: "done".into(),
+            body: Some("details".into()),
+            reply_to: None,
+            sent_at_ms: 1,
+        });
+
+        let restored = parse_snapshot(&serde_json::to_string(&snapshot).unwrap()).unwrap();
+
+        assert_eq!(restored.messages, snapshot.messages);
+        assert_eq!(restored.messages.iter().next().unwrap().summary, "done");
+        assert_eq!(
+            layout_fingerprint(&restored).as_deref(),
+            Some(without_messages.as_str())
+        );
+    }
+
+    #[test]
     fn round_trip_empty_session() {
         let snap = SessionSnapshot {
             version: SNAPSHOT_VERSION,
@@ -673,6 +714,7 @@ mod tests {
             sidebar_width: Some(26),
             sidebar_section_split: Some(0.5),
             collapsed_space_keys: std::collections::HashSet::new(),
+            messages: Default::default(),
         };
         let json = serde_json::to_string(&snap).unwrap();
         let restored = parse_snapshot(&json).unwrap();
@@ -767,6 +809,7 @@ mod tests {
             sidebar_width: Some(26),
             sidebar_section_split: Some(0.5),
             collapsed_space_keys: std::collections::HashSet::new(),
+            messages: Default::default(),
             version: SNAPSHOT_VERSION,
         };
 
@@ -1541,6 +1584,7 @@ mod tests {
             sidebar_width: Some(26),
             sidebar_section_split: Some(0.5),
             collapsed_space_keys: std::collections::HashSet::new(),
+            messages: Default::default(),
         };
 
         let json = serde_json::to_string(&snap).unwrap();

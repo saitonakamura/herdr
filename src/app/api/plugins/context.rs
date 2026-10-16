@@ -185,6 +185,15 @@ impl App {
                     context.focused_pane_id = Some(pane_id.clone());
                     context
                 }),
+            EventData::MessageQueued { message } | EventData::MessageDelivered { message } => {
+                crate::terminal::AgentId::parse(&message.to_agent_id)
+                    .and_then(|agent_id| self.terminal_with_agent_id(&agent_id))
+                    .and_then(|terminal_id| self.pane_for_terminal(&terminal_id))
+                    .map(|(ws_idx, pane_id)| {
+                        self.plugin_context_for_pane(ws_idx, pane_id, correlation_id)
+                    })
+                    .unwrap_or_else(|| empty_plugin_context(correlation_id))
+            }
         }
     }
 

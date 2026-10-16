@@ -20,6 +20,7 @@ mod creation;
 mod custom_commands;
 mod git_refresh;
 mod ids;
+pub(crate) mod messages;
 mod popup;
 mod runtime;
 mod session;
@@ -427,6 +428,10 @@ impl App {
         let session_writer = Arc::new(std::sync::Mutex::new(crate::persist::SessionWriter::new(
             policy.restore_session && snapshot.is_none(),
         )));
+        let restored_messages = snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.messages.clone())
+            .unwrap_or_default();
         let (workspaces, active, selected) = if let Some(snap) = snapshot {
             let history = config
                 .experimental
@@ -585,6 +590,9 @@ impl App {
             terminal_runtime_shutdowns: Vec::new(),
             // Restored identities may name parents whose panes did not come back.
             agent_identities_dirty: true,
+            messages: restored_messages,
+            message_delivery_due: true,
+            message_delivery_attempts: std::collections::HashMap::new(),
         };
 
         state.terminals = restored_terminals;
@@ -739,6 +747,9 @@ impl App {
         app.state.workspaces = workspaces;
         app.state.terminals = terminals;
         app.terminal_runtimes = runtimes.into();
+        app.state.messages = snapshot.messages.clone();
+        app.state.message_delivery_due = true;
+        app.state.agent_identities_dirty = true;
         app.state.active = snapshot
             .active
             .filter(|&idx| idx < app.state.workspaces.len());

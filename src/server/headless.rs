@@ -494,6 +494,9 @@ impl HeadlessServer {
             if self.app.state.agent_identities_dirty {
                 self.app.sync_agent_identities();
             }
+            if self.app.state.message_delivery_due {
+                self.app.deliver_pending_messages();
+            }
             self.app.sync_session_save_schedule();
 
             // 4. Accept new client connections.

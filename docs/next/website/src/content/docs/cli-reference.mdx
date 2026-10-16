@@ -378,6 +378,21 @@ An agent's parent is the agent that started it, shown as `parent_agent_id`. Set 
 
 Use `pane send-text`, `pane send-keys`, `pane run`, and `terminal attach` for ordinary terminals, servers, tests, shells, or low-level terminal control. Use `pane run` when you want to submit a command with Enter.
 
+## Messages
+
+```bash
+herdr message send <to> <summary> [--kind report|reply|tell] [--body TEXT|--body-file PATH] [--from TARGET|--user] [--reply-to MESSAGE_ID]
+herdr message list [--to TARGET] [--from TARGET] [--pending]
+herdr message show <message-id> [--json]
+herdr message withdraw <message-id>
+```
+
+A message is text one agent sends another through Herdr: a `report` upward, a `reply` to a report, or a `tell` downward. Herdr stores the text and does not enforce the direction; the kind is the sender's label. `<to>`, `--to` and `--from` targets are agent IDs, agent names or pane IDs, and a pane without an agent ID gets one, as with `agent set-parent`. `send` defaults to a `tell` from the calling pane (`HERDR_PANE_ID`); `--user` sends it as the user, which also happens when the CLI runs outside a pane. `--body-file -` reads the body from standard input.
+
+Each agent has its own queue. Herdr types a message into the recipient's pane as one line, `[from <name>] <summary> (herdr message show <id>)`, when the recipient is `idle` with nothing typed in its composer, or `blocked` on a `question` with an empty composer. Otherwise the message waits, and pending messages go oldest first, at most one each time the recipient's state changes, so a line is never typed over a draft, into a permission dialog, or while the previous message is still being taken up. A pane with no detected agent keeps its messages queued. `<name>` is the sender's agent name when it was sent, else its agent ID, or `user`. `send` reports whether the message was delivered at once.
+
+`show` prints the header, summary and body as text; `--json` prints the API response. `list` prints messages oldest first. `withdraw` removes a message that is still pending and refuses one already delivered. Herdr keeps pending messages until they are delivered or withdrawn and the most recent 500 delivered ones; messages to an agent are dropped when its pane closes. Messages persist with the session, and changes are published as `message.queued` and `message.delivered` events.
+
 ## Direct terminal attach
 
 ```bash

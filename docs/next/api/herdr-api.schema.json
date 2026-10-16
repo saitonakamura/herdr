@@ -742,6 +742,38 @@
                 "layout"
               ],
               "type": "object"
+            },
+            {
+              "properties": {
+                "message": {
+                  "$ref": "#/schemas/event/$defs/MessageInfo"
+                },
+                "type": {
+                  "const": "message_queued",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "message"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "message": {
+                  "$ref": "#/schemas/event/$defs/MessageInfo"
+                },
+                "type": {
+                  "const": "message_delivered",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "message"
+              ],
+              "type": "object"
             }
           ]
         },
@@ -772,9 +804,104 @@
             "pane_exited",
             "pane_agent_detected",
             "pane_agent_status_changed",
-            "layout_updated"
+            "layout_updated",
+            "message_queued",
+            "message_delivered"
           ],
           "type": "string"
+        },
+        "MessageInfo": {
+          "properties": {
+            "body": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "delivered_at_ms": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "from_agent_id": {
+              "description": "Absent when the user sent it.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "from_name": {
+              "description": "The sender's agent name when it was sent, else its agent id, or `user`.",
+              "type": "string"
+            },
+            "kind": {
+              "$ref": "#/schemas/event/$defs/MessageKind"
+            },
+            "message_id": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "reply_to": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "sent_at_ms": {
+              "description": "Unix time in milliseconds.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "state": {
+              "$ref": "#/schemas/event/$defs/MessageState"
+            },
+            "summary": {
+              "type": "string"
+            },
+            "to_agent_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "message_id",
+            "kind",
+            "state",
+            "from_name",
+            "to_agent_id",
+            "summary",
+            "sent_at_ms"
+          ],
+          "type": "object"
+        },
+        "MessageKind": {
+          "description": "What a message is to its recipient: a `report` upward, a `reply` to a report,\nor a `tell` downward. Herdr does not enforce the direction.",
+          "enum": [
+            "report",
+            "reply",
+            "tell"
+          ],
+          "type": "string"
+        },
+        "MessageState": {
+          "oneOf": [
+            {
+              "const": "pending",
+              "description": "Waiting for the recipient to be idle, or blocked on a question with an empty composer.",
+              "type": "string"
+            },
+            {
+              "const": "delivered",
+              "description": "Its line was typed into the recipient's pane.",
+              "type": "string"
+            }
+          ]
         },
         "PaneInfo": {
           "properties": {
@@ -2449,6 +2576,95 @@
           "required": [
             "path",
             "ratio"
+          ],
+          "type": "object"
+        },
+        "MessageKind": {
+          "description": "What a message is to its recipient: a `report` upward, a `reply` to a report,\nor a `tell` downward. Herdr does not enforce the direction.",
+          "enum": [
+            "report",
+            "reply",
+            "tell"
+          ],
+          "type": "string"
+        },
+        "MessageListParams": {
+          "properties": {
+            "from": {
+              "description": "Only messages from this agent id, agent name, or pane id.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "pending": {
+              "description": "Only messages not yet delivered.",
+              "type": "boolean"
+            },
+            "to": {
+              "description": "Only messages to this agent id, agent name, or pane id.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "type": "object"
+        },
+        "MessageSendParams": {
+          "properties": {
+            "body": {
+              "description": "The rest of the message, shown by `message.get`.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "from": {
+              "description": "Sender: agent id, agent name, or pane id. Omit to send as the user.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "$ref": "#/schemas/request/$defs/MessageKind",
+              "default": "tell"
+            },
+            "reply_to": {
+              "description": "The message this one answers.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "summary": {
+              "description": "One line, typed into the recipient's pane on delivery.",
+              "type": "string"
+            },
+            "to": {
+              "description": "Recipient: agent id, agent name, or pane id. A pane without an agent gets an agent id.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "to",
+            "summary"
+          ],
+          "type": "object"
+        },
+        "MessageTarget": {
+          "properties": {
+            "message_id": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "message_id"
           ],
           "type": "object"
         },
@@ -4374,6 +4590,30 @@
               "properties": {
                 "type": {
                   "const": "layout.updated",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "message.queued",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "message.delivered",
                   "type": "string"
                 }
               },
@@ -6442,6 +6682,70 @@
             "params"
           ],
           "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "message.send",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/MessageSendParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "message.list",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/MessageListParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "message.get",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/MessageTarget"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "message.withdraw",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/MessageTarget"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
         }
       ],
       "properties": {
@@ -7629,6 +7933,38 @@
                 "layout"
               ],
               "type": "object"
+            },
+            {
+              "properties": {
+                "message": {
+                  "$ref": "#/schemas/success_response/$defs/MessageInfo"
+                },
+                "type": {
+                  "const": "message_queued",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "message"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "message": {
+                  "$ref": "#/schemas/success_response/$defs/MessageInfo"
+                },
+                "type": {
+                  "const": "message_delivered",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "message"
+              ],
+              "type": "object"
             }
           ]
         },
@@ -7674,7 +8010,9 @@
             "pane_exited",
             "pane_agent_detected",
             "pane_agent_status_changed",
-            "layout_updated"
+            "layout_updated",
+            "message_queued",
+            "message_delivered"
           ],
           "type": "string"
         },
@@ -7964,6 +8302,99 @@
                 "second"
               ],
               "type": "object"
+            }
+          ]
+        },
+        "MessageInfo": {
+          "properties": {
+            "body": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "delivered_at_ms": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "from_agent_id": {
+              "description": "Absent when the user sent it.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "from_name": {
+              "description": "The sender's agent name when it was sent, else its agent id, or `user`.",
+              "type": "string"
+            },
+            "kind": {
+              "$ref": "#/schemas/success_response/$defs/MessageKind"
+            },
+            "message_id": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "reply_to": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "sent_at_ms": {
+              "description": "Unix time in milliseconds.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "state": {
+              "$ref": "#/schemas/success_response/$defs/MessageState"
+            },
+            "summary": {
+              "type": "string"
+            },
+            "to_agent_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "message_id",
+            "kind",
+            "state",
+            "from_name",
+            "to_agent_id",
+            "summary",
+            "sent_at_ms"
+          ],
+          "type": "object"
+        },
+        "MessageKind": {
+          "description": "What a message is to its recipient: a `report` upward, a `reply` to a report,\nor a `tell` downward. Herdr does not enforce the direction.",
+          "enum": [
+            "report",
+            "reply",
+            "tell"
+          ],
+          "type": "string"
+        },
+        "MessageState": {
+          "oneOf": [
+            {
+              "const": "pending",
+              "description": "Waiting for the recipient to be idle, or blocked on a question with an empty composer.",
+              "type": "string"
+            },
+            {
+              "const": "delivered",
+              "description": "Its line was typed into the recipient's pane.",
+              "type": "string"
             }
           ]
         },
@@ -10631,6 +11062,41 @@
               },
               "required": [
                 "type"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "message": {
+                  "$ref": "#/schemas/success_response/$defs/MessageInfo"
+                },
+                "type": {
+                  "const": "message_info",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "message"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "messages": {
+                  "items": {
+                    "$ref": "#/schemas/success_response/$defs/MessageInfo"
+                  },
+                  "type": "array"
+                },
+                "type": {
+                  "const": "message_list",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "messages"
               ],
               "type": "object"
             }

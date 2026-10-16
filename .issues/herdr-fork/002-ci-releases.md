@@ -1,14 +1,14 @@
 ---
 id: herdr-fork-ci-releases
 title: Fork CI builds and publishes releases
-status: in-progress
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
   - herdr-fork-sync-and-branch
 assignee: saitonakamura
-claimed_by: macos/w6:p3/78b5ca1a-5afc-4903-a949-deb1bda5aefa
+claimed_by: macos/78b5ca1a-5afc-4903-a949-deb1bda5aefa
 ---
 
 ## Question
@@ -31,7 +31,7 @@ Adapt upstream's `.github/workflows/release.yml` so a tag on the fork builds and
 
 ## Resolution
 
-_Draft, until [PR #3](https://github.com/saitonakamura/herdr/pull/3) merges._
+[PR #3](https://github.com/saitonakamura/herdr/pull/3), merged 2026-10-16 as `24cfd5c0`; first release [`v0.9.5+fork.1`](https://github.com/saitonakamura/herdr/releases/tag/v0.9.5%2Bfork.1) published the same day, assets verified against `SHA256SUMS`.
 
 - `.github/workflows/fork-release.yml`: a `v<upstream>+fork.N` tag publishes the five upstream asset names, plus `LICENSE`, `herdr-notices.tar.gz` and `SHA256SUMS`. A PR touching the file and `workflow_dispatch` are dry runs. Bare binaries can't carry the license, so it ships beside them.
 - `website-deploy`, `label-next-release-issues` and `distribution` are guarded to `herdrdev/herdr`; `release`, `preview` and `pr-gate` already were.

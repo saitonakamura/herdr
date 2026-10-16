@@ -1,7 +1,7 @@
 ---
 id: herdr-fork-tap-and-cutover
 title: Homebrew tap, Windows install, and the per-box cutover
-status: blocked
+status: open
 labels:
   - wayfinder:task
 parent: herdr-fork-map

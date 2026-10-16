@@ -844,6 +844,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(repo);
     }
 
+    #[cfg(unix)]
     fn create_worktree_with_post_create(
         name: &str,
         post_create: Vec<String>,

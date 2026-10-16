@@ -48,7 +48,7 @@ concurrency:
 
 jobs:
   validate:
-    if: github.repository == 'herdrdev/herdr'
+    if: github.repository == 'herdrdev/herdr' || github.repository == 'saitonakamura/herdr'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

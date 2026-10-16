@@ -22,3 +22,13 @@ Per ADR 0001. A workspace is a named container with no cwd of its own and never 
 ## Blocked by
 
 - herdr-fork-sync-and-branch
+
+## Resolution
+
+Draft, pending [saitonakamura/herdr#13](https://github.com/saitonakamura/herdr/pull/13); the ticket closes when it merges.
+
+- Every `Workspace` constructor names the workspace: the label, or else the starting cwd's basename (`fallback_label_from_cwd`, `~` for home), not the repo name. That covers `workspace create`, the TUI with the prompt off, the startup workspace, `pane move` into a new workspace and worktree workspaces opened without `--label`. The name no longer follows the root pane's cwd.
+- Upstream snapshots write an auto-named workspace as `custom_name: null`. The format is unchanged and still loads. On its first Git identity refresh after restore or handoff, such a workspace takes the label it was showing (the repo name) as its name and marks the session dirty. Smoke-tested in a throwaway session.
+- `ui.prompt_new_workspace_name` defaults to true. The prompt is prefilled with the basename and always sends the confirmed name.
+- Left for 016: `identity_cwd` and the workspace's branch and git facts. Left for 017: worktree child workspaces. Meanwhile, an unlabelled worktree workspace shows its checkout directory's name instead of its branch.
+- Nothing to change in loom or the dotfiles: loom always passes `--label`.

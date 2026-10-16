@@ -980,6 +980,8 @@ pub struct UiConfig {
     pub pane_gaps: bool,
     /// Show agent labels in split pane borders when no manual pane label is set. Default: false.
     pub show_agent_labels_on_pane_borders: bool,
+    /// Longest name a tab takes from its agent's title. Default: 24.
+    pub tab_name_max_length: NonZeroUsize,
     /// Hide the tab row when the workspace has one tab. Default: false.
     pub hide_tab_bar_when_single_tab: bool,
     /// Desktop tab row placement. Default: top.
@@ -1218,6 +1220,8 @@ impl Default for UiConfig {
             pane_scrollbars: true,
             pane_gaps: true,
             show_agent_labels_on_pane_borders: false,
+            tab_name_max_length: NonZeroUsize::new(crate::workspace::DEFAULT_TAB_NAME_MAX_LENGTH)
+                .expect("default tab name length is nonzero"),
             hide_tab_bar_when_single_tab: false,
             tab_bar_position: TabBarPositionConfig::Top,
             tab_bar_right: Vec::new(),

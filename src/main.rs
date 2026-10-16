@@ -311,6 +311,11 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Show detected/reported agent labels in split pane borders when no manual pane name is set.
 # show_agent_labels_on_pane_borders = false
 
+# Longest name a tab takes from its agent's title. A tab with exactly one agent
+# follows a slug of that agent's task title until it is renamed by hand;
+# renaming it to nothing or a bare number lets it follow again.
+# tab_name_max_length = 24
+
 # Hide the tab row when a workspace has exactly one tab.
 # New tabs can still be created with the configured keybinding.
 # hide_tab_bar_when_single_tab = false

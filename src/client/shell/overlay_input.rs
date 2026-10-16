@@ -975,7 +975,13 @@ impl ClientShellState {
                 tab_id,
                 auto_name,
                 original_name,
-            } => (!(trimmed.is_empty() || auto_name && trimmed == original_name)).then(|| {
+                // an empty name unpins a pinned tab; confirming the shown name never pins
+            } => (if trimmed.is_empty() {
+                !auto_name
+            } else {
+                !(auto_name && trimmed == original_name)
+            })
+            .then(|| {
                 crate::api::schema::Method::TabRename(crate::api::schema::TabRenameParams {
                     tab_id,
                     label: trimmed.to_owned(),

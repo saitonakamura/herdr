@@ -412,3 +412,27 @@ fn plain_and_ime_text_fill_every_field_on_a_report_all_host() {
         );
     }
 }
+
+#[test]
+fn clearing_a_pinned_tab_name_unpins_it() {
+    use crate::api::schema::Method;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut pinned = snapshot();
+    for tab in &mut pinned.tabs {
+        tab.custom_label = true;
+    }
+    state.set_snapshot(Box::new(pinned));
+    state.compose(106, 30).expect("initial shell");
+    state.open_rename_tab_overlay();
+    *editor(&mut state) = TextEditor::from("  ");
+
+    let result = press(&mut state, KeyCode::Enter, KeyModifiers::NONE);
+
+    let [ClientShellAction::Endpoint { request, .. }] = &result.actions[..] else {
+        panic!("clearing a pinned name should send a rename");
+    };
+    let Method::TabRename(params) = &request.method else {
+        panic!("wrong method");
+    };
+    assert_eq!(params.label, "");
+}

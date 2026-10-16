@@ -71,6 +71,7 @@ impl App {
 
         for (ws_idx, pane_id) in publish {
             self.emit_pane_updated(ws_idx, pane_id);
+            self.refresh_followed_tab_name(ws_idx, pane_id);
         }
 
         changes

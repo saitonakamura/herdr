@@ -70,4 +70,28 @@ pub struct TabInfo {
     pub focused: bool,
     pub pane_count: usize,
     pub agent_status: AgentStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label_source: Option<TabLabelSource>,
+}
+
+/// Where a tab's label comes from: a pinned name set by hand, its one agent's
+/// title, or its number.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TabLabelSource {
+    Pinned,
+    Following,
+    Number,
+    #[serde(other)]
+    Unknown,
+}
+
+impl From<crate::workspace::TabLabelSource> for TabLabelSource {
+    fn from(source: crate::workspace::TabLabelSource) -> Self {
+        match source {
+            crate::workspace::TabLabelSource::Pinned => Self::Pinned,
+            crate::workspace::TabLabelSource::Following => Self::Following,
+            crate::workspace::TabLabelSource::Number => Self::Number,
+        }
+    }
 }

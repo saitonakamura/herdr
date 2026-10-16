@@ -1000,6 +1000,12 @@
           "description": "Show agent labels in split pane borders when no manual pane label is set."
         },
         {
+          "key": "ui.tab_name_max_length",
+          "type": "integer",
+          "default": "24",
+          "description": "Longest name a tab takes from its agent's title. A tab with exactly one agent follows a slug of that agent's task title until renamed by hand; renaming it to nothing or a bare number lets it follow again."
+        },
+        {
           "key": "ui.hide_tab_bar_when_single_tab",
           "type": "boolean",
           "default": "false",

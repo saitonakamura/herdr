@@ -281,6 +281,7 @@ struct ServerCapabilitiesJson {
     surface_interest: bool,
     health_check: bool,
     ssh_agent_registration: bool,
+    worktree_post_create: bool,
 }
 
 #[derive(Serialize)]
@@ -327,6 +328,7 @@ fn server_status_json(server: &ServerRuntimeStatus) -> ServerStatusJson {
                     surface_interest: capabilities.surface_interest,
                     health_check: capabilities.health_check,
                     ssh_agent_registration: capabilities.ssh_agent_registration,
+                    worktree_post_create: capabilities.worktree_post_create,
                 }),
             compatible: protocol.map(|value| value == crate::protocol::PROTOCOL_VERSION),
             endpoint_compatible: capabilities.as_ref().and_then(|capabilities| {
@@ -425,6 +427,7 @@ mod tests {
                 surface_interest: true,
                 health_check: true,
                 ssh_agent_registration: false,
+                worktree_post_create: false,
             }),
         }
     }
@@ -434,6 +437,7 @@ mod tests {
         let server = running_server(Some("test"), None);
         let value = serde_json::to_value(server_status_json(&server)).unwrap();
         assert_eq!(value["capabilities"]["ssh_agent_registration"], false);
+        assert_eq!(value["capabilities"]["worktree_post_create"], false);
     }
 
     #[test]

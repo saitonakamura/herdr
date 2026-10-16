@@ -10450,6 +10450,11 @@
               "default": false,
               "description": "Whether this server supports explicit client-shell surface interest.",
               "type": "boolean"
+            },
+            "worktree_post_create": {
+              "default": false,
+              "description": "Runs `[worktrees] post_create` in each new checkout before opening it.",
+              "type": "boolean"
             }
           },
           "required": [

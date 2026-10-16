@@ -75,6 +75,7 @@ fn default_capabilities() -> Option<ServerCapabilities> {
         surface_interest: true,
         health_check: true,
         ssh_agent_registration: false,
+        worktree_post_create: true,
     })
 }
 
@@ -1397,6 +1398,7 @@ mod tests {
                 surface_interest: true,
                 health_check: true,
                 ssh_agent_registration: false,
+                worktree_post_create: false,
             }),
             None,
             None,

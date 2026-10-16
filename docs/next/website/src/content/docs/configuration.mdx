@@ -104,6 +104,15 @@ directory = "~/.herdr/worktrees"
 
 Herdr creates checkouts under `<directory>/<repo>/<branch-slug>`. For sibling-style checkouts, set this to a directory such as `~/Projects/herdr-worktrees`. Relative values are resolved to an absolute path when the app applies the config.
 
+Run a command in every new checkout before Herdr opens it, for example to copy gitignored files or install dependencies:
+
+```toml
+[worktrees]
+post_create = ["~/bin/seed-worktree", "--quiet"]
+```
+
+`post_create` is an argv list, not a shell string. It runs with the new checkout as its working directory and receives `HERDR_WORKTREE_PATH` (the checkout), `HERDR_WORKTREE_SOURCE` (the checkout it was created from) and `HERDR_WORKTREE_BRANCH`. It runs for checkouts created from the sidebar, the CLI and the socket API alike. If it exits non-zero, the create request fails with `worktree_post_create_failed` and the tail of its output; the checkout stays on disk and is not opened, so you can fix it and open it with `Open worktree...` or `herdr worktree open`. Servers that support it advertise `worktree_post_create` in their capabilities (`herdr status server --json`).
+
 Worktree actions are available from Git workspace rows. `New worktree` creates a checkout. It checks out an existing local branch when the entered branch exists; otherwise, it creates the branch. It then opens the checkout as a new Herdr workspace and groups it under the source workspace. `Open worktree...` lists existing Git worktree checkouts for that repo. Choosing an already-open checkout focuses it, while choosing a closed checkout opens it in the same group.
 
 Grouped worktrees still behave like normal Herdr workspaces: they can be focused, renamed, closed, and contain their own tabs and panes. The parent row is the original workspace. Closing the parent row closes the whole Herdr group, but it does not delete checkout folders or branches.

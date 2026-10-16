@@ -1,14 +1,14 @@
 ---
 id: herdr-fork-native-tab-names
 title: Tab names follow their agent natively
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
   - herdr-fork-sync-and-branch
 assignee:
-claimed_by:
+claimed_by: macos/w6:pC/42d898a1-1af6-4377-8ab9-69653d636787
 ---
 
 ## Question

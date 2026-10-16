@@ -704,6 +704,7 @@ mod tests {
 
     fn pane_info_with_scroll(scroll: Option<PaneScrollInfo>) -> PaneInfo {
         PaneInfo {
+            repo: None,
             blocked_reason: None,
             pane_id: "pane_1".into(),
             terminal_id: "terminal_1".into(),

@@ -105,7 +105,7 @@ mod tests {
         init_repo(&stale_cwd);
         init_repo(&live_cwd);
         state.workspaces[0].custom_name = None;
-        state.workspaces[0].identity_cwd = stale_cwd.clone();
+        state.workspaces[0].test_cwd = stale_cwd.clone();
         let mut terminal = TerminalState::new(terminal_id.clone(), stale_cwd);
         terminal.set_detected_state(Some(Agent::Codex), AgentState::Idle);
         state.terminals.insert(terminal_id.clone(), terminal);

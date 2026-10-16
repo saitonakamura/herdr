@@ -1137,6 +1137,7 @@ mod tests {
         agent_status: crate::api::schema::AgentStatus,
     ) -> crate::api::schema::PaneInfo {
         crate::api::schema::PaneInfo {
+            repo: None,
             blocked_reason: None,
             pane_id: pane_id.into(),
             terminal_id: "term_1".into(),

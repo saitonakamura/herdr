@@ -50,7 +50,7 @@ impl App {
         self.state
             .workspaces
             .get(ws_idx)?
-            .resolved_identity_cwd_from(&self.state.terminals, &self.terminal_runtimes)
+            .first_pane_cwd_from(&self.state.terminals, &self.terminal_runtimes)
     }
 
     pub(super) fn launch_cwd_for_pane_in_workspace(
@@ -364,6 +364,10 @@ impl App {
             agent_session: terminal_agent_session_info(terminal),
             agent_id: terminal.agent_id.as_ref().map(ToString::to_string),
             parent_agent_id: terminal.parent_agent_id.as_ref().map(ToString::to_string),
+            repo: terminal
+                .repo
+                .as_ref()
+                .and_then(crate::api::schema::PaneRepoInfo::from_repo),
             scroll: None,
             revision: terminal.revision,
         })

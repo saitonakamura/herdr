@@ -982,7 +982,9 @@ impl App {
                 .custom_name
                 .clone(),
             previous_worktree_space: self.state.workspaces[source_ws_idx].worktree_space.clone(),
-            identity_cwd: self.state.workspaces[source_ws_idx].identity_cwd.clone(),
+            name_cwd: self.state.workspaces[source_ws_idx]
+                .first_pane_cwd_from(&self.state.terminals, &self.terminal_runtimes)
+                .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| "/".into())),
         };
 
         if self.state.workspaces[source_ws_idx].tabs[source_tab_idx].zoomed {
@@ -1243,7 +1245,7 @@ impl App {
                 (target_ws_idx, target_tab_idx, moved_pane_id)
             }
             ResolvedPaneMoveDestination::NewWorkspace { label, tab_label } => {
-                let identity_cwd = self
+                let name_cwd = self
                     .state
                     .terminals
                     .get(&source_terminal_id)
@@ -1253,7 +1255,7 @@ impl App {
                 let workspace = crate::workspace::Workspace::from_existing_pane(
                     label,
                     tab_label,
-                    identity_cwd,
+                    name_cwd,
                     moved,
                     self.event_tx.clone(),
                     self.render_notify.clone(),
@@ -1382,7 +1384,7 @@ impl App {
             let mut workspace = crate::workspace::Workspace::from_existing_pane(
                 context.previous_workspace_label,
                 context.previous_tab_label,
-                context.identity_cwd,
+                context.name_cwd,
                 moved,
                 self.event_tx.clone(),
                 self.render_notify.clone(),
@@ -2247,7 +2249,8 @@ struct PaneMoveRecoveryContext {
     previous_workspace_label: Option<String>,
     previous_tab_label: Option<String>,
     previous_worktree_space: Option<crate::workspace::WorktreeSpaceMembership>,
-    identity_cwd: std::path::PathBuf,
+    /// Names the recreated workspace when it had no name.
+    name_cwd: std::path::PathBuf,
 }
 
 fn encode_unchanged_pane_move(
@@ -3880,7 +3883,7 @@ mod tests {
             previous_workspace_label: app.state.workspaces[0].custom_name.clone(),
             previous_tab_label: app.state.workspaces[0].tabs[0].custom_name.clone(),
             previous_worktree_space: app.state.workspaces[0].worktree_space.clone(),
-            identity_cwd: app.state.workspaces[0].identity_cwd.clone(),
+            name_cwd: app.state.workspaces[0].test_cwd.clone(),
         };
         let taken = app.state.workspaces[0]
             .take_pane_for_move(source)

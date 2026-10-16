@@ -851,6 +851,17 @@
                 "null"
               ]
             },
+            "repo": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/event/$defs/PaneRepoInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The Git checkout containing `cwd`; absent outside one or before its first refresh."
+            },
             "restore_error": {
               "type": [
                 "string",
@@ -1043,6 +1054,61 @@
             "direction",
             "ratio",
             "rect"
+          ],
+          "type": "object"
+        },
+        "PaneRepoInfo": {
+          "description": "Repo facts for the checkout containing a pane's cwd. Panes in one checkout\nshare one refresh.",
+          "properties": {
+            "ahead": {
+              "description": "Commits ahead of the branch's upstream; absent without an upstream.",
+              "format": "uint",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "behind": {
+              "description": "Commits behind the branch's upstream; absent without an upstream.",
+              "format": "uint",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "branch": {
+              "description": "The checked-out branch; absent on a detached HEAD.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "dirty": {
+              "description": "Changed paths (staged, unstaged, untracked). Counted only while a\nsidebar agent row shows `git_dirty`; absent otherwise.",
+              "format": "uint",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "is_linked_worktree": {
+              "type": "boolean"
+            },
+            "repo_name": {
+              "description": "The repository's name; for a linked worktree, its main checkout's name.",
+              "type": "string"
+            },
+            "root": {
+              "description": "The checkout's root directory.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "root",
+            "repo_name"
           ],
           "type": "object"
         },
@@ -6789,6 +6855,17 @@
                 "null"
               ]
             },
+            "repo": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/success_response/$defs/PaneRepoInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The Git checkout containing `cwd`; absent outside one or before its first refresh."
+            },
             "revision": {
               "format": "uint64",
               "minimum": 0,
@@ -8133,6 +8210,17 @@
                 "null"
               ]
             },
+            "repo": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/success_response/$defs/PaneRepoInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The Git checkout containing `cwd`; absent outside one or before its first refresh."
+            },
             "restore_error": {
               "type": [
                 "string",
@@ -8597,6 +8685,61 @@
             "text",
             "revision",
             "truncated"
+          ],
+          "type": "object"
+        },
+        "PaneRepoInfo": {
+          "description": "Repo facts for the checkout containing a pane's cwd. Panes in one checkout\nshare one refresh.",
+          "properties": {
+            "ahead": {
+              "description": "Commits ahead of the branch's upstream; absent without an upstream.",
+              "format": "uint",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "behind": {
+              "description": "Commits behind the branch's upstream; absent without an upstream.",
+              "format": "uint",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "branch": {
+              "description": "The checked-out branch; absent on a detached HEAD.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "dirty": {
+              "description": "Changed paths (staged, unstaged, untracked). Counted only while a\nsidebar agent row shows `git_dirty`; absent otherwise.",
+              "format": "uint",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "is_linked_worktree": {
+              "type": "boolean"
+            },
+            "repo_name": {
+              "description": "The repository's name; for a linked worktree, its main checkout's name.",
+              "type": "string"
+            },
+            "root": {
+              "description": "The checkout's root directory.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "root",
+            "repo_name"
           ],
           "type": "object"
         },

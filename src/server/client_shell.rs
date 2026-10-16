@@ -84,8 +84,9 @@ pub(super) fn snapshot_with_completions(
                 number: workspace.number,
                 label: workspace.label,
                 custom_label: state.custom_name.is_some(),
-                branch: state.branch(),
-                git_ahead_behind: state.git_ahead_behind(),
+                // A workspace has no repo; generation-1 clients still expect the fields.
+                branch: None,
+                git_ahead_behind: None,
                 tokens,
                 worktree: workspace
                     .worktree
@@ -173,6 +174,7 @@ pub(super) fn snapshot_with_completions(
                 state_labels,
                 tokens,
                 focused,
+                repo: agent.repo.map(Into::into),
             }
         })
         .collect();

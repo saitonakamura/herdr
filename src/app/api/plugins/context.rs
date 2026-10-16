@@ -382,9 +382,7 @@ impl App {
         self.state
             .workspaces
             .get(ws_idx)
-            .and_then(|ws| {
-                ws.resolved_identity_cwd_from(&self.state.terminals, &self.terminal_runtimes)
-            })
+            .and_then(|ws| ws.first_pane_cwd_from(&self.state.terminals, &self.terminal_runtimes))
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| "/".into()))
     }
 }

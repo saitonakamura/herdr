@@ -125,9 +125,11 @@ impl App {
         Ok(SourceInput {
             workspace_id: Some(ws.id.clone()),
             membership: ws.worktree_space().cloned(),
-            git_space: ws.git_space().cloned(),
-            cwd: if ws.worktree_space().is_none() && ws.git_space().is_none() {
-                ws.resolved_identity_cwd_from(&self.state.terminals, &self.terminal_runtimes)
+            git_space: ws.first_pane_git_space(&self.state.terminals).cloned(),
+            cwd: if ws.worktree_space().is_none()
+                && ws.first_pane_git_space(&self.state.terminals).is_none()
+            {
+                ws.first_pane_cwd_from(&self.state.terminals, &self.terminal_runtimes)
             } else {
                 None
             },
@@ -257,7 +259,8 @@ impl App {
                                 && current.key == source.repo_key
                                 && current.repo_root == source.source_repo_root
                                 && current.checkout_path == source.source_checkout_path
-                        } else if let Some(current) = ws.git_space() {
+                        } else if let Some(current) = ws.first_pane_git_space(&self.state.terminals)
+                        {
                             !current.is_linked_worktree
                                 && current.key == source.repo_key
                                 && current.repo_root == source.source_repo_root
@@ -265,7 +268,7 @@ impl App {
                             // Git was already discovered on the worker. A cache miss here
                             // must only compare the captured source path, not rediscover it.
                             result.source_cwd.as_ref().is_some_and(|cwd| {
-                                ws.resolved_identity_cwd_from(
+                                ws.first_pane_cwd_from(
                                     &self.state.terminals,
                                     &self.terminal_runtimes,
                                 )

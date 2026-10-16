@@ -403,6 +403,7 @@ impl App {
             agent_session: pane.agent_session,
             agent_id: pane.agent_id,
             parent_agent_id: pane.parent_agent_id,
+            repo: pane.repo,
             workspace_id: pane.workspace_id,
             tab_id: pane.tab_id,
             pane_id: pane.pane_id,

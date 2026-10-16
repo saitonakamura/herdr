@@ -11,7 +11,7 @@ use crate::layout::PaneId;
 #[cfg(test)]
 use crate::layout::{find_in_direction, NavDirection};
 use crate::terminal::{EffectiveStateChange, TerminalStateMutation};
-use crate::workspace::WorkspaceGitStatus;
+use crate::workspace::PaneGitStatus;
 
 use super::api_helpers::pane_agent_status;
 use super::state::{
@@ -1341,60 +1341,52 @@ fn is_trailing_token_wrapper(ch: char) -> bool {
 // ---------------------------------------------------------------------------
 
 impl AppState {
-    pub fn apply_workspace_git_statuses(
+    /// Stores refreshed repo facts on each terminal whose cwd has not moved
+    /// since the refresh started. Returns the terminals whose facts changed.
+    pub fn apply_pane_git_statuses(
         &mut self,
         terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
-        results: Vec<WorkspaceGitStatus>,
-    ) -> bool {
-        let mut changed = false;
+        results: Vec<PaneGitStatus>,
+    ) -> Vec<crate::terminal::TerminalId> {
+        let mut changed = Vec::new();
         for result in results {
-            let Some(ws_idx) = self
-                .workspaces
-                .iter()
-                .position(|ws| ws.id == result.workspace_id)
-            else {
+            let current_cwd = terminal_runtimes
+                .get(&result.terminal_id)
+                .and_then(|runtime| runtime.cwd())
+                .or_else(|| {
+                    self.terminals
+                        .get(&result.terminal_id)
+                        .map(|terminal| terminal.cwd.clone())
+                });
+            if current_cwd.as_ref() != Some(&result.repo.cwd) {
+                continue;
+            }
+            self.name_upstream_workspace_from_repo(&result);
+            let Some(terminal) = self.terminals.get_mut(&result.terminal_id) else {
                 continue;
             };
-
-            if self.workspaces[ws_idx]
-                .resolved_identity_cwd_from(&self.terminals, terminal_runtimes)
-                .as_ref()
-                != Some(&result.resolved_identity_cwd)
-            {
-                continue;
-            }
-
-            let ws = &mut self.workspaces[ws_idx];
-            if ws.custom_name.is_none() {
-                // An upstream snapshot's workspace keeps the label it showed, frozen.
-                ws.custom_name = Some(result.auto_label.clone());
-                self.session_dirty = true;
-                changed = true;
-            }
-            if ws.cached_identity_cwd != result.resolved_identity_cwd {
-                ws.cached_identity_cwd = result.resolved_identity_cwd;
-            }
-            if ws.cached_auto_label != result.auto_label {
-                ws.cached_auto_label = result.auto_label;
-                changed |= ws.custom_name.is_none();
-            }
-            if ws.cached_git_status_key != result.status_cache_key {
-                ws.cached_git_status_key = result.status_cache_key;
-            }
-            if result.demand.branch && ws.cached_git_branch != result.branch {
-                ws.cached_git_branch = result.branch;
-                changed = true;
-            }
-            if result.demand.ahead_behind && ws.cached_git_ahead_behind != result.ahead_behind {
-                ws.cached_git_ahead_behind = result.ahead_behind;
-                changed = true;
-            }
-            if ws.cached_git_space != result.space {
-                ws.cached_git_space = result.space;
-                changed = true;
+            if terminal.set_repo(Some(result.repo)) {
+                changed.push(result.terminal_id);
             }
         }
         changed
+    }
+
+    /// An upstream snapshot's workspace has no name; it takes the label it
+    /// showed (its first pane's repo name) once that pane's facts arrive.
+    fn name_upstream_workspace_from_repo(&mut self, result: &PaneGitStatus) {
+        let Some(ws) = self.workspaces.iter_mut().find(|ws| {
+            ws.custom_name.is_none()
+                && ws
+                    .tabs
+                    .first()
+                    .and_then(|tab| tab.terminal_id(tab.root_pane))
+                    == Some(&result.terminal_id)
+        }) else {
+            return;
+        };
+        ws.custom_name = Some(result.repo.facts.auto_label.clone());
+        self.session_dirty = true;
     }
 
     pub fn handle_app_event(&mut self, event: AppEvent) -> Vec<PaneStateUpdate> {
@@ -2604,61 +2596,63 @@ mod tests {
         assert_eq!(selected_url("open file:///tmp/report", "file"), None);
     }
 
-    #[test]
-    fn apply_workspace_git_statuses_updates_matching_workspace() {
-        let mut state = app_with_workspaces(&["one", "two"]);
-        let first_id = state.workspaces[0].id.clone();
-        let first_cwd = state.workspaces[0].resolved_identity_cwd().unwrap();
-        let second_id = state.workspaces[1].id.clone();
-
-        let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
-        let changed = state.apply_workspace_git_statuses(
-            &terminal_runtimes,
-            vec![WorkspaceGitStatus {
-                workspace_id: first_id,
-                resolved_identity_cwd: first_cwd.clone(),
-                status_cache_key: first_cwd,
-                demand: crate::workspace::GitStatusRefreshDemand::ALL,
-                auto_label: "one".into(),
-                branch: Some("main".into()),
-                ahead_behind: Some((2, 1)),
-                space: None,
-            }],
-        );
-
-        assert!(changed);
-        assert_eq!(state.workspaces[0].branch().as_deref(), Some("main"));
-        assert_eq!(state.workspaces[0].git_ahead_behind(), Some((2, 1)));
-        assert_eq!(state.workspaces[1].id, second_id);
-        assert_eq!(state.workspaces[1].git_ahead_behind(), None);
+    fn root_terminal(state: &AppState, ws_idx: usize) -> crate::terminal::TerminalId {
+        let tab = &state.workspaces[ws_idx].tabs[0];
+        tab.terminal_id(tab.root_pane).unwrap().clone()
     }
 
-    fn git_status_with_label(
-        state: &AppState,
-        ws_idx: usize,
-        auto_label: &str,
-    ) -> WorkspaceGitStatus {
-        let cwd = state.workspaces[ws_idx].resolved_identity_cwd().unwrap();
-        WorkspaceGitStatus {
-            workspace_id: state.workspaces[ws_idx].id.clone(),
-            resolved_identity_cwd: cwd.clone(),
-            status_cache_key: cwd,
+    fn git_status_with_label(state: &AppState, ws_idx: usize, auto_label: &str) -> PaneGitStatus {
+        let terminal_id = root_terminal(state, ws_idx);
+        let cwd = state.terminals[&terminal_id].cwd.clone();
+        PaneGitStatus {
+            terminal_id,
             demand: crate::workspace::GitStatusRefreshDemand::ALL,
-            auto_label: auto_label.into(),
-            branch: Some("main".into()),
-            ahead_behind: None,
-            space: None,
+            repo: crate::workspace::PaneRepo {
+                status_cache_key: cwd.clone(),
+                cwd,
+                facts: crate::workspace::GitStatusSnapshot {
+                    auto_label: auto_label.into(),
+                    branch: Some("main".into()),
+                    ahead_behind: None,
+                    dirty: None,
+                    space: None,
+                },
+            },
         }
     }
 
+    fn repo_branch(state: &AppState, ws_idx: usize) -> Option<String> {
+        state.terminals[&root_terminal(state, ws_idx)]
+            .repo
+            .as_ref()
+            .and_then(|repo| repo.facts.branch.clone())
+    }
+
     #[test]
-    fn apply_workspace_git_statuses_keeps_workspace_name() {
+    fn apply_pane_git_statuses_updates_only_the_matching_terminal() {
+        let mut state = app_with_workspaces(&["one", "two"]);
+        let mut status = git_status_with_label(&state, 0, "one");
+        status.repo.facts.ahead_behind = Some((2, 1));
+        let first = status.terminal_id.clone();
+
+        let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
+        let changed = state.apply_pane_git_statuses(&terminal_runtimes, vec![status]);
+
+        assert_eq!(changed, vec![first.clone()]);
+        let repo = state.terminals[&first].repo.as_ref().unwrap();
+        assert_eq!(repo.facts.branch.as_deref(), Some("main"));
+        assert_eq!(repo.facts.ahead_behind, Some((2, 1)));
+        assert!(state.terminals[&root_terminal(&state, 1)].repo.is_none());
+    }
+
+    #[test]
+    fn apply_pane_git_statuses_keeps_workspace_name() {
         let mut state = app_with_workspaces(&["effort"]);
         state.session_dirty = false;
         let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
 
         let status = git_status_with_label(&state, 0, "repo");
-        state.apply_workspace_git_statuses(&terminal_runtimes, vec![status]);
+        state.apply_pane_git_statuses(&terminal_runtimes, vec![status]);
 
         assert_eq!(state.workspaces[0].custom_name.as_deref(), Some("effort"));
         assert_eq!(
@@ -2676,13 +2670,13 @@ mod tests {
         let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
 
         let status = git_status_with_label(&state, 0, "herdr");
-        assert!(state.apply_workspace_git_statuses(&terminal_runtimes, vec![status]));
+        state.apply_pane_git_statuses(&terminal_runtimes, vec![status]);
         assert_eq!(state.workspaces[0].custom_name.as_deref(), Some("herdr"));
         assert!(state.session_dirty);
 
         state.session_dirty = false;
         let status = git_status_with_label(&state, 0, "elsewhere");
-        state.apply_workspace_git_statuses(&terminal_runtimes, vec![status]);
+        state.apply_pane_git_statuses(&terminal_runtimes, vec![status]);
         assert_eq!(state.workspaces[0].custom_name.as_deref(), Some("herdr"));
         assert!(!state.session_dirty);
         state.assert_invariants_for_test();
@@ -2695,8 +2689,8 @@ mod tests {
         let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
 
         let mut status = git_status_with_label(&state, 0, "stale");
-        status.resolved_identity_cwd = "/definitely/not/current".into();
-        state.apply_workspace_git_statuses(&terminal_runtimes, vec![status]);
+        status.repo.cwd = "/definitely/not/current".into();
+        state.apply_pane_git_statuses(&terminal_runtimes, vec![status]);
 
         assert_eq!(state.workspaces[0].custom_name, None);
     }
@@ -2742,120 +2736,69 @@ mod tests {
     }
 
     #[test]
-    fn apply_workspace_git_statuses_ignores_stale_cwd() {
+    fn apply_pane_git_statuses_ignores_stale_cwd() {
         let mut state = app_with_workspaces(&["one"]);
-        let workspace_id = state.workspaces[0].id.clone();
-        state.workspaces[0].cached_git_branch = Some("old".into());
-        state.workspaces[0].cached_git_ahead_behind = Some((1, 0));
-
         let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
-        let changed = state.apply_workspace_git_statuses(
-            &terminal_runtimes,
-            vec![WorkspaceGitStatus {
-                workspace_id,
-                resolved_identity_cwd: std::path::PathBuf::from("/definitely/not/current"),
-                status_cache_key: std::path::PathBuf::from("/definitely/not/current"),
-                demand: crate::workspace::GitStatusRefreshDemand::ALL,
-                auto_label: "stale".into(),
-                branch: Some("main".into()),
-                ahead_behind: Some((0, 1)),
-                space: None,
-            }],
-        );
+        let old = git_status_with_label(&state, 0, "one");
+        state.apply_pane_git_statuses(&terminal_runtimes, vec![old]);
 
-        assert!(!changed);
-        assert_eq!(state.workspaces[0].branch().as_deref(), Some("old"));
-        assert_eq!(state.workspaces[0].git_ahead_behind(), Some((1, 0)));
+        let mut stale = git_status_with_label(&state, 0, "stale");
+        stale.repo.cwd = "/definitely/not/current".into();
+        stale.repo.facts.branch = Some("elsewhere".into());
+        let changed = state.apply_pane_git_statuses(&terminal_runtimes, vec![stale]);
+
+        assert!(changed.is_empty());
+        assert_eq!(repo_branch(&state, 0).as_deref(), Some("main"));
     }
 
     #[test]
-    fn apply_workspace_git_statuses_ignores_unrequested_branch_changes() {
+    fn apply_pane_git_statuses_reports_no_change_for_identical_facts() {
         let mut state = app_with_workspaces(&["one"]);
-        let workspace_id = state.workspaces[0].id.clone();
-        let cwd = state.workspaces[0].resolved_identity_cwd().unwrap();
-        state.workspaces[0].cached_auto_label = "one".into();
-        state.workspaces[0].cached_git_branch = Some("old".into());
-
         let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
-        let changed = state.apply_workspace_git_statuses(
-            &terminal_runtimes,
-            vec![WorkspaceGitStatus {
-                workspace_id,
-                resolved_identity_cwd: cwd.clone(),
-                status_cache_key: cwd,
-                demand: crate::workspace::GitStatusRefreshDemand {
-                    branch: false,
-                    ahead_behind: true,
-                },
-                auto_label: "one".into(),
-                branch: Some("new".into()),
-                ahead_behind: None,
-                space: None,
-            }],
-        );
+        let status = git_status_with_label(&state, 0, "one");
+        state.apply_pane_git_statuses(&terminal_runtimes, vec![status.clone()]);
+        let revision = state.terminals[&status.terminal_id].revision;
 
-        assert!(!changed);
-        assert_eq!(state.workspaces[0].branch().as_deref(), Some("old"));
+        let changed = state.apply_pane_git_statuses(&terminal_runtimes, vec![status.clone()]);
+
+        assert!(changed.is_empty());
+        assert_eq!(state.terminals[&status.terminal_id].revision, revision);
     }
 
     #[test]
-    fn apply_workspace_git_statuses_clears_missing_git_status() {
+    fn apply_pane_git_statuses_clears_missing_git_status() {
         let mut state = app_with_workspaces(&["one"]);
-        let workspace_id = state.workspaces[0].id.clone();
-        let cwd = state.workspaces[0].resolved_identity_cwd().unwrap();
-        state.workspaces[0].cached_git_branch = Some("main".into());
-        state.workspaces[0].cached_git_ahead_behind = Some((1, 2));
-
         let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
-        let changed = state.apply_workspace_git_statuses(
-            &terminal_runtimes,
-            vec![WorkspaceGitStatus {
-                workspace_id,
-                resolved_identity_cwd: cwd.clone(),
-                status_cache_key: cwd,
-                demand: crate::workspace::GitStatusRefreshDemand::ALL,
-                auto_label: "one".into(),
-                branch: None,
-                ahead_behind: None,
-                space: None,
-            }],
-        );
+        let mut status = git_status_with_label(&state, 0, "one");
+        status.repo.facts.ahead_behind = Some((1, 2));
+        state.apply_pane_git_statuses(&terminal_runtimes, vec![status]);
 
-        assert!(changed);
-        assert_eq!(state.workspaces[0].branch(), None);
-        assert_eq!(state.workspaces[0].git_ahead_behind(), None);
+        let mut gone = git_status_with_label(&state, 0, "one");
+        gone.repo.facts.branch = None;
+        let changed = state.apply_pane_git_statuses(&terminal_runtimes, vec![gone]);
+
+        assert_eq!(changed.len(), 1);
+        assert_eq!(repo_branch(&state, 0), None);
     }
 
     #[test]
-    fn apply_workspace_git_statuses_does_not_change_worktree_membership() {
+    fn apply_pane_git_statuses_does_not_change_worktree_membership() {
         let mut state = app_with_workspaces(&["one"]);
         mark_linked_worktree(&mut state, 0);
-        let workspace_id = state.workspaces[0].id.clone();
-        let cwd = state.workspaces[0].resolved_identity_cwd().unwrap();
         let membership = state.workspaces[0].worktree_space().cloned();
+        let mut status = git_status_with_label(&state, 0, "other");
+        status.repo.facts.space = Some(crate::workspace::GitSpaceMetadata {
+            key: "other-repo-key".into(),
+            checkout_key: "/other/checkout".into(),
+            repo_name: "other".into(),
+            repo_root: "/other/repo".into(),
+            is_linked_worktree: false,
+        });
 
         let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
-        let changed = state.apply_workspace_git_statuses(
-            &terminal_runtimes,
-            vec![WorkspaceGitStatus {
-                workspace_id,
-                resolved_identity_cwd: cwd.clone(),
-                status_cache_key: cwd,
-                demand: crate::workspace::GitStatusRefreshDemand::ALL,
-                auto_label: "other".into(),
-                branch: Some("scratch".into()),
-                ahead_behind: None,
-                space: Some(crate::workspace::GitSpaceMetadata {
-                    key: "other-repo-key".into(),
-                    checkout_key: "/other/checkout".into(),
-                    repo_name: "other".into(),
-                    repo_root: "/other/repo".into(),
-                    is_linked_worktree: false,
-                }),
-            }],
-        );
+        let changed = state.apply_pane_git_statuses(&terminal_runtimes, vec![status]);
 
-        assert!(changed);
+        assert_eq!(changed.len(), 1);
         assert_eq!(state.workspaces[0].worktree_space().cloned(), membership);
     }
 

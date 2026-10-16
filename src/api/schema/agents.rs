@@ -254,6 +254,9 @@ pub struct AgentInfo {
     /// The agent that started this one; absent for a top-level agent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_agent_id: Option<String>,
+    /// The Git checkout containing `cwd`; absent outside one or before its first refresh.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repo: Option<super::panes::PaneRepoInfo>,
     pub workspace_id: String,
     pub tab_id: String,
     pub pane_id: String,

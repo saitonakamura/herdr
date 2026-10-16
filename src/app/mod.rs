@@ -1191,28 +1191,101 @@ mod tests {
     }
 
     #[test]
-    fn git_status_event_marks_render_dirty_when_status_changes() {
+    fn pane_and_agent_info_expose_repo_facts_only_inside_a_checkout() {
         let mut app = test_app();
         app.state.workspaces.push(Workspace::test_new("one"));
+        app.state.ensure_test_terminals();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.terminals.keys().next().unwrap().clone();
+        let space = crate::workspace::GitSpaceMetadata {
+            key: "/repo/.git".into(),
+            checkout_key: "/worktrees/feature".into(),
+            repo_name: "repo".into(),
+            repo_root: "/worktrees/feature".into(),
+            is_linked_worktree: true,
+        };
+        let mut facts = crate::workspace::GitStatusSnapshot {
+            auto_label: "feature".into(),
+            branch: Some("feature".into()),
+            ahead_behind: Some((3, 0)),
+            dirty: Some(2),
+            space: Some(space),
+        };
+        app.state.terminals.get_mut(&terminal_id).unwrap().repo =
+            Some(crate::workspace::PaneRepo {
+                cwd: "/worktrees/feature".into(),
+                status_cache_key: "/worktrees/feature".into(),
+                facts: facts.clone(),
+            });
+
+        let repo = app.pane_info(0, pane_id).unwrap().repo.unwrap();
+        assert_eq!(
+            repo,
+            crate::api::schema::PaneRepoInfo {
+                root: "/worktrees/feature".into(),
+                repo_name: "repo".into(),
+                branch: Some("feature".into()),
+                ahead: Some(3),
+                behind: Some(0),
+                dirty: Some(2),
+                is_linked_worktree: true,
+            }
+        );
+        let wire = crate::protocol::ClientShellRepo::from(repo);
+        assert_eq!(wire.ahead_behind, Some((3, 0)));
+        assert_eq!(wire.worktree.as_deref(), Some("feature"));
+
+        facts.space = None;
+        app.state.terminals.get_mut(&terminal_id).unwrap().repo =
+            Some(crate::workspace::PaneRepo {
+                cwd: "/tmp".into(),
+                status_cache_key: "/tmp".into(),
+                facts,
+            });
+        assert_eq!(app.pane_info(0, pane_id).unwrap().repo, None);
+    }
+
+    #[test]
+    fn git_status_event_marks_render_dirty_and_updates_pane_when_repo_changes() {
+        let mut app = test_app();
+        app.state.workspaces.push(Workspace::test_new("one"));
+        app.state.ensure_test_terminals();
         let _ = app.render_dirty.take();
-        let workspace_id = app.state.workspaces[0].id.clone();
-        let resolved_identity_cwd = app.state.workspaces[0].resolved_identity_cwd().unwrap();
+        let terminal_id = app.state.terminals.keys().next().unwrap().clone();
+        let cwd = app.state.terminals[&terminal_id].cwd.clone();
 
         app.handle_internal_event(AppEvent::GitStatusRefreshed {
-            results: vec![crate::workspace::WorkspaceGitStatus {
-                workspace_id,
-                resolved_identity_cwd: resolved_identity_cwd.clone(),
-                status_cache_key: resolved_identity_cwd,
+            results: vec![crate::workspace::PaneGitStatus {
+                terminal_id: terminal_id.clone(),
                 demand: crate::workspace::GitStatusRefreshDemand::ALL,
-                auto_label: "one".into(),
-                branch: Some("render-dirty-test".into()),
-                ahead_behind: Some((1, 0)),
-                space: None,
+                repo: crate::workspace::PaneRepo {
+                    cwd: cwd.clone(),
+                    status_cache_key: cwd,
+                    facts: crate::workspace::GitStatusSnapshot {
+                        auto_label: "one".into(),
+                        branch: Some("render-dirty-test".into()),
+                        ahead_behind: Some((1, 0)),
+                        dirty: None,
+                        space: None,
+                    },
+                },
             }],
             cache_updates: Vec::new(),
         });
 
         assert!(app.render_dirty.is_pending());
+        assert_eq!(
+            app.state.terminals[&terminal_id]
+                .repo
+                .as_ref()
+                .and_then(|repo| repo.facts.branch.as_deref()),
+            Some("render-dirty-test")
+        );
+        assert!(app
+            .event_hub
+            .events_after(0)
+            .iter()
+            .any(|(_, event)| event.event == crate::api::schema::EventKind::PaneUpdated));
     }
 
     #[test]
@@ -2432,11 +2505,12 @@ mod tests {
     fn workspace_creation_in_navigate_mode_uses_selected_workspace_seed_cwd() {
         let mut app = test_app();
         let mut first = Workspace::test_new("herdr");
-        first.identity_cwd = std::path::PathBuf::from("/tmp/herdr");
+        first.test_cwd = std::path::PathBuf::from("/tmp/herdr");
         let mut second = Workspace::test_new("pion");
-        second.identity_cwd = std::path::PathBuf::from("/tmp/pion");
+        second.test_cwd = std::path::PathBuf::from("/tmp/pion");
 
         app.state.workspaces = vec![first, second];
+        app.state.ensure_test_terminals();
         app.state.active = Some(0);
         app.state.selected = 1;
         app.state.mode = Mode::Navigate;

@@ -3348,16 +3348,37 @@ async fn worktree_discovery_does_not_block_client_typing() {
         crate::terminal::TerminalRuntime::test_with_channel_and_scrollback_bytes(80, 24, 0, b"", 4);
     workspace.insert_test_runtime(pane_id, runtime);
     let repo = std::env::temp_dir().join(format!("herdr-blocked-git-{}", workspace.id));
-    workspace.identity_cwd = repo.clone();
-    workspace.cached_git_space = Some(crate::workspace::GitSpaceMetadata {
-        key: repo.display().to_string(),
-        checkout_key: repo.display().to_string(),
-        repo_name: "blocked-git".into(),
-        repo_root: repo.clone(),
-        is_linked_worktree: false,
-    });
+    workspace.test_cwd = repo.clone();
     let workspace_id = workspace.id.clone();
     server.app.state.workspaces = vec![workspace];
+    server.app.state.ensure_test_terminals();
+    let terminal_id = server.app.state.workspaces[0].tabs[0]
+        .terminal_id(pane_id)
+        .unwrap()
+        .clone();
+    server
+        .app
+        .state
+        .terminals
+        .get_mut(&terminal_id)
+        .unwrap()
+        .repo = Some(crate::workspace::PaneRepo {
+        cwd: repo.clone(),
+        status_cache_key: repo.clone(),
+        facts: crate::workspace::GitStatusSnapshot {
+            auto_label: "blocked-git".into(),
+            branch: None,
+            ahead_behind: None,
+            dirty: None,
+            space: Some(crate::workspace::GitSpaceMetadata {
+                key: repo.display().to_string(),
+                checkout_key: repo.display().to_string(),
+                repo_name: "blocked-git".into(),
+                repo_root: repo.clone(),
+                is_linked_worktree: false,
+            }),
+        },
+    });
     server.app.state.active = Some(0);
     server.app.state.selected = 0;
     let public_pane_id = server.app.public_pane_id(0, pane_id).unwrap();
@@ -3399,9 +3420,13 @@ async fn worktree_discovery_does_not_block_client_typing() {
             }),
         ),
     ] {
-        server.app.state.workspaces[0]
-            .cached_git_space
-            .as_mut()
+        server
+            .app
+            .state
+            .terminals
+            .get_mut(&terminal_id)
+            .and_then(|terminal| terminal.repo.as_mut())
+            .and_then(|repo| repo.facts.space.as_mut())
             .unwrap()
             .is_linked_worktree = linked;
         let (entered, release) = crate::worktree::test_list_gate::block(&repo);
@@ -3484,10 +3509,10 @@ async fn deferred_worktree_open_disconnect_keeps_other_clients_focus() {
         "pending-open",
         checkout.to_str().unwrap(),
     ]);
-    source.identity_cwd = repo.clone();
+    source.test_cwd = repo.clone();
     let source_id = source.id.clone();
     let mut target = crate::workspace::Workspace::test_new("pending-open-target");
-    target.identity_cwd = checkout.clone();
+    target.test_cwd = checkout.clone();
     server.app.state.workspaces = vec![source, target];
     server.app.state.ensure_test_terminals();
     server.app.state.active = Some(0);
@@ -4782,29 +4807,51 @@ fn terminal_attach_rejects_later_observe_and_clears_ownership() {
     });
 }
 
+fn root_pane_git_status(
+    server: &HeadlessServer,
+    branch: Option<&str>,
+) -> crate::workspace::PaneGitStatus {
+    let tab = &server.app.state.workspaces[0].tabs[0];
+    let terminal_id = tab.terminal_id(tab.root_pane).unwrap().clone();
+    let cwd = server.app.state.terminals[&terminal_id].cwd.clone();
+    crate::workspace::PaneGitStatus {
+        terminal_id,
+        demand: crate::workspace::GitStatusRefreshDemand::ALL,
+        repo: crate::workspace::PaneRepo {
+            status_cache_key: cwd.clone(),
+            cwd,
+            facts: crate::workspace::GitStatusSnapshot {
+                auto_label: "one".into(),
+                branch: branch.map(Into::into),
+                ahead_behind: None,
+                dirty: None,
+                space: None,
+            },
+        },
+    }
+}
+
 #[test]
 fn unchanged_git_refresh_does_not_request_headless_render() {
     let mut server = test_headless_server();
     server.app.git_refresh_in_flight = true;
-    let mut workspace = crate::workspace::Workspace::test_new("one");
-    let workspace_id = workspace.id.clone();
-    let cwd = workspace.identity_cwd.clone();
-    workspace.cached_auto_label = "cached".into();
-    workspace.cached_git_status_key = cwd.clone();
-    workspace.cached_git_branch = None;
-    server.app.state.workspaces.push(workspace);
+    server
+        .app
+        .state
+        .workspaces
+        .push(crate::workspace::Workspace::test_new("one"));
+    server.app.state.ensure_test_terminals();
+    let status = root_pane_git_status(&server, None);
+    server
+        .app
+        .state
+        .terminals
+        .get_mut(&status.terminal_id)
+        .unwrap()
+        .repo = Some(status.repo.clone());
 
     let changed = server.handle_internal_event_with_forwarding(AppEvent::GitStatusRefreshed {
-        results: vec![crate::workspace::WorkspaceGitStatus {
-            workspace_id,
-            resolved_identity_cwd: cwd.clone(),
-            status_cache_key: cwd,
-            demand: crate::workspace::GitStatusRefreshDemand::ALL,
-            auto_label: "cached".into(),
-            branch: None,
-            ahead_behind: None,
-            space: None,
-        }],
+        results: vec![status],
         cache_updates: Vec::new(),
     });
 
@@ -4820,6 +4867,7 @@ fn failed_startup_git_refresh_retries_without_clients() {
         .state
         .workspaces
         .push(crate::workspace::Workspace::test_new("restored"));
+    server.app.state.ensure_test_terminals();
     assert_eq!(server.app_client_count(), 0);
 
     crate::thread_spawn::test_hook::fail_next_spawns(1);
@@ -4847,22 +4895,16 @@ fn failed_startup_git_refresh_retries_without_clients() {
 #[test]
 fn changed_git_refresh_requests_headless_render() {
     let mut server = test_headless_server();
-    let workspace = crate::workspace::Workspace::test_new("one");
-    let workspace_id = workspace.id.clone();
-    let cwd = workspace.identity_cwd.clone();
-    server.app.state.workspaces.push(workspace);
+    server
+        .app
+        .state
+        .workspaces
+        .push(crate::workspace::Workspace::test_new("one"));
+    server.app.state.ensure_test_terminals();
+    let status = root_pane_git_status(&server, Some("changed"));
 
     let changed = server.handle_internal_event_with_forwarding(AppEvent::GitStatusRefreshed {
-        results: vec![crate::workspace::WorkspaceGitStatus {
-            workspace_id,
-            resolved_identity_cwd: cwd.clone(),
-            status_cache_key: cwd,
-            demand: crate::workspace::GitStatusRefreshDemand::ALL,
-            auto_label: "one".into(),
-            branch: Some("changed".into()),
-            ahead_behind: None,
-            space: None,
-        }],
+        results: vec![status],
         cache_updates: Vec::new(),
     });
 

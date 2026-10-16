@@ -1083,6 +1083,43 @@ pub struct ClientShellAgent {
     pub state_labels: Vec<(String, String)>,
     pub tokens: Vec<(String, String)>,
     pub focused: bool,
+    /// Repo facts of the agent's pane. Optional: older endpoints omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repo: Option<ClientShellRepo>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClientShellRepo {
+    pub repo_name: String,
+    #[serde(default)]
+    pub branch: Option<String>,
+    #[serde(default)]
+    pub ahead_behind: Option<(usize, usize)>,
+    #[serde(default)]
+    pub dirty: Option<usize>,
+    /// The checkout's directory name, set only for a linked worktree.
+    #[serde(default)]
+    pub worktree: Option<String>,
+}
+
+impl From<crate::api::schema::PaneRepoInfo> for ClientShellRepo {
+    fn from(repo: crate::api::schema::PaneRepoInfo) -> Self {
+        let worktree = repo
+            .is_linked_worktree
+            .then(|| {
+                std::path::Path::new(&repo.root)
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+            })
+            .flatten();
+        Self {
+            repo_name: repo.repo_name,
+            branch: repo.branch,
+            ahead_behind: repo.ahead.zip(repo.behind),
+            dirty: repo.dirty,
+            worktree,
+        }
+    }
 }
 
 /// Origin-relative geometry for one pane in a rendered pane surface.

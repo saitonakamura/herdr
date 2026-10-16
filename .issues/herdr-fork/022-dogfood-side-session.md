@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-dogfood-side-session
 title: Dogfood the fork in a side session on the primary mac
-status: in-progress
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee:
-claimed_by: macos/w6:p7/887cbe33-85f2-4472-9564-edde9c7fabab
+claimed_by: macos/887cbe33-85f2-4472-9564-edde9c7fabab
 ---
 
 ## Question
@@ -54,7 +54,7 @@ server is in scope. Touching any other session's server is not.
 
 ## Resolution
 
-Draft, pending [PR #6](https://github.com/saitonakamura/herdr/pull/6) (`scripts/dogfood.sh` + FORK.md § Dogfooding).
+[PR #6], merged 2026-10-16 as `c98acac6`(https://github.com/saitonakamura/herdr/pull/6) (`scripts/dogfood.sh` + FORK.md § Dogfooding).
 
 - **Binary**: `~/.local/opt/herdr-fork/bin/herdr`, installed by `scripts/dogfood.sh release|build|status`
   (copy + rename, never `target/`, never `/opt/homebrew`). Installed now: `build 4 5` =

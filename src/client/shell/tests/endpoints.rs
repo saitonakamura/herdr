@@ -1986,7 +1986,7 @@ fn aggregate_priority_uses_client_observed_recency_across_machines() {
 }
 
 #[test]
-fn unselected_endpoint_completion_projects_done_client_side() {
+fn unselected_endpoint_keeps_server_done() {
     use crate::api::schema::AgentStatus;
 
     let (mut state, endpoint_id) = state_with_remote();
@@ -1995,7 +1995,7 @@ fn unselected_endpoint_completion_projects_done_client_side() {
     remote.agents = vec![agent("background agent", AgentStatus::Working, 2)];
     state.set_endpoint_snapshot(&endpoint_id, Box::new(remote.clone()));
     remote.revision = 2;
-    remote.agents = vec![agent("background agent", AgentStatus::Idle, 3)];
+    remote.agents = vec![agent("background agent", AgentStatus::Done, 3)];
 
     state.set_endpoint_snapshot(&endpoint_id, Box::new(remote));
 

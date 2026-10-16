@@ -2554,7 +2554,8 @@ fn pane_info_and_subscriptions_expose_done_agent_status() {
             background_pane_id
         ),
     );
-    assert_eq!(pane_after_focus["result"]["pane"]["agent_status"], "idle");
+    // Only focusing the pane in a focused client acknowledges done, never a tab switch.
+    assert_eq!(pane_after_focus["result"]["pane"]["agent_status"], "done");
 
     fs::write(&stop_file, "stop").unwrap();
 

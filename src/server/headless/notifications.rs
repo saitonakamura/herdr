@@ -116,16 +116,11 @@ impl HeadlessServer {
             return;
         }
 
-        let is_active_tab = self
-            .app
-            .state
-            .pane_is_in_active_tab(update.ws_idx, update.pane_id);
-        let suppress_active_tab_notifications =
-            self.active_tab_suppresses_notifications(is_active_tab);
+        let acknowledging = self.pane_is_acknowledging(update.pane_id);
 
         if !update.suppress_completion && self.app.state.sound.allows(update.known_agent) {
             if let Some(sound) = crate::app::actions::notification_sound_for_state_change(
-                suppress_active_tab_notifications,
+                acknowledging,
                 update.previous_state,
                 update.state,
             ) {
@@ -140,10 +135,9 @@ impl HeadlessServer {
         if !should_forward_toast_to_clients(self.app.state.toast_config.delivery) {
             return;
         }
-        let Some(kind) = crate::app::actions::notification_toast_for_pane_state_update(
-            suppress_active_tab_notifications,
-            update,
-        ) else {
+        let Some(kind) =
+            crate::app::actions::notification_toast_for_pane_state_update(acknowledging, update)
+        else {
             return;
         };
         let Some(ws) = self.app.state.workspaces.get(update.ws_idx) else {
@@ -363,18 +357,7 @@ impl HeadlessServer {
                 }
 
                 // Forward sound notification to clients when server-side sound policy allows it.
-                let is_active_tab = self
-                    .app
-                    .state
-                    .active
-                    .and_then(|ws_idx| self.app.state.workspaces.get(ws_idx))
-                    .is_some_and(|ws| {
-                        ws.find_tab_index_for_pane(pane_id_val)
-                            .is_some_and(|tab_idx| ws.active_tab_index() == tab_idx)
-                    });
-
-                let suppress_active_tab_notifications =
-                    self.active_tab_suppresses_notifications(is_active_tab);
+                let acknowledging = self.pane_is_acknowledging(pane_id_val);
 
                 let next_state = self.pane_effective_state(pane_id_val);
 
@@ -383,7 +366,7 @@ impl HeadlessServer {
                     && self.app.state.sound.allows(agent_val)
                 {
                     if let Some(sound) = crate::app::actions::notification_sound_for_state_change(
-                        suppress_active_tab_notifications,
+                        acknowledging,
                         prev_state,
                         next_state,
                     ) {
@@ -410,7 +393,7 @@ impl HeadlessServer {
                             &self.app.state,
                             &self.app.terminal_runtimes,
                             pane_id_val,
-                            suppress_active_tab_notifications,
+                            acknowledging,
                             prev_state,
                             next_state,
                         )
@@ -457,18 +440,7 @@ impl HeadlessServer {
 
                 // Forward sound notification based on the effective transition when
                 // server-side sound policy allows it.
-                let is_active_tab = self
-                    .app
-                    .state
-                    .active
-                    .and_then(|ws_idx| self.app.state.workspaces.get(ws_idx))
-                    .is_some_and(|ws| {
-                        ws.find_tab_index_for_pane(pane_id_val)
-                            .is_some_and(|tab_idx| ws.active_tab_index() == tab_idx)
-                    });
-
-                let suppress_active_tab_notifications =
-                    self.active_tab_suppresses_notifications(is_active_tab);
+                let acknowledging = self.pane_is_acknowledging(pane_id_val);
 
                 let next_state = self.pane_effective_state(pane_id_val);
 
@@ -477,7 +449,7 @@ impl HeadlessServer {
                     && self.app.state.sound.allows(agent_val)
                 {
                     if let Some(sound) = crate::app::actions::notification_sound_for_state_change(
-                        suppress_active_tab_notifications,
+                        acknowledging,
                         prev_state,
                         next_state,
                     ) {
@@ -504,7 +476,7 @@ impl HeadlessServer {
                             &self.app.state,
                             &self.app.terminal_runtimes,
                             pane_id_val,
-                            suppress_active_tab_notifications,
+                            acknowledging,
                             prev_state,
                             next_state,
                         )

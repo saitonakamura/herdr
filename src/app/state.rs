@@ -819,11 +819,11 @@ pub struct AppState {
     pub toast: Option<ToastNotification>,
     pub pending_agent_notifications: std::collections::HashMap<PaneId, PendingAgentNotification>,
     /// Last reported focus state for the outer terminal hosting herdr.
-    /// None means unsupported or not yet reported, which preserves active-pane suppression.
+    /// None means unsupported or not yet reported.
     pub outer_terminal_focus: Option<bool>,
-    /// False while a server has no client attached: then nobody sees the
-    /// active tab, so its completions stay done.
-    pub viewer_attached: bool,
+    /// Panes focused in a client whose outer terminal has focus. Being here is an
+    /// acknowledgement: done cannot survive on them, and they raise no sound or toast.
+    pub acknowledging_panes: std::collections::HashSet<PaneId>,
     // Config
     pub prefix_keys: Vec<(KeyCode, KeyModifiers)>,
     /// Virtual terminal size (columns, rows) used when no client is attached.
@@ -1070,7 +1070,7 @@ impl AppState {
             toast: None,
             pending_agent_notifications: std::collections::HashMap::new(),
             outer_terminal_focus: None,
-            viewer_attached: true,
+            acknowledging_panes: std::collections::HashSet::new(),
             prefix_keys: vec![(KeyCode::Char('b'), KeyModifiers::CONTROL)],
             headless_size: (
                 crate::config::DEFAULT_HEADLESS_COLS,

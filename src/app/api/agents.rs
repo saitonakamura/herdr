@@ -960,7 +960,7 @@ mod tests {
     }
 
     #[test]
-    fn agent_focus_marks_already_focused_done_agent_seen() {
+    fn agent_focus_leaves_done_until_acknowledged() {
         let mut app = app_with_agent();
         app.state.outer_terminal_focus = Some(false);
 
@@ -991,7 +991,7 @@ mod tests {
         let ResponseResult::AgentInfo { agent } = success.result else {
             panic!("expected agent info response");
         };
-        assert_eq!(agent.agent_status, AgentStatus::Idle);
+        assert_eq!(agent.agent_status, AgentStatus::Done);
     }
 
     #[test]

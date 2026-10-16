@@ -35,28 +35,18 @@ fn public_tab_id_for_index(ws: &crate::workspace::Workspace, tab_idx: usize) -> 
     ))
 }
 
-pub fn active_tab_suppresses_notifications(
-    is_active_tab: bool,
-    outer_terminal_focus: Option<bool>,
-) -> bool {
-    is_active_tab && outer_terminal_focus != Some(false)
-}
-
 pub fn notification_sound_for_state_change(
-    suppress_active_tab_notifications: bool,
+    acknowledging: bool,
     prev_state: AgentState,
     new_state: AgentState,
 ) -> Option<crate::sound::Sound> {
-    if new_state == prev_state {
+    if acknowledging || new_state == prev_state {
         return None;
     }
 
     match new_state {
         AgentState::Blocked => Some(crate::sound::Sound::Request),
-        AgentState::Idle
-            if is_background_completion_transition(prev_state, new_state)
-                && !suppress_active_tab_notifications =>
-        {
+        AgentState::Idle if is_background_completion_transition(prev_state, new_state) => {
             Some(crate::sound::Sound::Done)
         }
         _ => None,
@@ -64,22 +54,18 @@ pub fn notification_sound_for_state_change(
 }
 
 fn notification_sound_for_effective_state_change(
-    suppress_active_tab_notifications: bool,
+    acknowledging: bool,
     change: &EffectiveStateChange,
 ) -> Option<crate::sound::Sound> {
-    notification_sound_for_state_change(
-        suppress_active_tab_notifications,
-        change.previous_state,
-        change.state,
-    )
+    notification_sound_for_state_change(acknowledging, change.previous_state, change.state)
 }
 
 pub fn notification_toast_for_state_change(
-    suppress_active_tab_notifications: bool,
+    acknowledging: bool,
     prev_state: AgentState,
     new_state: AgentState,
 ) -> Option<ToastKind> {
-    if suppress_active_tab_notifications || new_state == prev_state {
+    if acknowledging || new_state == prev_state {
         return None;
     }
 
@@ -93,32 +79,21 @@ pub fn notification_toast_for_state_change(
 }
 
 fn notification_toast_for_effective_state_change(
-    suppress_active_tab_notifications: bool,
+    acknowledging: bool,
     change: &EffectiveStateChange,
 ) -> Option<ToastKind> {
-    notification_toast_for_state_change(
-        suppress_active_tab_notifications,
-        change.previous_state,
-        change.state,
-    )
+    notification_toast_for_state_change(acknowledging, change.previous_state, change.state)
 }
 
 pub fn notification_toast_for_pane_state_update(
-    suppress_active_tab_notifications: bool,
+    acknowledging: bool,
     update: &PaneStateUpdate,
 ) -> Option<ToastKind> {
-    if update.suppress_completion
-        || suppress_active_tab_notifications
-        || update.state == update.previous_state
-    {
+    if update.suppress_completion || acknowledging || update.state == update.previous_state {
         return None;
     }
 
-    notification_toast_for_state_change(
-        suppress_active_tab_notifications,
-        update.previous_state,
-        update.state,
-    )
+    notification_toast_for_state_change(acknowledging, update.previous_state, update.state)
 }
 
 fn toast_agent_label(agent_label: &str) -> &str {
@@ -133,16 +108,12 @@ fn toast_event_text(kind: ToastKind) -> &'static str {
     }
 }
 
-fn sound_for_toast_kind(
-    kind: ToastKind,
-    suppress_active_tab_notifications: bool,
-) -> Option<crate::sound::Sound> {
+fn sound_for_toast_kind(kind: ToastKind, acknowledging: bool) -> Option<crate::sound::Sound> {
     match kind {
+        _ if acknowledging => None,
         ToastKind::NeedsAttention => Some(crate::sound::Sound::Request),
-        ToastKind::Finished if !suppress_active_tab_notifications => {
-            Some(crate::sound::Sound::Done)
-        }
-        ToastKind::Finished | ToastKind::UpdateInstalled => None,
+        ToastKind::Finished => Some(crate::sound::Sound::Done),
+        ToastKind::UpdateInstalled => None,
     }
 }
 
@@ -214,6 +185,55 @@ impl AppState {
         if previous.as_ref() != Some(&target) {
             self.previous_pane_focus = previous;
         }
+    }
+
+    /// Replaces the panes being looked at and acknowledges done on each of them.
+    /// Returns one update per pane whose done was cleared.
+    pub(crate) fn set_acknowledging_panes(
+        &mut self,
+        panes: std::collections::HashSet<PaneId>,
+    ) -> Vec<PaneStateUpdate> {
+        let now = Instant::now();
+        let mut updates = Vec::new();
+        for &pane_id in &panes {
+            let Some(ws_idx) = self
+                .workspaces
+                .iter()
+                .position(|ws| ws.pane_state(pane_id).is_some_and(|pane| !pane.seen))
+            else {
+                continue;
+            };
+            let Some(pane) = self.workspaces[ws_idx].pane_state_mut(pane_id) else {
+                continue;
+            };
+            pane.seen = true;
+            let terminal_id = pane.attached_terminal_id.clone();
+            self.pending_agent_notifications.remove(&pane_id);
+            let Some(terminal) = self.terminals.get(&terminal_id) else {
+                continue;
+            };
+            let change = terminal.unchanged_effective_state_change_at(now);
+            updates.push(PaneStateUpdate {
+                pane_id,
+                ws_idx,
+                previous_agent_label: change.previous_agent_label,
+                previous_known_agent: change.previous_known_agent,
+                previous_state: change.previous_state,
+                previous_seen: false,
+                previous_presentation: change.previous_presentation,
+                agent_label: change.agent_label,
+                known_agent: change.known_agent,
+                state: change.state,
+                seen: true,
+                presentation: change.presentation,
+                agent_name_changed: false,
+                agent_released: false,
+                agent_release_status: None,
+                suppress_completion: true,
+            });
+        }
+        self.acknowledging_panes = panes;
+        updates
     }
 
     fn record_pane_focus_after_navigation(&mut self, previous: Option<PaneFocusTarget>) {
@@ -384,11 +404,6 @@ impl AppState {
             .is_some_and(|tab_idx| tab_idx == self.workspaces[ws_idx].active_tab)
     }
 
-    /// In the active tab of a server someone is attached to.
-    pub(crate) fn pane_is_watched(&self, ws_idx: usize, pane_id: PaneId) -> bool {
-        self.viewer_attached && self.pane_is_in_active_tab(ws_idx, pane_id)
-    }
-
     pub fn switch_workspace(&mut self, idx: usize) {
         if idx < self.workspaces.len() {
             let previous_focus = self.current_pane_focus_target();
@@ -453,28 +468,6 @@ impl AppState {
             self.mark_session_dirty();
             self.record_pane_focus_after_navigation(previous_focus);
         }
-    }
-
-    pub(crate) fn mark_active_tab_seen(&mut self) -> bool {
-        let Some(ws_idx) = self.active else {
-            return false;
-        };
-        let Some(tab) = self
-            .workspaces
-            .get_mut(ws_idx)
-            .and_then(crate::workspace::Workspace::active_tab_mut)
-        else {
-            return false;
-        };
-
-        let mut changed = false;
-        for pane in tab.panes.values_mut() {
-            if !pane.seen {
-                pane.seen = true;
-                changed = true;
-            }
-        }
-        changed
     }
 
     pub fn move_workspace(&mut self, source_idx: usize, insert_idx: usize) -> bool {
@@ -1887,9 +1880,7 @@ impl AppState {
         change: &EffectiveStateChange,
         suppress_completion: bool,
     ) -> Option<bool> {
-        let is_active_tab = self.pane_is_watched(ws_idx, pane_id);
-        let suppress_active_tab_notifications =
-            active_tab_suppresses_notifications(is_active_tab, self.outer_terminal_focus);
+        let acknowledging = self.acknowledging_panes.contains(&pane_id);
         let pane = self.workspaces[ws_idx]
             .tabs
             .iter_mut()
@@ -1898,7 +1889,7 @@ impl AppState {
         if change.state != AgentState::Idle {
             pane.seen = true;
         } else if !suppress_completion && is_completion_transition(change) {
-            pane.seen = suppress_active_tab_notifications;
+            pane.seen = acknowledging;
         }
         let seen = pane.seen;
 
@@ -1921,18 +1912,11 @@ impl AppState {
     ) -> Option<AgentNotificationDelivery> {
         self.pending_agent_notifications.remove(&pane_id);
 
-        let is_active_tab = self.pane_is_watched(ws_idx, pane_id);
-        let suppress_active_tab_notifications =
-            active_tab_suppresses_notifications(is_active_tab, self.outer_terminal_focus);
+        let acknowledging = self.acknowledging_panes.contains(&pane_id);
 
-        let client_notification_kind = notification_toast_for_effective_state_change(
-            suppress_active_tab_notifications,
-            change,
-        );
-        let sound = notification_sound_for_effective_state_change(
-            suppress_active_tab_notifications,
-            change,
-        );
+        let client_notification_kind =
+            notification_toast_for_effective_state_change(acknowledging, change);
+        let sound = notification_sound_for_effective_state_change(acknowledging, change);
         if client_notification_kind.is_none() && sound.is_none() {
             return None;
         }
@@ -2008,11 +1992,9 @@ impl AppState {
             return None;
         }
 
-        let is_active_tab = self.pane_is_watched(ws_idx, pane_id);
-        let suppress_active_tab_notifications =
-            active_tab_suppresses_notifications(is_active_tab, self.outer_terminal_focus);
-        let sound = sound_for_toast_kind(kind, suppress_active_tab_notifications)
-            .filter(|_| self.sound.allows(known_agent));
+        let acknowledging = self.acknowledging_panes.contains(&pane_id);
+        let sound =
+            sound_for_toast_kind(kind, acknowledging).filter(|_| self.sound.allows(known_agent));
         let build_toast = || {
             let workspace_label =
                 self.workspaces[ws_idx].display_name_from_terminals(&self.terminals);
@@ -2033,8 +2015,9 @@ impl AppState {
                 }),
             }
         };
-        let toast = (!is_active_tab).then(build_toast);
-        let client_notification = (!suppress_active_tab_notifications).then(build_toast);
+        let is_active_tab = self.pane_is_in_active_tab(ws_idx, pane_id);
+        let toast = (!is_active_tab && !acknowledging).then(build_toast);
+        let client_notification = (!acknowledging).then(build_toast);
 
         if toast.is_none() && client_notification.is_none() && sound.is_none() {
             return None;
@@ -2885,14 +2868,19 @@ mod tests {
     }
 
     #[test]
-    fn switch_workspace_marks_panes_seen() {
+    fn switch_workspace_leaves_done_for_acknowledgement() {
         let mut state = app_with_workspaces(&["a", "b"]);
-        // Mark a pane in workspace 1 as unseen
         let id = *state.workspaces[1].panes.keys().next().unwrap();
         state.workspaces[1].panes.get_mut(&id).unwrap().seen = false;
 
         state.switch_workspace(1);
+        assert!(!state.workspaces[1].panes.get(&id).unwrap().seen);
+
+        let updates = state.set_acknowledging_panes([id].into());
         assert!(state.workspaces[1].panes.get(&id).unwrap().seen);
+        assert_eq!(updates.len(), 1);
+        assert!(!updates[0].previous_seen && updates[0].seen);
+        assert!(state.set_acknowledging_panes([id].into()).is_empty());
     }
 
     #[test]
@@ -3183,11 +3171,12 @@ mod tests {
     }
 
     #[test]
-    fn active_tab_completion_marks_pane_seen() {
+    fn acknowledging_pane_completion_stays_seen() {
         let mut state = app_with_workspaces(&["active"]);
         state.active = Some(0);
         state.outer_terminal_focus = Some(true);
         let pane_id = *state.workspaces[0].panes.keys().next().unwrap();
+        state.acknowledging_panes.insert(pane_id);
         let terminal_id = state.workspaces[0]
             .panes
             .get(&pane_id)
@@ -3218,7 +3207,6 @@ mod tests {
         let mut state = app_with_workspaces(&["active"]);
         state.active = Some(0);
         state.outer_terminal_focus = None;
-        state.viewer_attached = false;
         let pane_id = *state.workspaces[0].panes.keys().next().unwrap();
         let terminal_id = state.workspaces[0]
             .panes
@@ -3610,7 +3598,7 @@ mod tests {
     #[test]
     fn waiting_sound_plays_even_in_active_workspace() {
         assert_eq!(
-            notification_sound_for_state_change(true, AgentState::Working, AgentState::Blocked),
+            notification_sound_for_state_change(false, AgentState::Working, AgentState::Blocked),
             Some(crate::sound::Sound::Request)
         );
     }
@@ -3721,7 +3709,7 @@ mod tests {
     }
 
     #[test]
-    fn delayed_background_waiting_is_suppressed_if_pane_becomes_active() {
+    fn delayed_background_waiting_is_suppressed_if_pane_becomes_acknowledged() {
         let mut state = app_with_workspaces(&["active", "background"]);
         state.active = Some(0);
         state.toast_config.delivery = crate::config::ToastDelivery::Herdr;
@@ -3739,6 +3727,7 @@ mod tests {
         });
         let deadline = state.next_pending_agent_notification_deadline().unwrap();
         state.active = Some(1);
+        state.acknowledging_panes.insert(bg_pane_id);
 
         assert!(state.drain_due_agent_notifications(deadline).is_empty());
         assert!(state.toast.is_none());
@@ -4441,11 +4430,17 @@ mod tests {
     }
 
     #[test]
-    fn active_tab_suppression_preserves_unknown_focus_behavior() {
-        assert!(active_tab_suppresses_notifications(true, None));
-        assert!(active_tab_suppresses_notifications(true, Some(true)));
-        assert!(!active_tab_suppresses_notifications(true, Some(false)));
-        assert!(!active_tab_suppresses_notifications(false, None));
+    fn acknowledging_pane_raises_no_sound_even_when_blocked() {
+        for state in [AgentState::Blocked, AgentState::Idle] {
+            assert_eq!(
+                notification_sound_for_state_change(true, AgentState::Working, state),
+                None
+            );
+            assert!(
+                notification_sound_for_state_change(false, AgentState::Working, state).is_some()
+            );
+        }
+        assert_eq!(sound_for_toast_kind(ToastKind::NeedsAttention, true), None);
     }
 
     #[test]

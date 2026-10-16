@@ -2238,6 +2238,12 @@ mod tests {
 
         app.state.switch_workspace(1);
         app.sync_focus_events();
+        assert!(
+            status_changes(after_done).is_empty(),
+            "a tab switch is no acknowledgement"
+        );
+        app.state.set_acknowledging_panes([pane_id].into());
+        app.sync_focus_events();
 
         assert_eq!(
             status_changes(after_done),

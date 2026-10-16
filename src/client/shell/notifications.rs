@@ -331,7 +331,7 @@ mod tests {
     }
 
     #[test]
-    fn finished_hint_waits_for_the_projected_completion_snapshot() {
+    fn finished_hint_waits_for_the_server_done_snapshot() {
         let mut config = ClientShellConfig::from_config(&Config::default());
         config.toast_delivery = crate::config::ToastDelivery::Terminal;
         config.toast_delay_seconds = 0;
@@ -372,7 +372,7 @@ mod tests {
         assert_eq!(state.pending_notifications.len(), 1);
 
         snapshot.revision = snapshot.revision.saturating_add(1);
-        snapshot.agents[0].agent_status = crate::api::schema::AgentStatus::Idle;
+        snapshot.agents[0].agent_status = crate::api::schema::AgentStatus::Done;
         snapshot.agents[0].state_change_seq = 2;
         state.set_snapshot(Box::new(snapshot));
         let (effects, _) = state.tick_notifications(now + COMPLETION_RECHECK_INTERVAL);

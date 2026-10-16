@@ -497,7 +497,6 @@ impl App {
         };
 
         self.state.focus_pane_in_workspace(ws_idx, pane_id);
-        self.state.mark_active_tab_seen();
         self.state.mode = crate::app::Mode::Terminal;
 
         let Some(pane) = self.pane_info(ws_idx, pane_id) else {
@@ -4357,7 +4356,7 @@ mod tests {
     }
 
     #[test]
-    fn api_pane_focus_marks_already_focused_done_pane_seen() {
+    fn api_pane_focus_leaves_done_until_acknowledged() {
         let mut app = app_with_linked_worktree();
         app.state.active = Some(0);
         app.state.selected = 0;
@@ -4387,7 +4386,7 @@ mod tests {
         let ResponseResult::PaneInfo { pane } = success.result else {
             panic!("expected pane info response");
         };
-        assert_eq!(pane.agent_status, crate::api::schema::AgentStatus::Idle);
+        assert_eq!(pane.agent_status, crate::api::schema::AgentStatus::Done);
     }
 
     #[test]

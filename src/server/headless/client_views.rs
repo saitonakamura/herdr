@@ -390,6 +390,50 @@ impl HeadlessServer {
         self.focus_target_for_surface(self.shell_target_for_client(client_id)?)
     }
 
+    /// Acknowledges done on every pane focused in a client whose outer terminal has
+    /// focus. Returns whether any pane's done cleared.
+    pub(super) fn sync_acknowledging_panes(&mut self) -> bool {
+        let panes = self
+            .clients
+            .iter()
+            .filter(|(_, client)| {
+                client.is_active_shell_client() && client.outer_terminal_focus == Some(true)
+            })
+            .filter_map(|(&client_id, _)| {
+                let target = self.shell_target_for_client(client_id)?;
+                let pane_id = self
+                    .app
+                    .state
+                    .workspaces
+                    .get(target.workspace_index)?
+                    .tabs
+                    .get(target.tab_index)?
+                    .layout
+                    .focused();
+                Some(pane_id)
+            })
+            .collect::<HashSet<_>>();
+        if panes == self.app.state.acknowledging_panes
+            && !panes.iter().any(|&pane_id| self.pane_unseen(pane_id))
+        {
+            return false;
+        }
+        let updates = self.app.state.set_acknowledging_panes(panes);
+        for update in &updates {
+            self.app.emit_pane_state_update(update);
+        }
+        !updates.is_empty()
+    }
+
+    fn pane_unseen(&self, pane_id: crate::layout::PaneId) -> bool {
+        self.app
+            .state
+            .workspaces
+            .iter()
+            .find_map(|ws| ws.pane_state(pane_id))
+            .is_some_and(|pane| !pane.seen)
+    }
+
     pub(super) fn focused_shell_tabs(&self) -> HashSet<String> {
         self.clients
             .iter()

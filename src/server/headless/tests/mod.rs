@@ -8333,3 +8333,88 @@ fn no_handle_internal_event_bypass_in_module() {
         bypass_lines.join("\n  ")
     );
 }
+
+#[tokio::test]
+async fn done_clears_once_for_every_client_when_its_pane_is_focused_in_a_focused_terminal() {
+    let mut server = test_headless_server();
+    let mut workspace = crate::workspace::Workspace::test_new("acknowledgement");
+    let first_pane = workspace.tabs[0].root_pane;
+    let split_pane = workspace.test_split(ratatui::layout::Direction::Vertical);
+    let second_tab = workspace.test_add_tab(Some("second"));
+    let second_pane = workspace.tabs[second_tab].root_pane;
+    workspace.tabs[0].layout.focus_pane(first_pane);
+    server.app.state.workspaces = vec![workspace];
+    server.app.state.ensure_test_terminals();
+    server.app.state.active = Some(0);
+    server.app.state.selected = 0;
+    for pane_id in [first_pane, split_pane, second_pane] {
+        let terminal_id = server.app.state.terminal_id_for_pane(0, pane_id).unwrap();
+        server
+            .app
+            .state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .set_detected_state(
+                Some(crate::detect::Agent::Pi),
+                crate::detect::AgentState::Idle,
+            );
+        server.app.state.workspaces[0]
+            .pane_state_mut(pane_id)
+            .unwrap()
+            .seen = false;
+    }
+    let first_tab_id = server.app.public_tab_id(0, 0).unwrap();
+    let second_tab_id = server.app.public_tab_id(0, second_tab).unwrap();
+    let (first_control, _) = connect_test_shell(&mut server, 81, 100, 30);
+    let (second_control, _) = connect_test_shell(&mut server, 82, 100, 30);
+    let _ = first_control.recv().expect("first snapshot");
+    let _ = second_control.recv().expect("second snapshot");
+    assert!(server.focus_shell_client_on_tab(81, &first_tab_id));
+    assert!(server.focus_shell_client_on_tab(82, &second_tab_id));
+    let seen = |server: &HeadlessServer, pane_id| {
+        server.app.state.workspaces[0]
+            .pane_state(pane_id)
+            .unwrap()
+            .seen
+    };
+
+    server.clients.get_mut(&81).unwrap().outer_terminal_focus = Some(false);
+    server.clients.get_mut(&82).unwrap().outer_terminal_focus = None;
+    assert!(!server.sync_acknowledging_panes());
+    assert!(!seen(&server, first_pane));
+    assert!(!seen(&server, second_pane));
+
+    server.clients.get_mut(&81).unwrap().outer_terminal_focus = Some(true);
+    assert!(server.sync_acknowledging_panes());
+    assert!(seen(&server, first_pane));
+    assert!(
+        !seen(&server, split_pane),
+        "a visible but unfocused pane stays done"
+    );
+    assert!(!seen(&server, second_pane));
+    assert!(!server.sync_acknowledging_panes());
+
+    let status = |server: &HeadlessServer, pane_id| {
+        let public_pane_id = server.app.public_pane_id(0, pane_id).unwrap();
+        server
+            .app
+            .session_metadata_snapshot()
+            .agents
+            .into_iter()
+            .find(|agent| agent.pane_id == public_pane_id)
+            .map(|agent| agent.agent_status)
+    };
+    assert_eq!(
+        status(&server, second_pane),
+        Some(crate::api::schema::AgentStatus::Done)
+    );
+    server.clients.get_mut(&82).unwrap().outer_terminal_focus = Some(true);
+    assert!(server.sync_acknowledging_panes());
+    assert!(seen(&server, second_pane));
+    assert_eq!(
+        status(&server, second_pane),
+        Some(crate::api::schema::AgentStatus::Idle)
+    );
+    shutdown_test_runtimes(&mut server);
+}

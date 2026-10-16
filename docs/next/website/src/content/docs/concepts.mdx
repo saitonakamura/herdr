@@ -48,7 +48,7 @@ Agent states are:
 | `idle` | The agent is finished or waiting and has been seen. |
 | `unknown` | Herdr cannot confidently classify the state. |
 
-Each client tracks which completions it has displayed. Viewing a completion in one client does not clear another client's Done badge. CLI/API statuses use the server's seen state, so they need not match a particular client's badge; both `idle` and `done` mean ready for input.
+Done is acknowledged once, on the server: focusing the pane in any client whose terminal window has focus clears it for every client and for the CLI/API. Both `idle` and `done` mean ready for input.
 
 ## Session
 

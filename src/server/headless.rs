@@ -539,6 +539,10 @@ impl HeadlessServer {
             self.sync_immediate_pty_sources();
             self.stream_host_mouse_capture_mode();
             self.stream_direct_terminal_keyboard_mode();
+            if self.sync_acknowledging_panes() {
+                needs_render = true;
+                needs_full_render = true;
+            }
 
             // 7. Render virtually and stream frames. Hidden-only PTY work keeps a
             // bounded classification cadence without delaying presentation work
@@ -842,9 +846,6 @@ impl HeadlessServer {
         let server_keybindings = self.server_keybindings.clone();
         apply_keybindings(&mut self.app, &server_keybindings);
         self.sync_visible_server_config_diagnostic(false);
-        if outer_terminal_focus == Some(true) {
-            self.app.state.mark_active_tab_seen();
-        }
         self.app.set_host_terminal_appearance_state(
             host_terminal_appearance,
             host_terminal_appearance_explicit,
@@ -881,16 +882,8 @@ impl HeadlessServer {
         report
     }
 
-    fn foreground_client_outer_focus(&self) -> Option<bool> {
-        let client_id = self.foreground_client_id?;
-        self.clients.get(&client_id)?.outer_terminal_focus
-    }
-
-    fn active_tab_suppresses_notifications(&self, is_active_tab: bool) -> bool {
-        crate::app::actions::active_tab_suppresses_notifications(
-            is_active_tab,
-            self.foreground_client_outer_focus(),
-        )
+    fn pane_is_acknowledging(&self, pane_id: crate::layout::PaneId) -> bool {
+        self.app.state.acknowledging_panes.contains(&pane_id)
     }
 
     fn promote_client_to_foreground(&mut self, client_id: u64) -> bool {
@@ -3177,9 +3170,7 @@ impl HeadlessServer {
                 continue;
             }
 
-            let is_active_tab = self.app.state.pane_is_in_active_tab(*ws_idx, *pane_id);
-            let suppress_active_tab_notifications =
-                self.active_tab_suppresses_notifications(is_active_tab);
+            let acknowledging = self.pane_is_acknowledging(*pane_id);
 
             let agent = terminal_after.effective_known_agent();
             let agent_label = terminal_after.effective_agent_label().map(str::to_string);
@@ -3207,7 +3198,7 @@ impl HeadlessServer {
                 && should_forward_toast_to_clients(self.app.state.toast_config.delivery)
             {
                 if let Some(kind) = crate::app::actions::notification_toast_for_state_change(
-                    suppress_active_tab_notifications,
+                    acknowledging,
                     *prev_state,
                     new_state,
                 ) {
@@ -3248,7 +3239,7 @@ impl HeadlessServer {
             if self.app.state.toast_config.delay_seconds == 0 && self.app.state.sound.allows(agent)
             {
                 if let Some(sound) = crate::app::actions::notification_sound_for_state_change(
-                    suppress_active_tab_notifications,
+                    acknowledging,
                     *prev_state,
                     new_state,
                 ) {

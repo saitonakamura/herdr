@@ -271,7 +271,7 @@ mod tests {
         AgentSetParentParams, AgentTarget, EmptyParams, EventData, EventKind, Method, PaneTarget,
         Request,
     };
-    use crate::app::{App, AppEvent};
+    use crate::app::App;
     use crate::detect::{Agent, AgentState};
     use crate::layout::PaneId;
 
@@ -446,8 +446,8 @@ mod tests {
         assert_eq!(agent["parent_agent_id"], parent.as_str());
     }
 
-    #[tokio::test]
-    async fn closing_the_parent_pane_makes_its_children_top_level() {
+    #[test]
+    fn closing_the_parent_pane_makes_its_children_top_level() {
         let mut f = fixture();
         f.detect(f.root, Agent::Claude);
         f.detect(f.second, Agent::Pi);
@@ -461,10 +461,9 @@ mod tests {
             .map(|(seq, _)| *seq)
             .unwrap_or(0);
 
-        f.app.handle_internal_event(AppEvent::PaneDied {
-            pane_id: f.second,
-            exit_reason: crate::platform::ChildExitReason::Exited,
-        });
+        let pane_id = f.public(f.second);
+        let closed = f.call(Method::PaneClose(PaneTarget { pane_id }));
+        assert_eq!(closed["result"]["type"], "ok");
         assert!(f.app.state.agent_identities_dirty);
         f.app.sync_agent_identities();
 

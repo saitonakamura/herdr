@@ -26,3 +26,21 @@ Same change in loom: `report`, `reply`, `tell` and `inbox` keep their names and 
 
 - herdr-fork-agent-identity-parent
 - herdr-fork-claude-hooks-state
+
+## Resolution
+
+Draft, open until merged: [PR #15](https://github.com/saitonakamura/herdr/pull/15) (branch
+`fork/012-agent-messages`) and dotfiles branch `herdr-fork/012-agent-messages` (fe0839d).
+
+- herdr keeps a per-agent message queue (`report`, `reply`, `tell`) in session state, persisted
+  across restart and handoff. `message.send|list|get|withdraw` over the API, `herdr message
+  send|list|show|withdraw` on the CLI, `message.queued`/`message.delivered` events (plugin
+  hookable). Delivery types `[from <name>] <summary> (herdr message show <id>)` through the
+  `agent prompt` path when the recipient is idle without a draft, or blocked on a question with
+  an empty composer; otherwise oldest-first, one attempt per state change. Messages to agents that
+  are gone are dropped.
+- loom probes `herdr message list --help`; with it, report/reply/tell queue in herdr and record the
+  id as `message:`, inbox syncs `delivered:` from herdr, doctor counts only what herdr holds
+  pending. An asking report sends the parent only the pane the user is wanted in, never the
+  question, and is withdrawn once the child moves on. Stock herdr keeps loom's own push.
+- On-box: nothing beyond pulling dotfiles after both merge; the loom side is safe on stock herdr.

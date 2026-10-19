@@ -24,3 +24,25 @@ Branch, ahead/behind, git status and is-a-worktree are computed per pane from it
 ## Blocked by
 
 - herdr-fork-workspace-is-effort
+
+## Resolution
+
+Draft, open until merged: [PR #16](https://github.com/saitonakamura/herdr/pull/16) (branch
+`fork/016-repo-facts-per-pane`) and dotfiles branch `herdr-fork/016-repo-facts-per-pane` (1665eea).
+
+- Each pane's terminal carries `repo` (checkout root, repo name, branch, ahead/behind,
+  linked-worktree flag, optional dirty count) from its cwd. The Git worker dedupes by checkout
+  root, so ten panes in one checkout cost one refresh. Branch and ahead/behind are always fresh;
+  the dirty count (`git status --porcelain`) runs only while an agent row shows `git_dirty`, at
+  most every 5 s per checkout. Exposed as optional `repo` on `pane get/list` and `agent get/list`,
+  with `pane.updated` on change.
+- The workspace lost `identity_cwd` and its git facts. Space rows show name and rolled-up state;
+  `branch`/`git_status` still parse there but render nothing and `config check` flags them. New
+  agent-row tokens: `repo`, `branch`, `git_status`, `git_dirty`, `worktree`.
+- Fork config overlay (own commit, FORK.md § fork config overlay): fork builds merge an optional
+  `config.fork.toml` over `config.toml`, so the shared dotfiles carry fork-only tokens without
+  stock rejecting the file. The dotfiles put the trimmed space rows and a repo row per agent there;
+  `config.toml` is unchanged.
+- On-box: `~/.config/herdr/config.fork.toml` is linked on the primary mac and resolves once the
+  dotfiles branch merges. Other unix boxes run the `ln -sfn` from `docs/setup/herdr.md` at
+  cutover. The work and windows generated configs don't carry the overlay yet.

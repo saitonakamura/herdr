@@ -285,27 +285,6 @@ impl App {
             return;
         }
 
-        #[cfg(windows)]
-        {
-            if !params.force
-                && crate::worktree::checkout_has_dirty_files(
-                    &space.checkout_path,
-                    params.trust_repository,
-                )
-                .unwrap_or(false)
-            {
-                Self::send_api_response(
-                    respond_to,
-                    encode_error(
-                        id,
-                        "dirty_worktree_requires_force",
-                        crate::worktree::worktree_dirty_remove_message(&space.checkout_path),
-                    ),
-                );
-                return;
-            }
-        }
-
         let checkout_key = crate::worktree::canonical_or_original(&space.checkout_path);
         let tabs = self.tabs_for_checkout(&space.checkout_path);
         let pane_ids = tabs
@@ -336,6 +315,28 @@ impl App {
                 ),
             );
             return;
+        }
+
+        // After the in-progress check: a duplicate must not run `git status` beside the removal.
+        #[cfg(windows)]
+        {
+            if !params.force
+                && crate::worktree::checkout_has_dirty_files(
+                    &space.checkout_path,
+                    params.trust_repository,
+                )
+                .unwrap_or(false)
+            {
+                Self::send_api_response(
+                    respond_to,
+                    encode_error(
+                        id,
+                        "dirty_worktree_requires_force",
+                        crate::worktree::worktree_dirty_remove_message(&space.checkout_path),
+                    ),
+                );
+                return;
+            }
         }
 
         let shutdown_panes =

@@ -120,34 +120,29 @@ fn worktree_management_commands_work() {
     );
     assert_eq!(created["result"]["type"], "worktree_created");
     assert_eq!(created["result"]["worktree"]["branch"], branch);
-    let child_workspace_id = created["result"]["workspace"]["workspace_id"]
+    // With no workspace open, the worktree's tab gets a workspace of its own.
+    let workspace_id = created["result"]["workspace"]["workspace_id"]
         .as_str()
         .unwrap()
         .to_string();
+    let tab_id = created["result"]["tab"]["tab_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(
+        created["result"]["tab"]["worktree"]["is_linked_worktree"],
+        true
+    );
     assert!(checkout.join("README.md").exists());
 
     let workspaces = run_cli_json(&socket_path, &["workspace", "list"]);
     let workspace_list = workspaces["result"]["workspaces"].as_array().unwrap();
-    let parent_workspace_id = workspace_list
-        .iter()
-        .find(|workspace| workspace["worktree"]["is_linked_worktree"].as_bool() == Some(false))
-        .and_then(|workspace| workspace["workspace_id"].as_str())
-        .unwrap()
-        .to_string();
-    assert!(workspace_list.iter().any(|workspace| {
-        workspace["workspace_id"].as_str() == Some(child_workspace_id.as_str())
-            && workspace["worktree"]["is_linked_worktree"].as_bool() == Some(true)
-    }));
+    assert_eq!(workspace_list.len(), 1);
+    assert!(workspace_list[0].get("worktree").is_none());
 
     let listed = run_cli_json(
         &socket_path,
-        &[
-            "worktree",
-            "list",
-            "--workspace",
-            &parent_workspace_id,
-            "--json",
-        ],
+        &["worktree", "list", "--workspace", &workspace_id, "--json"],
     );
     let listed_entry = listed["result"]["worktrees"]
         .as_array()
@@ -155,9 +150,10 @@ fn worktree_management_commands_work() {
         .iter()
         .find(|entry| entry["branch"].as_str() == Some(branch))
         .unwrap();
+    assert_eq!(listed_entry["open_tab_id"].as_str(), Some(tab_id.as_str()));
     assert_eq!(
         listed_entry["open_workspace_id"].as_str(),
-        Some(child_workspace_id.as_str())
+        Some(workspace_id.as_str())
     );
 
     let opened = run_cli_json(
@@ -166,7 +162,7 @@ fn worktree_management_commands_work() {
             "worktree",
             "open",
             "--workspace",
-            &parent_workspace_id,
+            &workspace_id,
             "--branch",
             branch,
             "--json",
@@ -175,20 +171,14 @@ fn worktree_management_commands_work() {
     assert_eq!(opened["result"]["type"], "worktree_opened");
     assert_eq!(opened["result"]["already_open"], true);
     assert_eq!(
-        opened["result"]["workspace"]["workspace_id"].as_str(),
-        Some(child_workspace_id.as_str())
+        opened["result"]["tab"]["tab_id"].as_str(),
+        Some(tab_id.as_str())
     );
 
     fs::write(checkout.join("README.md"), "dirty\n").unwrap();
     let safe_remove = run_cli(
         &socket_path,
-        &[
-            "worktree",
-            "remove",
-            "--workspace",
-            &child_workspace_id,
-            "--json",
-        ],
+        &["worktree", "remove", "--tab", &tab_id, "--json"],
     );
     assert_eq!(safe_remove.status.code(), Some(1));
     let safe_remove_json: serde_json::Value = serde_json::from_slice(&safe_remove.stderr).unwrap();
@@ -204,7 +194,7 @@ fn worktree_management_commands_work() {
             "worktree",
             "remove",
             "--workspace",
-            &child_workspace_id,
+            &workspace_id,
             "--force",
             "--json",
         ],
@@ -217,7 +207,7 @@ fn worktree_management_commands_work() {
 }
 
 #[test]
-fn workspace_close_requires_explicit_worktree_group_intent() {
+fn workspace_close_takes_only_the_workspace_named() {
     let base = unique_test_dir();
     let config_home = base.join("config");
     let runtime_dir = base.join("runtime");
@@ -237,49 +227,39 @@ fn workspace_close_requires_explicit_worktree_group_intent() {
             "--cwd",
             repo.to_str().unwrap(),
             "--branch",
-            "worktree/group-close",
+            "worktree/close",
             "--path",
             checkout.to_str().unwrap(),
         ],
     );
     assert_eq!(created["result"]["type"], "worktree_created");
-    let workspaces = run_cli_json(&socket_path, &["workspace", "list"]);
-    let workspace_list = workspaces["result"]["workspaces"].as_array().unwrap();
-    let parent_workspace_id = workspace_list
-        .iter()
-        .find(|workspace| workspace["worktree"]["is_linked_worktree"] == false)
-        .and_then(|workspace| workspace["workspace_id"].as_str())
+    let worktree_workspace_id = created["result"]["workspace"]["workspace_id"]
+        .as_str()
         .unwrap()
         .to_string();
-    let workspace_ids = workspace_list
-        .iter()
-        .map(|workspace| workspace["workspace_id"].as_str().unwrap().to_string())
-        .collect::<Vec<_>>();
-
-    let rejected = run_cli(&socket_path, &["workspace", "close", &parent_workspace_id]);
-    assert_eq!(rejected.status.code(), Some(1));
-    let error: serde_json::Value = serde_json::from_slice(&rejected.stderr).unwrap();
-    assert_eq!(error["error"]["code"], "workspace_group_close_required");
-    let after_rejection = run_cli_json(&socket_path, &["workspace", "list"]);
-    assert_eq!(
-        after_rejection["result"]["workspaces"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|workspace| workspace["workspace_id"].as_str().unwrap().to_string())
-            .collect::<Vec<_>>(),
-        workspace_ids
-    );
-
-    let closed = run_cli(
+    let other = run_cli_json(
         &socket_path,
-        &["workspace", "close", &parent_workspace_id, "--group"],
+        &["workspace", "create", "--cwd", repo.to_str().unwrap()],
     );
-    assert!(
-        closed.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&closed.stderr)
-    );
+    let other_workspace_id = other["result"]["workspace"]["workspace_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // `--group` is still accepted; no workspace has a group to take along.
+    for (workspace_id, flags) in [
+        (&other_workspace_id, &[][..]),
+        (&worktree_workspace_id, &["--group"][..]),
+    ] {
+        let mut args = vec!["workspace", "close", workspace_id.as_str()];
+        args.extend_from_slice(flags);
+        let closed = run_cli(&socket_path, &args);
+        assert!(
+            closed.status.success(),
+            "stderr: {}",
+            String::from_utf8_lossy(&closed.stderr)
+        );
+    }
     let after_close = run_cli_json(&socket_path, &["workspace", "list"]);
     assert!(after_close["result"]["workspaces"]
         .as_array()
@@ -405,30 +385,22 @@ fn worktree_open_existing_checkout_by_path_and_branch() {
     assert_eq!(opened["result"]["already_open"], false);
     assert_eq!(opened["result"]["worktree"]["branch"], branch);
     assert_eq!(
-        opened["result"]["workspace"]["worktree"]["is_linked_worktree"],
+        opened["result"]["tab"]["worktree"]["is_linked_worktree"],
         true
     );
     let child_workspace_id = opened["result"]["workspace"]["workspace_id"]
         .as_str()
         .unwrap()
         .to_string();
-
-    let workspaces = run_cli_json(&socket_path, &["workspace", "list"]);
-    let workspace_list = workspaces["result"]["workspaces"].as_array().unwrap();
-    let parent_workspace_id = workspace_list
-        .iter()
-        .find(|workspace| workspace["worktree"]["is_linked_worktree"].as_bool() == Some(false))
-        .and_then(|workspace| workspace["workspace_id"].as_str())
-        .unwrap()
-        .to_string();
+    let parent_workspace_id = child_workspace_id.clone();
 
     let listed = run_cli_json(
         &socket_path,
         &[
             "worktree",
             "list",
-            "--workspace",
-            &parent_workspace_id,
+            "--cwd",
+            base.join("repo").to_str().unwrap(),
             "--json",
         ],
     );
@@ -658,9 +630,8 @@ fn worktree_cli_rejects_local_argument_errors_before_socket_use() {
     fs::create_dir_all(&base).unwrap();
     let socket_path = base.join("missing.sock");
     let cases: &[&[&str]] = &[
-        &["worktree", "list", "--workspace", "1", "--cwd", "/tmp"],
-        &["worktree", "create", "--workspace", "1", "--cwd", "/tmp"],
         &["worktree", "open", "--workspace", "1"],
+        &["worktree", "remove", "--tab", "1:1", "--workspace", "1"],
         &[
             "worktree",
             "open",
@@ -668,16 +639,6 @@ fn worktree_cli_rejects_local_argument_errors_before_socket_use() {
             "1",
             "--path",
             "a",
-            "--branch",
-            "b",
-        ],
-        &[
-            "worktree",
-            "open",
-            "--workspace",
-            "1",
-            "--cwd",
-            "/tmp",
             "--branch",
             "b",
         ],

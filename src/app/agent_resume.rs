@@ -238,7 +238,7 @@ impl App {
             return false;
         }
 
-        let Some(resume_command) = shell_command_from_argv(&plan.argv) else {
+        let Some(resume_command) = shell_command_from_argv(&resume_argv_with_env(&plan)) else {
             tracing::warn!(
                 pane = pane_id.raw(),
                 terminal = %terminal_id,
@@ -247,9 +247,15 @@ impl App {
             );
             return false;
         };
+        let saved_env = self
+            .state
+            .terminals
+            .get(&terminal_id)
+            .map(|terminal| shell_env_for_resume(&terminal.launch_env, &plan))
+            .unwrap_or_default();
         let Some(launch_env) = self
             .find_pane(pane_id)
-            .and_then(|(ws_idx, _)| self.pane_launch_env(ws_idx, pane_id, Vec::new()))
+            .and_then(|(ws_idx, _)| self.pane_launch_env(ws_idx, pane_id, saved_env))
         else {
             return false;
         };
@@ -353,6 +359,53 @@ fn stable_terminal_inner_rect(pane_inner: Rect) -> Rect {
     )
 }
 
+/// On unix the plan's environment goes on the command itself through `env`,
+/// after the shell's startup and directory hooks have run.
+#[cfg(unix)]
+fn resume_argv_with_env(plan: &crate::agent_resume::AgentResumePlan) -> Vec<String> {
+    if plan.env.is_empty() {
+        return plan.argv.clone();
+    }
+    let mut argv = vec!["env".to_string()];
+    for (key, value) in &plan.env {
+        match value {
+            Some(value) => argv.push(format!("{key}={value}")),
+            None => argv.extend(["-u".to_string(), key.clone()]),
+        }
+    }
+    argv.extend(plan.argv.iter().cloned());
+    argv
+}
+
+#[cfg(unix)]
+fn shell_env_for_resume(
+    saved: &[(String, String)],
+    _plan: &crate::agent_resume::AgentResumePlan,
+) -> Vec<(String, String)> {
+    saved.to_vec()
+}
+
+#[cfg(windows)]
+fn resume_argv_with_env(plan: &crate::agent_resume::AgentResumePlan) -> Vec<String> {
+    plan.argv.clone()
+}
+
+/// Windows shells have no `env`, so the variables a resume sets reach the
+/// agent through its shell instead.
+#[cfg(windows)]
+fn shell_env_for_resume(
+    saved: &[(String, String)],
+    plan: &crate::agent_resume::AgentResumePlan,
+) -> Vec<(String, String)> {
+    let mut env = saved.to_vec();
+    env.extend(
+        plan.env
+            .iter()
+            .filter_map(|(key, value)| Some((key.clone(), value.clone()?))),
+    );
+    env
+}
+
 fn shell_command_from_argv(argv: &[String]) -> Option<String> {
     let mut parts = argv.iter();
     let first = shell_quote(parts.next()?);
@@ -383,6 +436,29 @@ fn shell_quote(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn resume_command_sets_and_unsets_its_env_after_the_shell_starts() {
+        let plan = crate::agent_resume::AgentResumePlan {
+            agent: "claude".into(),
+            argv: vec!["claude".into(), "--resume".into(), "abc".into()],
+            dedupe_key: String::new(),
+            env: vec![
+                (
+                    "CLAUDE_CONFIG_DIR".into(),
+                    Some("/home/u/.claude-personal".into()),
+                ),
+                ("CODEX_HOME".into(), None),
+            ],
+        };
+        assert_eq!(
+            shell_command_from_argv(&resume_argv_with_env(&plan)).as_deref(),
+            Some(
+                "env CLAUDE_CONFIG_DIR=/home/u/.claude-personal -u CODEX_HOME claude --resume abc"
+            )
+        );
+    }
 
     #[cfg(unix)]
     fn test_app() -> App {
@@ -427,6 +503,7 @@ mod tests {
                     agent: "codex".into(),
                     argv: vec!["codex".into()],
                     dedupe_key: terminal.id.to_string(),
+                    env: Vec::new(),
                 });
             }
             let now = Instant::now();
@@ -522,6 +599,7 @@ mod tests {
                 agent: "codex".into(),
                 argv: long_running_test_argv(),
                 dedupe_key: "resume-test".into(),
+                env: Vec::new(),
             });
             app.start_pending_agent_resume_for_terminal(&terminal_id, 24, 80, true);
             assert!(app.terminal_runtimes.get(&terminal_id).is_none());
@@ -558,6 +636,7 @@ mod tests {
             agent: "codex".into(),
             argv: marker_resume_test_argv(),
             dedupe_key: "herdr:codex\0codex\0Id\0codex-session".into(),
+            env: Vec::new(),
         });
 
         assert!(!app.start_pending_agent_resumes(Instant::now(), false));
@@ -636,6 +715,7 @@ mod tests {
             agent: "codex".into(),
             argv: long_running_test_argv(),
             dedupe_key: "herdr:codex\0codex\0Id\0codex-session".into(),
+            env: Vec::new(),
         });
 
         app.sync_pending_agent_resume_deadline(std::time::Instant::now());
@@ -687,6 +767,7 @@ mod tests {
                 agent: "codex".into(),
                 argv: long_running_test_argv(),
                 dedupe_key: format!("herdr:codex\0codex\0Id\0{terminal_id}"),
+                env: Vec::new(),
             });
         }
         app.pending_agent_resume_deadline =
@@ -757,6 +838,7 @@ mod tests {
             agent: "codex".into(),
             argv: long_running_test_argv(),
             dedupe_key: "herdr:codex\0codex\0Id\0inactive-tab-session".into(),
+            env: Vec::new(),
         });
 
         assert!(app.start_pending_agent_resumes(Instant::now(), false));
@@ -818,6 +900,7 @@ mod tests {
             agent: "codex".into(),
             argv: long_running_test_argv(),
             dedupe_key: "herdr:codex\0codex\0Id\0zoom-hidden-session".into(),
+            env: Vec::new(),
         });
 
         assert!(app.start_pending_agent_resumes(Instant::now(), false));
@@ -876,6 +959,7 @@ mod tests {
             agent: "codex".into(),
             argv: long_running_test_argv(),
             dedupe_key: "herdr:codex\0codex\0Id\0codex-session".into(),
+            env: Vec::new(),
         });
 
         app.sync_pending_agent_resume_deadline(std::time::Instant::now());
@@ -937,6 +1021,7 @@ mod tests {
             agent: "codex".into(),
             argv: long_running_test_argv(),
             dedupe_key: "herdr:codex\0codex\0Id\0codex-session".into(),
+            env: Vec::new(),
         });
 
         assert!(app.start_pending_agent_resumes(Instant::now(), false));

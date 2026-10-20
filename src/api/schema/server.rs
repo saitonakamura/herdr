@@ -61,4 +61,8 @@ pub struct ServerCapabilities {
     /// Opens worktrees as tabs in a workspace and removes them by tab.
     #[serde(default)]
     pub worktree_tabs: bool,
+    /// Resumes a restored agent with its `agent start` args, its pane's `--env`
+    /// and its session's profile directory.
+    #[serde(default)]
+    pub agent_launch_resume: bool,
 }

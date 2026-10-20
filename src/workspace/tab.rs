@@ -179,7 +179,8 @@ impl Tab {
                 TerminalState::new(terminal_id.clone(), initial_cwd).with_launch_argv(argv.to_vec())
             }
             None => TerminalState::new(terminal_id.clone(), initial_cwd),
-        };
+        }
+        .with_launch_env(launch_env.extra().to_vec());
         let mut panes = HashMap::new();
         panes.insert(root_id, PaneState::new(terminal_id));
 
@@ -360,6 +361,11 @@ impl Tab {
         } else {
             None
         };
+        let saved_env = match &command {
+            Some(SplitCommand::Shell { launch_env, .. })
+            | Some(SplitCommand::Argv { launch_env, .. }) => launch_env.extra().to_vec(),
+            None => launch_env.extra().to_vec(),
+        };
         let runtime = match command {
             Some(SplitCommand::Shell {
                 command,
@@ -422,7 +428,8 @@ impl Tab {
                 TerminalState::new(terminal_id.clone(), actual_cwd).with_launch_argv(argv)
             }
             None => TerminalState::new(terminal_id.clone(), actual_cwd),
-        };
+        }
+        .with_launch_env(saved_env);
         if focus_new_pane {
             self.layout.focus_pane(new_id);
         }

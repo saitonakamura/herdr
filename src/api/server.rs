@@ -77,6 +77,7 @@ fn default_capabilities() -> Option<ServerCapabilities> {
         ssh_agent_registration: false,
         worktree_post_create: true,
         worktree_tabs: true,
+        agent_launch_resume: true,
     })
 }
 
@@ -1160,6 +1161,8 @@ mod tests {
             agent_session: None,
             agent_id: None,
             parent_agent_id: None,
+            launch_args: None,
+            agent_home: None,
             scroll: None,
             revision: 0,
         }
@@ -1405,6 +1408,7 @@ mod tests {
                 ssh_agent_registration: false,
                 worktree_post_create: false,
                 worktree_tabs: false,
+                agent_launch_resume: false,
             }),
             None,
             None,

@@ -90,7 +90,7 @@ fn collapsed_workspace_jitter_remains_a_click() {
 }
 
 #[test]
-fn grouped_worktrees_render_parent_branch_and_indented_child() {
+fn grouped_worktrees_render_indented_child_without_repo_facts() {
     let config = ClientShellConfig::from_config(&Config::default());
     let mut state = ClientShellState::new(config);
     let mut snapshot = snapshot();
@@ -130,9 +130,11 @@ fn grouped_worktrees_render_parent_branch_and_indented_child() {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(text.contains("main"));
+    assert!(text.contains("client-shell"));
+    assert!(!text.contains("main"));
     assert!(text.contains("└─"));
-    assert!(text.contains("feature"));
+    assert!(text.contains("repo-feature"));
+    assert!(!text.contains("worktree/feature"));
 
     let mut replacement = (**state.snapshot.as_ref().expect("snapshot")).clone();
     replacement.revision = 2;
@@ -568,6 +570,7 @@ fn pane_cycle_last_and_agent_actions_resolve_to_stable_pane_ids() {
     initial.panes.push(second);
     initial.agents = vec![
         ClientShellAgent {
+            repo: None,
             pane_id: "pane_1".into(),
             workspace_id: "ws_1".into(),
             tab_id: "tab_1".into(),
@@ -584,6 +587,7 @@ fn pane_cycle_last_and_agent_actions_resolve_to_stable_pane_ids() {
             focused: true,
         },
         ClientShellAgent {
+            repo: None,
             pane_id: "pane_2".into(),
             workspace_id: "ws_1".into(),
             tab_id: "tab_1".into(),
@@ -658,6 +662,7 @@ fn agent_sidebar_honors_priority_symbols_tokens_and_stable_hits() {
     projected.panes.push(second_pane);
     projected.agents = vec![
         ClientShellAgent {
+            repo: None,
             pane_id: "pane_1".into(),
             workspace_id: "ws_1".into(),
             tab_id: "tab_1".into(),
@@ -674,6 +679,7 @@ fn agent_sidebar_honors_priority_symbols_tokens_and_stable_hits() {
             focused: true,
         },
         ClientShellAgent {
+            repo: None,
             pane_id: "pane_2".into(),
             workspace_id: "ws_1".into(),
             tab_id: "tab_1".into(),
@@ -797,6 +803,7 @@ fn muted_agent_sidebar_rows_do_not_stack_terminal_faint() {
     projected.tabs[0].label = "second".into();
     projected.tabs[0].custom_label = true;
     projected.agents = vec![ClientShellAgent {
+        repo: None,
         pane_id: "pane_1".into(),
         workspace_id: "ws_1".into(),
         tab_id: "tab_1".into(),
@@ -864,6 +871,7 @@ fn active_agent_view_controls_sidebar_order_and_focus_indices() {
     projected.panes.push(third_pane);
     projected.agents = vec![
         ClientShellAgent {
+            repo: None,
             pane_id: "pane_1".into(),
             workspace_id: "ws_1".into(),
             tab_id: "tab_1".into(),
@@ -880,6 +888,7 @@ fn active_agent_view_controls_sidebar_order_and_focus_indices() {
             focused: true,
         },
         ClientShellAgent {
+            repo: None,
             pane_id: "pane_2".into(),
             workspace_id: "ws_1".into(),
             tab_id: "tab_1".into(),
@@ -896,6 +905,7 @@ fn active_agent_view_controls_sidebar_order_and_focus_indices() {
             focused: false,
         },
         ClientShellAgent {
+            repo: None,
             pane_id: "pane_3".into(),
             workspace_id: "ws_1".into(),
             tab_id: "tab_1".into(),
@@ -970,6 +980,7 @@ fn agent_sort_toggle_is_client_local_and_persists_per_endpoint() {
     ));
     let mut projected = snapshot();
     projected.agents.push(ClientShellAgent {
+        repo: None,
         pane_id: "pane_1".into(),
         workspace_id: "ws_1".into(),
         tab_id: "tab_1".into(),
@@ -1535,6 +1546,7 @@ fn semantic_notifications_use_client_policy_and_stable_navigation_targets() {
     let mut state = ClientShellState::new(config);
     let mut projected = snapshot();
     projected.agents.push(ClientShellAgent {
+        repo: None,
         pane_id: "pane_2".into(),
         workspace_id: "ws_2".into(),
         tab_id: "tab_2".into(),
@@ -1681,4 +1693,49 @@ fn semantic_notifications_use_client_policy_and_stable_navigation_targets() {
     assert!(repaint);
     assert!(state.visible_notification.is_none());
     assert_eq!(state.pending_notifications.len(), 1);
+}
+
+#[test]
+fn default_agent_rows_show_the_pane_repo_branch_and_ahead_behind() {
+    let config = ClientShellConfig::from_config(&Config::default());
+    let mut snapshot = snapshot();
+    snapshot.agents = vec![ClientShellAgent {
+        pane_id: "pane_1".into(),
+        workspace_id: "ws_1".into(),
+        tab_id: "tab_1".into(),
+        name: Some("coder".into()),
+        display_agent: None,
+        agent: None,
+        title: None,
+        terminal_title: None,
+        terminal_title_stripped: None,
+        agent_status: AgentStatus::Idle,
+        state_change_seq: 1,
+        state_labels: Vec::new(),
+        tokens: Vec::new(),
+        focused: true,
+        repo: Some(crate::protocol::ClientShellRepo {
+            repo_name: "herdr".into(),
+            branch: Some("fork/016".into()),
+            ahead_behind: Some((1, 2)),
+            dirty: Some(4),
+            worktree: None,
+        }),
+    }];
+
+    let row = super::agent_sidebar::agent_row(&snapshot, "pane_1", &config, None).unwrap();
+
+    let kinds = row
+        .rows
+        .concat()
+        .into_iter()
+        .map(|token| token.kind)
+        .collect::<Vec<_>>();
+    assert!(kinds.contains(&crate::ui::ResolvedTokenKind::Branch("fork/016".into())));
+    assert!(kinds.contains(&crate::ui::ResolvedTokenKind::GitStatus {
+        ahead: 1,
+        behind: 2
+    }));
+    // Not in the default rows: a dirty count costs a `git status` per refresh.
+    assert!(!kinds.contains(&crate::ui::ResolvedTokenKind::GitDirty(4)));
 }

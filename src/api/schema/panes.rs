@@ -544,9 +544,53 @@ pub struct PaneInfo {
     /// The agent that started this one; absent for a top-level agent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_agent_id: Option<String>,
+    /// The Git checkout containing `cwd`; absent outside one or before its first refresh.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repo: Option<PaneRepoInfo>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scroll: Option<PaneScrollInfo>,
     pub revision: u64,
+}
+
+/// Repo facts for the checkout containing a pane's cwd. Panes in one checkout
+/// share one refresh.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PaneRepoInfo {
+    /// The checkout's root directory.
+    pub root: String,
+    /// The repository's name; for a linked worktree, its main checkout's name.
+    pub repo_name: String,
+    /// The checked-out branch; absent on a detached HEAD.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    /// Commits ahead of the branch's upstream; absent without an upstream.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ahead: Option<usize>,
+    /// Commits behind the branch's upstream; absent without an upstream.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub behind: Option<usize>,
+    /// Changed paths (staged, unstaged, untracked). Counted only while a
+    /// sidebar agent row shows `git_dirty`; absent otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dirty: Option<usize>,
+    #[serde(default, skip_serializing_if = "super::is_false")]
+    pub is_linked_worktree: bool,
+}
+
+impl PaneRepoInfo {
+    /// `None` outside a Git checkout.
+    pub(crate) fn from_repo(repo: &crate::workspace::PaneRepo) -> Option<Self> {
+        let space = repo.facts.space.as_ref()?;
+        Some(Self {
+            root: space.checkout_key.clone(),
+            repo_name: space.repo_name.clone(),
+            branch: repo.facts.branch.clone(),
+            ahead: repo.facts.ahead_behind.map(|(ahead, _)| ahead),
+            behind: repo.facts.ahead_behind.map(|(_, behind)| behind),
+            dirty: repo.facts.dirty,
+            is_linked_worktree: space.is_linked_worktree,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

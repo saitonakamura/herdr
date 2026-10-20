@@ -7,7 +7,7 @@ use std::time::Instant;
 
 use crate::detect::{Agent, AgentState};
 use crate::layout::PaneId;
-use crate::workspace::{GitStatusCacheEntry, WorkspaceGitStatus};
+use crate::workspace::{GitStatusCacheEntry, PaneGitStatus};
 
 #[derive(Debug)]
 pub struct ApiWorktreeAddRequest {
@@ -190,7 +190,7 @@ pub enum AppEvent {
     },
     /// Background git status refresh completed for workspaces.
     GitStatusRefreshed {
-        results: Vec<WorkspaceGitStatus>,
+        results: Vec<PaneGitStatus>,
         cache_updates: Vec<(std::path::PathBuf, GitStatusCacheEntry)>,
     },
     /// Background validation of a saved membership after session restore.

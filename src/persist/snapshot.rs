@@ -313,11 +313,12 @@ fn capture_workspace(
         .iter()
         .map(|tab| capture_tab(tab, terminals, terminal_runtimes))
         .collect();
+    // Written for format detection and older builds; a workspace has no cwd of its own.
     let identity_cwd = tabs
         .first()
         .and_then(|tab| tab.root_pane.and_then(|id| tab.panes.get(&id)))
         .map(|pane| pane.cwd.clone())
-        .unwrap_or_else(|| ws.identity_cwd.clone());
+        .unwrap_or_default();
     WorkspaceSnapshot {
         id: Some(ws.id.clone()),
         custom_name: ws.custom_name.clone(),
@@ -1147,7 +1148,7 @@ mod tests {
         let new = std::fs::canonicalize(new).unwrap();
         let mut state = AppState::test_new();
         state.workspaces = vec![Workspace::test_new("cwd-source")];
-        state.workspaces[0].identity_cwd = old.clone();
+        state.workspaces[0].test_cwd = old.clone();
         state.active = Some(0);
         state.ensure_test_terminals();
         let pane_id = state.workspaces[0].tabs[0].root_pane;
@@ -1233,7 +1234,7 @@ mod tests {
     fn capture_contract_tracks_workspace_identity_and_pane_cwds() {
         let mut state = state_with_workspaces(&["one"]);
         let root = state.workspaces[0].tabs[0].root_pane;
-        state.workspaces[0].identity_cwd = PathBuf::from("/tmp/pion");
+        state.workspaces[0].test_cwd = PathBuf::from("/tmp/pion");
         let second = state.workspaces[0].test_split(Direction::Horizontal);
         state.ensure_test_terminals();
         let root_terminal_id = state.workspaces[0].tabs[0].panes[&root]

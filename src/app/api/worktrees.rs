@@ -248,11 +248,14 @@ impl App {
             });
         }
 
-        let git_space = ws.git_space().cloned().or_else(|| {
-            ws.resolved_identity_cwd_from(&self.state.terminals, &self.terminal_runtimes)
-                .as_deref()
-                .and_then(crate::workspace::git_space_metadata)
-        });
+        let git_space = ws
+            .first_pane_git_space(&self.state.terminals)
+            .cloned()
+            .or_else(|| {
+                ws.first_pane_cwd_from(&self.state.terminals, &self.terminal_runtimes)
+                    .as_deref()
+                    .and_then(crate::workspace::git_space_metadata)
+            });
         let Some(space) = git_space else {
             return Err(ApiFailure::new(
                 "not_git_worktree",
@@ -346,7 +349,7 @@ impl App {
             ws.worktree_space()
                 .is_some_and(|space| space.key == repo_key && !space.is_linked_worktree)
                 || ws
-                    .git_space()
+                    .first_pane_git_space(&self.state.terminals)
                     .is_some_and(|space| space.key == repo_key && !space.is_linked_worktree)
         })
     }
@@ -449,11 +452,14 @@ impl App {
                     == canonical_checkout;
             }
 
-            let git_space = ws.git_space().cloned().or_else(|| {
-                ws.resolved_identity_cwd_from(&self.state.terminals, &self.terminal_runtimes)
-                    .as_deref()
-                    .and_then(crate::workspace::git_space_metadata)
-            });
+            let git_space = ws
+                .first_pane_git_space(&self.state.terminals)
+                .cloned()
+                .or_else(|| {
+                    ws.first_pane_cwd_from(&self.state.terminals, &self.terminal_runtimes)
+                        .as_deref()
+                        .and_then(crate::workspace::git_space_metadata)
+                });
             if git_space
                 .as_ref()
                 .is_some_and(|metadata| metadata.checkout_key == checkout_key)
@@ -461,7 +467,7 @@ impl App {
                 return true;
             }
 
-            ws.resolved_identity_cwd_from(&self.state.terminals, &self.terminal_runtimes)
+            ws.first_pane_cwd_from(&self.state.terminals, &self.terminal_runtimes)
                 .as_deref()
                 .is_some_and(|cwd| {
                     crate::worktree::canonical_or_original(cwd) == canonical_checkout
@@ -663,7 +669,7 @@ mod tests {
     fn app_with_parent(repo: &Path) -> App {
         let mut app = test_app();
         let mut parent = Workspace::test_new("main");
-        parent.identity_cwd = repo.to_path_buf();
+        parent.test_cwd = repo.to_path_buf();
         app.state.workspaces = vec![parent];
         app.state.ensure_test_terminals();
         app.state.active = Some(0);
@@ -747,7 +753,7 @@ mod tests {
         let event_hub = crate::api::EventHub::default();
         let mut app = test_app_with_event_hub(event_hub.clone());
         let mut parent = Workspace::test_new("main");
-        parent.identity_cwd = repo.clone();
+        parent.test_cwd = repo.clone();
         app.state.workspaces = vec![parent];
         app.state.ensure_test_terminals();
         app.state.active = Some(0);
@@ -941,7 +947,7 @@ mod tests {
         let event_hub = crate::api::EventHub::default();
         let mut app = test_app_with_event_hub(event_hub.clone());
         let mut parent = Workspace::test_new("main");
-        parent.identity_cwd = repo.clone();
+        parent.test_cwd = repo.clone();
         app.state.workspaces = vec![parent];
         app.state.ensure_test_terminals();
         app.state.active = Some(0);
@@ -1021,7 +1027,7 @@ mod tests {
         run_git(&repo, &["branch", branch]);
         let mut app = test_app();
         let mut parent = Workspace::test_new("main");
-        parent.identity_cwd = repo.clone();
+        parent.test_cwd = repo.clone();
         let parent_id = parent.id.clone();
         app.state.workspaces = vec![parent];
         app.state.ensure_test_terminals();
@@ -1086,7 +1092,7 @@ mod tests {
             .to_string();
         let mut app = test_app();
         let mut parent = Workspace::test_new("main");
-        parent.identity_cwd = repo.clone();
+        parent.test_cwd = repo.clone();
         let parent_id = parent.id.clone();
         app.state.workspaces = vec![parent];
         app.state.ensure_test_terminals();
@@ -1211,7 +1217,7 @@ mod tests {
         std::fs::create_dir_all(&checkout).unwrap();
         let checkout_key = crate::worktree::canonical_or_original(&checkout);
         let mut source = Workspace::test_new("source");
-        source.identity_cwd = repo.clone();
+        source.test_cwd = repo.clone();
         let source_id = source.id.clone();
         app.state.workspaces = vec![source];
         app.pending_api_worktree_creates
@@ -1444,10 +1450,10 @@ mod tests {
         let event_hub = crate::api::EventHub::default();
         let mut app = test_app_with_event_hub(event_hub.clone());
         let mut parent = Workspace::test_new("main");
-        parent.identity_cwd = repo.clone();
+        parent.test_cwd = repo.clone();
         app.state.workspaces = vec![parent];
         let mut child = Workspace::test_new("child");
-        child.identity_cwd = subdir;
+        child.test_cwd = subdir;
         app.state.workspaces.push(child);
         app.state.ensure_test_terminals();
 
@@ -1536,15 +1542,16 @@ mod tests {
 
         // Shell navigation and refreshed Git metadata must not override provenance.
         let parent = &mut app.state.workspaces[0];
-        parent.cached_git_space = crate::workspace::git_space_metadata(&checkout);
         let terminal_id = parent.tabs[0]
             .terminal_id(parent.tabs[0].root_pane)
             .unwrap();
-        app.state.terminals.get_mut(terminal_id).unwrap().cwd = checkout.clone();
+        let terminal = app.state.terminals.get_mut(terminal_id).unwrap();
+        terminal.cwd = checkout.clone();
+        terminal.repo = Some(crate::workspace::PaneRepo::test_at(&checkout));
         assert_eq!(app.open_workspace_idx_for_checkout(&checkout), None);
 
         let mut child = Workspace::test_new("child");
-        child.identity_cwd = checkout.clone();
+        child.test_cwd = checkout.clone();
         let child_id = child.id.clone();
         app.state.workspaces.push(child);
         app.state.ensure_test_terminals();
@@ -1631,10 +1638,10 @@ mod tests {
         let event_hub = crate::api::EventHub::default();
         let mut app = test_app_with_event_hub(event_hub.clone());
         let mut parent = Workspace::test_new("main");
-        parent.identity_cwd = repo.clone();
+        parent.test_cwd = repo.clone();
         app.state.workspaces = vec![parent];
         let mut child = Workspace::test_new("child");
-        child.identity_cwd = checkout.clone();
+        child.test_cwd = checkout.clone();
         let child_id = child.id.clone();
         app.state.workspaces.push(child);
         app.state.ensure_test_terminals();
@@ -1737,7 +1744,7 @@ mod tests {
                 _ => {}
             }
             let mut unrelated = Workspace::test_new("unrelated");
-            unrelated.identity_cwd = checkout.clone();
+            unrelated.test_cwd = checkout.clone();
             app.state.workspaces.push(unrelated);
             app.state.ensure_test_terminals();
             app.handle_internal_event(completion);
@@ -1860,12 +1867,12 @@ mod tests {
 
             let original_source = app.state.workspaces.remove(0);
             let mut unrelated = Workspace::test_new("unrelated");
-            unrelated.identity_cwd = other_repo.clone();
+            unrelated.test_cwd = other_repo.clone();
             if source_change == "repurposed" {
                 unrelated.id = source_id.clone();
             }
             let mut opened_target = Workspace::test_new("opened-during-discovery");
-            opened_target.identity_cwd = checkout.clone();
+            opened_target.test_cwd = checkout.clone();
             let target_id = opened_target.id.clone();
             app.state.workspaces = vec![unrelated, opened_target];
             if source_change == "reordered" {
@@ -1994,7 +2001,7 @@ mod tests {
         );
         let mut app = app_with_parent(&repo);
         let mut child = Workspace::test_new("child");
-        child.identity_cwd = checkout.clone();
+        child.test_cwd = checkout.clone();
         app.state.workspaces.push(child);
         app.state.ensure_test_terminals();
 
@@ -2049,7 +2056,7 @@ mod tests {
         let mut app = app_with_parent(&repo);
         let parent_id = app.state.workspaces[0].id.clone();
         let mut child = Workspace::test_new("child");
-        child.identity_cwd = checkout.clone();
+        child.test_cwd = checkout.clone();
         let child_id = child.id.clone();
         app.state.workspaces.push(child);
         app.state.ensure_test_terminals();
@@ -2163,7 +2170,7 @@ mod tests {
 
         let mut app = app_with_parent(&repo);
         let mut child = Workspace::test_new("child");
-        child.identity_cwd = checkout.clone();
+        child.test_cwd = checkout.clone();
         child.worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
             key: crate::workspace::git_space_metadata(&repo).unwrap().key,
             label: "api-worktree-remove-repo".into(),
@@ -2234,7 +2241,7 @@ mod tests {
         let event_hub = crate::api::EventHub::default();
         let mut app = test_app_with_event_hub(event_hub.clone());
         let mut child = Workspace::test_new("child");
-        child.identity_cwd = checkout.clone();
+        child.test_cwd = checkout.clone();
         child.worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
             key: crate::workspace::git_space_metadata(&repo).unwrap().key,
             label: "api-worktree-remove-event-repo".into(),
@@ -2319,7 +2326,7 @@ mod tests {
         let event_hub = crate::api::EventHub::default();
         let mut app = test_app_with_event_hub(event_hub.clone());
         let mut child = Workspace::test_new("child");
-        child.identity_cwd = checkout.clone();
+        child.test_cwd = checkout.clone();
         child.worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
             key: crate::workspace::git_space_metadata(&repo).unwrap().key,
             label: "api-worktree-remove-deferred-repo".into(),
@@ -2396,7 +2403,7 @@ mod tests {
 
         let mut app = test_app();
         let mut child = Workspace::test_new("child");
-        child.identity_cwd = checkout.clone();
+        child.test_cwd = checkout.clone();
         child.worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
             key: crate::workspace::git_space_metadata(&repo).unwrap().key,
             label: "api-worktree-remove-duplicate-repo".into(),
@@ -2471,11 +2478,11 @@ mod tests {
             is_linked_worktree: true,
         };
         let mut first = Workspace::test_new("first");
-        first.identity_cwd = checkout.clone();
+        first.test_cwd = checkout.clone();
         first.worktree_space = Some(membership.clone());
         let first_id = first.id.clone();
         let mut second = Workspace::test_new("second");
-        second.identity_cwd = checkout.clone();
+        second.test_cwd = checkout.clone();
         second.worktree_space = Some(membership);
         let second_id = second.id.clone();
         app.state.workspaces = vec![first, second];
@@ -2573,7 +2580,7 @@ mod tests {
 
         let mut app = test_app();
         let mut child = Workspace::test_new("child");
-        child.identity_cwd = checkout.clone();
+        child.test_cwd = checkout.clone();
         child.worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
             key: crate::workspace::git_space_metadata(&repo).unwrap().key,
             label: "api-worktree-remove-create-in-flight-repo".into(),
@@ -2619,7 +2626,7 @@ mod tests {
         let mut app = test_app();
         app.state.default_shell = test_shell().into();
         let mut workspace = Workspace::test_new("worktree");
-        workspace.identity_cwd = checkout.clone();
+        workspace.test_cwd = checkout.clone();
         workspace.worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
             key: "repo-key".into(),
             label: "repo".into(),

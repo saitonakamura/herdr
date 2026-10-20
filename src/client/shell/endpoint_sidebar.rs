@@ -322,7 +322,6 @@ pub(super) fn render_expanded(
                                     workspace,
                                     collapsed_groups,
                                 ),
-                                entry.indented,
                                 &config.spaces,
                             )
                             .len()
@@ -447,12 +446,7 @@ pub(super) fn render_expanded(
                     workspace,
                     collapsed_groups,
                 );
-                let tokens = super::sidebar::workspace_rows(
-                    workspace,
-                    status,
-                    entry.indented,
-                    &config.spaces,
-                );
+                let tokens = super::sidebar::workspace_rows(workspace, status, &config.spaces);
                 let height = (tokens.len().max(1).min(u16::MAX as usize) as u16).min(body.height);
                 if y.saturating_add(height) > body.bottom() {
                     break;

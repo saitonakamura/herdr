@@ -79,12 +79,15 @@ impl App {
             }
             return self.find_parent_workspace_by_key(&api.repo_key);
         }
-        let git_space = workspace.git_space().cloned().or_else(|| {
-            workspace
-                .resolved_identity_cwd_from(&self.state.terminals, &self.terminal_runtimes)
-                .as_deref()
-                .and_then(crate::workspace::git_space_metadata)
-        });
+        let git_space = workspace
+            .first_pane_git_space(&self.state.terminals)
+            .cloned()
+            .or_else(|| {
+                workspace
+                    .first_pane_cwd_from(&self.state.terminals, &self.terminal_runtimes)
+                    .as_deref()
+                    .and_then(crate::workspace::git_space_metadata)
+            });
         if git_space.is_some_and(|space| {
             !space.is_linked_worktree
                 && space.key == api.repo_key
@@ -680,11 +683,16 @@ impl App {
                 let workspace = &self.state.workspaces[ws_idx];
                 let current_checkout = workspace
                     .worktree_space()
-                    .map(|space| &space.checkout_path)
-                    .unwrap_or(&workspace.identity_cwd);
-                if crate::worktree::canonical_or_original(current_checkout) != removed_checkout {
+                    .map(|space| space.checkout_path.clone())
+                    .or_else(|| {
+                        workspace
+                            .first_pane_cwd_from(&self.state.terminals, &self.terminal_runtimes)
+                    });
+                if let Some(current_checkout) = current_checkout.filter(|checkout| {
+                    crate::worktree::canonical_or_original(checkout) != removed_checkout
+                }) {
                     if let Some(terminal) = self.state.terminals.get_mut(&terminal_id) {
-                        terminal.cwd = current_checkout.clone();
+                        terminal.cwd = current_checkout;
                     }
                 }
                 if self

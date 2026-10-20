@@ -415,15 +415,6 @@ fn restore_workspace(
         Some(Workspace {
             id: workspace_id,
             custom_name: snap.custom_name.clone(),
-            identity_cwd: snap.identity_cwd.clone(),
-            cached_identity_cwd: snap.identity_cwd.clone(),
-            // Repository metadata is optional and may block on unavailable
-            // storage. The app refreshes it after restoring the session.
-            cached_auto_label: crate::workspace::fallback_label_from_cwd(&snap.identity_cwd),
-            cached_git_status_key: snap.identity_cwd.clone(),
-            cached_git_branch: None,
-            cached_git_ahead_behind: None,
-            cached_git_space: None,
             worktree_space: snap.worktree_space.clone(),
             metadata_tokens: crate::metadata_tokens::MetadataTokens::default(),
             metadata_token_sequences: HashMap::new(),
@@ -434,6 +425,8 @@ fn restore_workspace(
             tabs,
             #[cfg(test)]
             test_runtimes: HashMap::new(),
+            #[cfg(test)]
+            test_cwd: snap.identity_cwd.clone(),
         })
         .map(|workspace| (workspace, terminals, terminal_runtimes)),
         failed_imports,

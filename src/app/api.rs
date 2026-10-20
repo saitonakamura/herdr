@@ -60,7 +60,7 @@ impl App {
 
     fn handle_git_status_refreshed(
         &mut self,
-        results: Vec<crate::workspace::WorkspaceGitStatus>,
+        results: Vec<crate::workspace::PaneGitStatus>,
         cache_updates: Vec<(std::path::PathBuf, crate::workspace::GitStatusCacheEntry)>,
     ) -> bool {
         self.git_refresh_in_flight = false;
@@ -73,14 +73,30 @@ impl App {
         } else {
             self.last_git_remote_status_refresh = Instant::now();
         }
+        let unnamed_before = self.unnamed_workspace_count();
         let changed = self
             .state
-            .apply_workspace_git_statuses(&self.terminal_runtimes, results);
+            .apply_pane_git_statuses(&self.terminal_runtimes, results);
+        let named = self.unnamed_workspace_count() != unnamed_before;
+        for terminal_id in &changed {
+            if let Some((ws_idx, pane_id)) = self.pane_for_terminal(terminal_id) {
+                self.emit_pane_updated(ws_idx, pane_id);
+            }
+        }
+        let changed = named || !changed.is_empty();
         if changed {
             self.render_dirty.request_generic();
             self.render_notify.notify_one();
         }
         changed
+    }
+
+    fn unnamed_workspace_count(&self) -> usize {
+        self.state
+            .workspaces
+            .iter()
+            .filter(|ws| ws.custom_name.is_none())
+            .count()
     }
 
     pub(crate) fn handle_internal_event(&mut self, ev: AppEvent) {
@@ -1917,7 +1933,7 @@ mod tests {
         init_repo(&stale_cwd);
         init_repo(&live_cwd);
 
-        workspace.identity_cwd = stale_cwd.clone();
+        workspace.test_cwd = stale_cwd.clone();
         app.state.workspaces = vec![workspace];
         app.state.ensure_test_terminals();
         app.state.terminals.get_mut(&terminal_id).unwrap().cwd = stale_cwd;
@@ -2010,7 +2026,7 @@ mod tests {
         init_repo(&stale_cwd);
         init_repo(&live_cwd);
 
-        workspace.identity_cwd = stale_cwd.clone();
+        workspace.test_cwd = stale_cwd.clone();
         app.state.workspaces = vec![workspace];
         app.state.ensure_test_terminals();
         app.state.terminals.get_mut(&terminal_id).unwrap().cwd = stale_cwd;
@@ -2593,7 +2609,7 @@ mod tests {
         );
         let mut workspace = crate::workspace::Workspace::test_new("stale");
         workspace.custom_name = None;
-        workspace.identity_cwd = "/__herdr_original__".into();
+        workspace.test_cwd = "/__herdr_original__".into();
         let root = workspace.tabs[0].root_pane;
         let terminal_id = workspace.terminal_id(root).cloned().unwrap();
         let workspace_id = workspace.id.clone();

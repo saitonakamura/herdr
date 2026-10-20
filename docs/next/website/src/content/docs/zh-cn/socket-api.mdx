@@ -578,6 +578,8 @@ Herdr 存有原生会话引用时,`pane.get`、`pane.list`、`agent.get` 和 `ag
 
 当 Herdr 能解析当前控制窗格 PTY 的进程的 cwd 时,`pane.get`、`pane.list`、`agent.get` 和 `agent.list` 也暴露 `foreground_cwd`。已有的 `cwd` 字段仍然是用于标签、follow-cwd 行为和恢复会话状态的窗格/工作区 cwd。
 
+当窗格的 cwd 位于 Git 检出中时，它们还会公开 `repo`：`root`（检出的根目录）、`repo_name`、`branch`（detached HEAD 时省略）、`ahead` 和 `behind`（没有 upstream 时省略）、`dirty`（已更改路径的数量，仅当 Agent 侧边栏行显示 `git_dirty` 时提供）以及 `is_linked_worktree`。同一检出中的窗格共享一次刷新。`repo` 变化时会发出 `pane.updated`。
+
 `PaneInfo` 和 `AgentInfo` 暴露可选的 `terminal_title` 和 `terminal_title_stripped` 字段。`terminal_title` 是经过安全规范化的最新 OSC 0/2 标题。`terminal_title_stripped` 会移除开头一个已识别的活动或旋转指示符字形及其后的空白。这些值归服务器所有,冷重启后不会保留,并且独立于元数据 `title` 和语义智能体状态。
 
 当用户钩子想自定义展示、又不从 Herdr 集成接管生命周期状态时,使用 `pane.report_metadata`。

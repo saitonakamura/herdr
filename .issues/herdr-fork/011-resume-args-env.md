@@ -28,7 +28,8 @@ Same change in loom: `loom resume`, most of `lib/restore.sh` and `bin/loom-sessi
 ## Resolution
 
 Draft, open until merged: [PR #14](https://github.com/saitonakamura/herdr/pull/14) (branch
-`fork/011-resume-args-env`) and dotfiles branch `herdr-fork/011-resume-args-env` (0efaa66).
+`fork/011-resume-args-env`, master merged in at 5bb70bdb) and dotfiles branch
+`herdr-fork/011-resume-args-env` (d8c7192, master merged in).
 
 - herdr stores `agent start` args (`launch_args`, replaceable with `agent set-args`), the pane's
   `--env`, and the profile dir a claude or codex session is reported in (`agent_home`), persists

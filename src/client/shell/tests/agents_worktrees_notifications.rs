@@ -1321,15 +1321,21 @@ fn unavailable_worktree_create_does_not_wedge_the_overlay() {
 #[test]
 fn worktree_action_errors_expire_without_more_input() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
-    state.set_snapshot(Box::new(snapshot()));
+    let mut snapshot = snapshot();
+    snapshot.workspaces[0].worktree = Some(ClientShellWorktree {
+        key: "repo-key".into(),
+        label: "repo".into(),
+        is_linked_worktree: true,
+    });
+    state.set_snapshot(Box::new(snapshot));
     state.set_pane_surface(surface());
 
     let mut guard = ClientShellInput::default();
     state.record_binding(
-        crate::input::KeybindMatch::Action(crate::input::KeybindAction::RemoveWorktree),
+        crate::input::KeybindMatch::Action(crate::input::KeybindAction::NewWorktree),
         &mut guard,
     );
-    let message = "This workspace is not a Herdr-managed worktree checkout.";
+    let message = "New and open worktree actions start from the repo parent workspace.";
     assert_eq!(state.endpoint_error.as_deref(), Some(message));
 
     let deadline = state.endpoint_error_deadline.expect("deadline");
@@ -1536,6 +1542,113 @@ fn worktree_remove_escalates_recoverable_failure_to_force_confirmation() {
         state.handle_input_bytes(b"\x1b");
         assert!(state.overlay.is_none());
     }
+}
+
+#[test]
+fn worktree_remove_names_the_focused_worktree_tab() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    let mut prepare = ClientShellInput::default();
+    state.record_binding(
+        crate::input::KeybindMatch::Action(crate::input::KeybindAction::RemoveWorktree),
+        &mut prepare,
+    );
+    let [ClientShellAction::Endpoint { request, .. }] = &prepare.actions[..] else {
+        panic!("remove worktree should prepare through worktree.list");
+    };
+    let request_id = request.id.clone();
+    state.handle_endpoint_result(
+        "boot-1",
+        &request_id,
+        Ok(worktree_list_result_on_tab(Some("ws_1"), Some("tab_1"))),
+    );
+    let remove = state.handle_input_bytes(b"\r");
+    let [ClientShellAction::Endpoint { request, .. }] = &remove.actions[..] else {
+        panic!("worktree remove should use endpoint API");
+    };
+    assert!(matches!(
+        &request.method,
+        crate::api::schema::Method::WorktreeRemoveTab(params)
+            if params.tab_id.as_deref() == Some("tab_1") && !params.force
+    ));
+}
+
+#[test]
+fn worktree_remove_refuses_a_tab_without_a_worktree() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    let mut prepare = ClientShellInput::default();
+    state.record_binding(
+        crate::input::KeybindMatch::Action(crate::input::KeybindAction::RemoveWorktree),
+        &mut prepare,
+    );
+    let [ClientShellAction::Endpoint { request, .. }] = &prepare.actions[..] else {
+        panic!("remove worktree should prepare through worktree.list");
+    };
+    let request_id = request.id.clone();
+    state.handle_endpoint_result(
+        "boot-1",
+        &request_id,
+        Ok(worktree_list_result_on_tab(Some("ws_1"), Some("tab_2"))),
+    );
+    assert!(state.overlay.is_none());
+    assert_eq!(
+        state.endpoint_error.as_deref(),
+        Some("This tab is not a Herdr-managed worktree checkout.")
+    );
+}
+
+#[test]
+fn tab_menu_offers_worktree_removal_for_a_tab_in_the_worktree_directory() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    state.open_tab_context_menu("tab_1".into(), 30, 1);
+    let Some(ClientShellOverlay::ContextMenu(menu)) = &state.overlay else {
+        panic!("tab menu should open");
+    };
+    assert!(!menu
+        .items()
+        .iter()
+        .any(|item| item.action == ClientContextMenuAction::RemoveWorktree));
+
+    let mut snapshot = snapshot();
+    snapshot.panes[0].cwd = Some("/tmp/herdr-worktrees/repo/feature".into());
+    state.set_snapshot(Box::new(snapshot));
+    state.open_tab_context_menu("tab_1".into(), 30, 1);
+    let Some(ClientShellOverlay::ContextMenu(menu)) = &state.overlay else {
+        panic!("tab menu should open");
+    };
+    let index = menu
+        .items()
+        .iter()
+        .position(|item| item.action == ClientContextMenuAction::RemoveWorktree)
+        .expect("worktree tab offers removal");
+    let mut outcome = ClientShellInput::default();
+    state.activate_context_menu_item(index, &mut outcome);
+    let request_id = outcome
+        .actions
+        .iter()
+        .find_map(|action| match action {
+            ClientShellAction::Endpoint { request, .. }
+                if matches!(request.method, crate::api::schema::Method::WorktreeList(_)) =>
+            {
+                Some(request.id.clone())
+            }
+            _ => None,
+        })
+        .expect("removal prepares through worktree.list");
+    state.handle_endpoint_result(
+        "boot-1",
+        &request_id,
+        Ok(worktree_list_result_on_tab(Some("ws_1"), Some("tab_1"))),
+    );
+    let Some(ClientShellOverlay::WorktreeRemove(remove)) = &state.overlay else {
+        panic!("removal should confirm");
+    };
+    assert_eq!(remove.tab_id.as_deref(), Some("tab_1"));
 }
 
 #[test]

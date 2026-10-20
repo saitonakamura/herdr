@@ -7,41 +7,15 @@ impl App {
         force || cfg!(windows)
     }
 
-    pub(crate) fn close_removed_linked_worktree_workspace(&mut self, ws_idx: usize) {
-        let removed_workspace_was_active = self.state.active == Some(ws_idx);
-        let parent_key = self
-            .state
-            .workspaces
-            .get(ws_idx)
-            .and_then(|workspace| workspace.worktree_space())
-            .filter(|space| space.is_linked_worktree)
-            .map(|space| space.key.clone());
-
-        self.state.selected = ws_idx;
-        self.state.close_selected_workspace();
-
-        if !removed_workspace_was_active {
-            return;
-        }
-        let Some(parent_key) = parent_key else {
-            return;
-        };
-        let Some(parent_idx) = self.state.workspaces.iter().position(|workspace| {
-            workspace
-                .worktree_space()
-                .is_some_and(|space| !space.is_linked_worktree && space.key == parent_key)
-        }) else {
-            return;
-        };
-        self.state.switch_workspace(parent_idx);
-    }
-
-    pub(crate) fn shutdown_workspace_terminal_runtimes_for_worktree_remove(
+    pub(crate) fn shutdown_terminal_runtimes_for_worktree_remove(
         &mut self,
-        ws_idx: usize,
+        pane_ids: &[crate::layout::PaneId],
     ) -> Vec<crate::layout::PaneId> {
         let mut shutdown_panes = Vec::new();
-        for pane_id in self.state.pane_ids_for_workspace(ws_idx) {
+        for &pane_id in pane_ids {
+            let Some((ws_idx, _)) = self.find_pane(pane_id) else {
+                continue;
+            };
             let Some(terminal_id) = self.state.terminal_id_for_pane(ws_idx, pane_id) else {
                 continue;
             };

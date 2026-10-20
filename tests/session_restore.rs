@@ -152,50 +152,31 @@ fn server_restores_while_git_metadata_is_blocked() {
         assert_eq!(restored["label"], "restored");
         assert_eq!(restored["active_tab_id"], "w1:t2");
         assert_eq!(restored["pane_count"], 1);
-        if saved_membership {
-            for (method, params) in [
-                (
-                    "worktree.create",
-                    serde_json::json!({"workspace_id": "w1", "branch": "blocked"}),
-                ),
-                (
-                    "worktree.open",
-                    serde_json::json!({"workspace_id": "w1", "branch": "main"}),
-                ),
-                ("worktree.list", serde_json::json!({"workspace_id": "w1"})),
-                (
-                    "worktree.remove",
-                    serde_json::json!({"workspace_id": "w1", "force": true}),
-                ),
-            ] {
-                let response = restore_request_with_params(&socket_path, method, params);
-                assert_eq!(
-                    response["error"]["code"], "worktree_operation_in_progress",
-                    "{method}: {response}"
-                );
-            }
-        }
-        if saved_membership {
-            // A blocked saved membership must not keep unrelated saved
-            // memberships pending or prevent their worktree operations.
-            let deadline = std::time::Instant::now() + Duration::from_secs(5);
-            loop {
-                let response = restore_request_with_params(
-                    &socket_path,
-                    "worktree.list",
-                    serde_json::json!({"workspace_id": "w2"}),
-                );
-                if response.get("error").is_none() {
-                    break;
-                }
-                assert_eq!(response["error"]["code"], "worktree_operation_in_progress");
-                assert!(
-                    std::time::Instant::now() < deadline,
-                    "healthy workspace validation waited for another checkout's blocked metadata"
-                );
-                std::thread::sleep(Duration::from_millis(25));
-            }
-        }
+        // Discovery for w1 reads its blocked `.git/config` on a worker; leave it
+        // hanging and check that the server keeps answering everything else.
+        let mut stalled = UnixStream::connect(&socket_path).unwrap();
+        writeln!(
+            stalled,
+            "{}",
+            serde_json::json!({"id": "stalled", "method": "worktree.create",
+                "params": {"workspace_id": "w1", "branch": "blocked"}})
+        )
+        .unwrap();
+        let healthy_list = restore_request_with_params(
+            &socket_path,
+            "worktree.list",
+            serde_json::json!({"workspace_id": "w2"}),
+        );
+        assert!(healthy_list.get("error").is_none(), "{healthy_list}");
+        let not_a_worktree = restore_request_with_params(
+            &socket_path,
+            "worktree.remove",
+            serde_json::json!({"workspace_id": "w1", "force": true}),
+        );
+        assert_eq!(
+            not_a_worktree["error"]["code"], "not_linked_worktree",
+            "{not_a_worktree}"
+        );
         restore_request(&socket_path, "session.snapshot");
         restore_request(&socket_path, "agent.list");
         restore_request(&socket_path, "server.stop");
@@ -217,10 +198,10 @@ fn server_restores_while_git_metadata_is_blocked() {
             saved["workspaces"][0]["identity_cwd"],
             snapshot["workspaces"][0]["identity_cwd"]
         );
-        assert_eq!(
-            saved["workspaces"][0]["worktree_space"],
-            snapshot["workspaces"][0]["worktree_space"]
-        );
+        // A workspace no longer records a checkout; a main-checkout record is dropped.
+        assert!(saved["workspaces"][0].get("worktree_space").is_none());
+        assert!(saved["workspaces"][0]["tabs"][0].get("worktree").is_none());
+        drop(stalled);
         drop(herdr);
     }
 }

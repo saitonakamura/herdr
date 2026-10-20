@@ -72,6 +72,9 @@ pub struct TabInfo {
     pub agent_status: AgentStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label_source: Option<TabLabelSource>,
+    /// The worktree checkout the tab was opened for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree: Option<super::workspaces::WorkspaceWorktreeInfo>,
 }
 
 /// Where a tab's label comes from: a pinned name set by hand, its one agent's

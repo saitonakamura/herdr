@@ -73,6 +73,7 @@ operations::define_operations! {
     WorktreeCreate(WorktreeCreateParams) => "worktree.create", true, true;
     WorktreeOpen(WorktreeOpenParams) => "worktree.open", true, true;
     WorktreeRemove(WorktreeRemoveParams) => "worktree.remove", true, true;
+    WorktreeRemoveTab(WorktreeRemoveTabParams) => "worktree.remove_tab", true, true;
     TabCreate(TabCreateParams) => "tab.create", true, true;
     TabList(TabListParams) => "tab.list", false, false;
     TabGet(TabTarget) => "tab.get", false, false;

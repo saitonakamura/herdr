@@ -2,7 +2,7 @@ use clap::Command;
 
 use crate::api::schema::worktrees::{
     WorktreeCreateProjection, WorktreeListProjection, WorktreeOpenProjection,
-    WorktreeRemoveProjection,
+    WorktreeRemoveTabProjection,
 };
 use crate::api::schema::{Method, Request};
 
@@ -19,14 +19,14 @@ pub(crate) fn path(name: &'static str) -> Input<Option<String>> {
 const LEAVES: [Leaf; 4] = [
     Leaf {
         name: "list",
-        about: "List worktree workspaces",
+        about: "List a repo's Git worktrees",
         id: "cli:worktree:list",
         arguments: WorktreeListProjection::arguments,
         method: |matches| WorktreeListProjection::from_matches(matches).map(Method::WorktreeList),
     },
     Leaf {
         name: "create",
-        about: "Create and open a Git worktree",
+        about: "Create a Git worktree and open it as a tab",
         id: "cli:worktree:create",
         arguments: WorktreeCreateProjection::arguments,
         method: |matches| {
@@ -35,31 +35,38 @@ const LEAVES: [Leaf; 4] = [
     },
     Leaf {
         name: "open",
-        about: "Open an existing Git worktree",
+        about: "Open an existing Git worktree as a tab",
         id: "cli:worktree:open",
         arguments: WorktreeOpenProjection::arguments,
         method: |matches| WorktreeOpenProjection::from_matches(matches).map(Method::WorktreeOpen),
     },
     Leaf {
         name: "remove",
-        about: "Remove a worktree checkout",
+        about: "Remove a worktree checkout and close its tab",
         id: "cli:worktree:remove",
-        arguments: WorktreeRemoveProjection::arguments,
+        arguments: WorktreeRemoveTabProjection::arguments,
         method: |matches| {
-            WorktreeRemoveProjection::from_matches(matches).map(Method::WorktreeRemove)
+            WorktreeRemoveTabProjection::from_matches(matches).map(Method::WorktreeRemoveTab)
         },
     },
 ];
 
 pub(crate) fn command() -> Command {
     Command::new("worktree")
-        .about("Manage Git worktree-backed workspaces")
+        .about("Manage Git worktrees opened as tabs")
         .subcommand_required(true)
         .subcommands(LEAVES.iter().map(Leaf::command))
         .mut_subcommand("open", |open| {
             open.group(
                 clap::ArgGroup::new("open_target")
                     .args(["path", "branch"])
+                    .required(true),
+            )
+        })
+        .mut_subcommand("remove", |remove| {
+            remove.group(
+                clap::ArgGroup::new("remove_target")
+                    .args(["tab", "workspace"])
                     .required(true),
             )
         })
@@ -112,19 +119,23 @@ mod tests {
                 serde_json::json!({"id":"cli:worktree:open","method":"worktree.open","params":{"branch":"topic","focus":false}}),
             ),
             (
+                vec!["create", "--workspace", "2", "--cwd", "/repo", "--json"],
+                serde_json::json!({"id":"cli:worktree:create","method":"worktree.create","params":{"workspace_id":"2","cwd":"/repo","focus":false}}),
+            ),
+            (
                 vec!["remove", "--workspace=2", "--json"],
-                serde_json::json!({"id":"cli:worktree:remove","method":"worktree.remove","params":{"workspace_id":"2","force":false}}),
+                serde_json::json!({"id":"cli:worktree:remove","method":"worktree.remove_tab","params":{"workspace_id":"2","force":false}}),
             ),
             (
                 vec![
                     "remove",
-                    "--workspace",
-                    "2",
+                    "--tab",
+                    "2:3",
                     "--force",
                     "--trust-repository",
                     "--json",
                 ],
-                serde_json::json!({"id":"cli:worktree:remove","method":"worktree.remove","params":{"workspace_id":"2","force":true,"trust_repository":true}}),
+                serde_json::json!({"id":"cli:worktree:remove","method":"worktree.remove_tab","params":{"tab_id":"2:3","force":true,"trust_repository":true}}),
             ),
         ] {
             assert_eq!(
@@ -174,8 +185,7 @@ mod tests {
     #[test]
     fn worktree_projection_keeps_context_and_xor_validations() {
         for args in [
-            vec!["list", "--workspace", "2", "--cwd", "."],
-            vec!["create", "--workspace", "2", "--cwd", "."],
+            vec!["remove", "--tab", "2:3", "--workspace", "2"],
             vec!["open"],
             vec!["open", "--path", ".", "--branch", "topic"],
         ] {

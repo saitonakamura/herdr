@@ -501,6 +501,8 @@ impl ClientWorktreeOpenOverlay {
 #[derive(Debug)]
 pub(super) struct ClientWorktreeRemoveOverlay {
     pub(super) workspace_id: String,
+    /// Set when the server opens worktrees as tabs; removal then names the tab.
+    pub(super) tab_id: Option<String>,
     pub(super) path: String,
     pub(super) error: Option<String>,
     pub(super) removing: bool,
@@ -539,6 +541,8 @@ pub(super) enum ClientContextMenuTarget {
     Tab {
         tab_id: String,
         workspace_id: String,
+        /// A pane of the tab is in a linked worktree, so it may be one Herdr opened.
+        in_linked_worktree: bool,
     },
     Pane {
         pane_id: String,
@@ -635,6 +639,8 @@ pub(super) enum PendingEndpointKind {
     },
     PrepareWorktreeRemove {
         workspace_id: String,
+        /// The workspace's active tab, which a tab-aware server reports a worktree on.
+        tab_id: Option<String>,
     },
     WorktreeCreate,
     WorktreeOpen,

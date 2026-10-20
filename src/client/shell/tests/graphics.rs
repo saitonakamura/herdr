@@ -294,6 +294,7 @@ fn every_dialog_and_menu_occludes_its_panel_not_the_whole_screen() {
         }),
         ClientShellOverlay::WorktreeRemove(ClientWorktreeRemoveOverlay {
             workspace_id: "ws_1".into(),
+            tab_id: None,
             path: "path".into(),
             error: None,
             removing: false,
@@ -303,6 +304,7 @@ fn every_dialog_and_menu_occludes_its_panel_not_the_whole_screen() {
             target: ClientContextMenuTarget::Tab {
                 tab_id: "tab_1".into(),
                 workspace_id: "ws_1".into(),
+                in_linked_worktree: true,
             },
             x: 35,
             y: 8,

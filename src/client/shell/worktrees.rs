@@ -15,7 +15,7 @@ fn checkout_path_preview(root: &str, repo: &str, branch: &str) -> String {
 }
 
 impl ClientShellState {
-    fn endpoint_worktree_directory(&self) -> Option<String> {
+    pub(super) fn endpoint_worktree_directory(&self) -> Option<String> {
         self.snapshot
             .as_deref()
             .map(|snapshot| snapshot.worktree_directory.clone())
@@ -190,9 +190,11 @@ impl ClientShellState {
                 .iter()
                 .find(|workspace| workspace.workspace_id == workspace_id)
         });
+        // Only a server that opens worktrees as workspaces reports one here.
         let linked = workspace
             .and_then(|workspace| workspace.worktree.as_ref())
             .is_some_and(|worktree| worktree.is_linked_worktree);
+        let active_tab_id = workspace.map(|workspace| workspace.active_tab_id.clone());
         let kind = match action {
             KeybindAction::NewWorktree | KeybindAction::OpenWorktree if linked => {
                 self.set_endpoint_error(
@@ -207,13 +209,9 @@ impl ClientShellState {
             KeybindAction::OpenWorktree => PendingEndpointKind::PrepareWorktreeOpen {
                 workspace_id: workspace_id.clone(),
             },
-            KeybindAction::RemoveWorktree if !linked => {
-                self.set_endpoint_error("This workspace is not a Herdr-managed worktree checkout.");
-                outcome.repaint = true;
-                return;
-            }
             KeybindAction::RemoveWorktree => PendingEndpointKind::PrepareWorktreeRemove {
                 workspace_id: workspace_id.clone(),
+                tab_id: active_tab_id,
             },
             _ => return,
         };
@@ -224,6 +222,27 @@ impl ClientShellState {
                 trust_repository: false,
             }),
             kind,
+            outcome,
+        );
+    }
+
+    /// Removes the worktree of a named tab, which need not be the active one.
+    pub(super) fn begin_worktree_remove_for_tab(
+        &mut self,
+        workspace_id: String,
+        tab_id: String,
+        outcome: &mut ClientShellInput,
+    ) {
+        self.push_endpoint_method_with_kind(
+            crate::api::schema::Method::WorktreeList(crate::api::schema::WorktreeListParams {
+                workspace_id: Some(workspace_id.clone()),
+                cwd: None,
+                trust_repository: false,
+            }),
+            PendingEndpointKind::PrepareWorktreeRemove {
+                workspace_id,
+                tab_id: Some(tab_id),
+            },
             outcome,
         );
     }
@@ -345,16 +364,28 @@ impl ClientShellState {
         if remove.removing {
             return;
         }
-        let workspace_id = remove.workspace_id.clone();
         let forced = remove.force_confirmation;
+        let method = match remove.tab_id.clone() {
+            Some(tab_id) => crate::api::schema::Method::WorktreeRemoveTab(
+                crate::api::schema::WorktreeRemoveTabParams {
+                    tab_id: Some(tab_id),
+                    workspace_id: None,
+                    force: forced,
+                    trust_repository: false,
+                },
+            ),
+            None => crate::api::schema::Method::WorktreeRemove(
+                crate::api::schema::WorktreeRemoveParams {
+                    workspace_id: remove.workspace_id.clone(),
+                    force: forced,
+                    trust_repository: false,
+                },
+            ),
+        };
         remove.removing = true;
         remove.error = None;
         if !self.push_endpoint_method_with_kind(
-            crate::api::schema::Method::WorktreeRemove(crate::api::schema::WorktreeRemoveParams {
-                workspace_id,
-                force: forced,
-                trust_repository: false,
-            }),
+            method,
             PendingEndpointKind::WorktreeRemove { forced },
             outcome,
         ) {
@@ -437,17 +468,25 @@ impl ClientShellState {
                 true
             }
             (
-                PendingEndpointKind::PrepareWorktreeRemove { workspace_id },
+                PendingEndpointKind::PrepareWorktreeRemove {
+                    workspace_id,
+                    tab_id,
+                },
                 Ok(ResponseResult::WorktreeList { worktrees, .. }),
             ) => {
-                let path = worktrees
-                    .into_iter()
-                    .find(|entry| entry.open_workspace_id.as_deref() == Some(&workspace_id))
-                    .map(|entry| entry.path);
-                if let Some(path) = path {
+                // A tab-aware server names the tab; an older one, only the workspace.
+                let target = worktrees.into_iter().find_map(|entry| {
+                    let on_tab = tab_id.is_some() && entry.open_tab_id == tab_id;
+                    let on_workspace = entry.open_tab_id.is_none()
+                        && entry.open_workspace_id.as_deref() == Some(&workspace_id);
+                    (entry.is_linked_worktree && (on_tab || on_workspace))
+                        .then_some((entry.path, entry.open_tab_id))
+                });
+                if let Some((path, tab_id)) = target {
                     self.overlay = Some(ClientShellOverlay::WorktreeRemove(
                         ClientWorktreeRemoveOverlay {
                             workspace_id,
+                            tab_id,
                             path,
                             error: None,
                             removing: false,
@@ -455,9 +494,7 @@ impl ClientShellState {
                         },
                     ));
                 } else {
-                    self.set_endpoint_error(
-                        "This workspace is not a Herdr-managed worktree checkout.",
-                    );
+                    self.set_endpoint_error("This tab is not a Herdr-managed worktree checkout.");
                 }
                 true
             }

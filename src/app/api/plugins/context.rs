@@ -44,11 +44,25 @@ impl App {
         match &event.data {
             EventData::WorkspaceCreated { workspace }
             | EventData::WorkspaceUpdated { workspace }
-            | EventData::WorkspaceMetadataUpdated { workspace }
-            | EventData::WorktreeCreated { workspace, .. }
-            | EventData::WorktreeOpened { workspace, .. } => {
+            | EventData::WorkspaceMetadataUpdated { workspace } => {
                 self.plugin_context_for_workspace_info(workspace, correlation_id)
             }
+            // The worktree's own tab, which need not be the focused one.
+            EventData::WorktreeCreated {
+                workspace,
+                worktree,
+            }
+            | EventData::WorktreeOpened {
+                workspace,
+                worktree,
+                ..
+            } => worktree
+                .open_tab_id
+                .as_deref()
+                .and_then(|tab_id| self.plugin_context_for_tab_id(tab_id, correlation_id))
+                .unwrap_or_else(|| {
+                    self.plugin_context_for_workspace_info(workspace, correlation_id)
+                }),
             EventData::WorkspaceClosed {
                 workspace_id,
                 workspace,
@@ -83,19 +97,23 @@ impl App {
                 workspace,
                 worktree,
                 ..
-            } => workspace
-                .as_ref()
-                .map(|workspace| {
-                    self.plugin_context_for_workspace_snapshot(workspace, correlation_id)
-                })
-                .or_else(|| self.plugin_context_for_workspace_id(workspace_id, correlation_id))
-                .unwrap_or_else(|| {
-                    let mut context = empty_plugin_context(correlation_id);
-                    context.workspace_id = Some(workspace_id.clone());
-                    context.workspace_label = Some(worktree.label.clone());
-                    context.workspace_cwd = Some(worktree.path.clone());
-                    context
-                }),
+            } => {
+                let mut context = workspace
+                    .as_ref()
+                    .map(|workspace| {
+                        self.plugin_context_for_workspace_snapshot(workspace, correlation_id)
+                    })
+                    .or_else(|| self.plugin_context_for_workspace_id(workspace_id, correlation_id))
+                    .unwrap_or_else(|| {
+                        let mut context = empty_plugin_context(correlation_id);
+                        context.workspace_id = Some(workspace_id.clone());
+                        context.workspace_label = Some(worktree.label.clone());
+                        context
+                    });
+                // Its tab is gone; the removed checkout is the context's directory.
+                context.workspace_cwd = Some(worktree.path.clone());
+                context
+            }
             EventData::TabCreated { tab } => self.plugin_context_for_tab_info(tab, correlation_id),
             EventData::TabClosed {
                 tab_id,
@@ -366,11 +384,21 @@ impl App {
             .as_ref()
             .and_then(|pane| pane.cwd.clone())
             .or_else(|| Some(self.default_cwd_for_workspace(ws_idx).display().to_string()));
+        let worktree = tab_id
+            .as_deref()
+            .and_then(|tab_id| self.parse_tab_id(tab_id))
+            .and_then(|(ws_idx, tab_idx)| {
+                self.state.workspaces[ws_idx].tabs[tab_idx]
+                    .worktree
+                    .as_ref()
+            })
+            .map(Into::into)
+            .or(workspace.worktree);
         PluginInvocationContext {
             workspace_id: Some(workspace.workspace_id),
             workspace_label: Some(workspace.label),
             workspace_cwd,
-            worktree: workspace.worktree,
+            worktree,
             tab_id,
             tab_label,
             focused_pane_id: focused_pane.as_ref().map(|pane| pane.pane_id.clone()),

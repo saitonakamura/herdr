@@ -58,4 +58,7 @@ pub struct ServerCapabilities {
     /// Runs `[worktrees] post_create` in each new checkout before opening it.
     #[serde(default)]
     pub worktree_post_create: bool,
+    /// Opens worktrees as tabs in a workspace and removes them by tab.
+    #[serde(default)]
+    pub worktree_tabs: bool,
 }

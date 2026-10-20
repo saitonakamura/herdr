@@ -51,6 +51,10 @@ _Avoid_: marker, flag
 A named container of tabs for one line of work. It has no directory, repo or branch of its own; those belong to its panes.
 _Avoid_: space, project, repo
 
+**Worktree tab**:
+A tab opened for a Git worktree checkout, in whichever workspace asked for it. Removing the worktree closes it; closing it keeps the checkout.
+_Avoid_: worktree workspace, child workspace
+
 **Pinned name**:
 A tab label set by hand, which stops the tab following its agent's title until it is cleared.
 _Avoid_: custom name, manual name

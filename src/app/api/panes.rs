@@ -981,7 +981,9 @@ impl App {
             previous_tab_label: self.state.workspaces[source_ws_idx].tabs[source_tab_idx]
                 .custom_name
                 .clone(),
-            previous_worktree_space: self.state.workspaces[source_ws_idx].worktree_space.clone(),
+            previous_tab_worktree: self.state.workspaces[source_ws_idx].tabs[source_tab_idx]
+                .worktree
+                .clone(),
             name_cwd: self.state.workspaces[source_ws_idx]
                 .first_pane_cwd_from(&self.state.terminals, &self.terminal_runtimes)
                 .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| "/".into())),
@@ -1391,7 +1393,7 @@ impl App {
                 self.render_dirty.clone(),
             );
             workspace.id = context.previous_workspace_id;
-            workspace.worktree_space = context.previous_worktree_space;
+            workspace.tabs[0].worktree = context.previous_tab_worktree;
             let insert_idx = context.source_ws_idx.min(self.state.workspaces.len());
             if let Some(active) = self.state.active {
                 if active >= insert_idx {
@@ -1978,19 +1980,6 @@ impl App {
         };
         let workspace_id = self.public_workspace_id(ws_idx);
         let layout_update_target = self.layout_update_target_after_pane_removal(ws_idx, pane_id);
-        if self.state.close_pane_would_close_workspace(ws_idx, pane_id) {
-            self.require_restored_group_close_ready(
-                &id,
-                &self.state.workspace_close_indices(ws_idx),
-            )?;
-            if self.state.confirm_implicit_worktree_group_close(ws_idx) {
-                return Err(encode_error(
-                    id,
-                    "confirmation_required",
-                    "closing this pane would close a worktree group",
-                ));
-            }
-        }
         let workspace_snapshot = self.workspace_info(ws_idx);
         let terminal_id = self.state.terminal_id_for_pane(ws_idx, pane_id);
         let should_close_workspace = {
@@ -2248,7 +2237,7 @@ struct PaneMoveRecoveryContext {
     previous_workspace_id: String,
     previous_workspace_label: Option<String>,
     previous_tab_label: Option<String>,
-    previous_worktree_space: Option<crate::workspace::WorktreeSpaceMembership>,
+    previous_tab_worktree: Option<crate::workspace::WorktreeSpaceMembership>,
     /// Names the recreated workspace when it had no name.
     name_cwd: std::path::PathBuf,
 }
@@ -3087,13 +3076,14 @@ mod tests {
         );
         app.state.workspaces = vec![Workspace::test_new("issue")];
         app.state.ensure_test_terminals();
-        app.state.workspaces[0].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
-            key: "repo-key".into(),
-            label: "herdr".into(),
-            repo_root: "/repo/herdr".into(),
-            checkout_path: "/repo/herdr-issue".into(),
-            is_linked_worktree: true,
-        });
+        app.state.workspaces[0].tabs[0].worktree =
+            Some(crate::workspace::WorktreeSpaceMembership {
+                key: "repo-key".into(),
+                label: "herdr".into(),
+                repo_root: "/repo/herdr".into(),
+                checkout_path: "/repo/herdr-issue".into(),
+                is_linked_worktree: true,
+            });
         app
     }
 
@@ -3882,7 +3872,7 @@ mod tests {
             previous_workspace_id: previous_workspace_id.clone(),
             previous_workspace_label: app.state.workspaces[0].custom_name.clone(),
             previous_tab_label: app.state.workspaces[0].tabs[0].custom_name.clone(),
-            previous_worktree_space: app.state.workspaces[0].worktree_space.clone(),
+            previous_tab_worktree: app.state.workspaces[0].tabs[0].worktree.clone(),
             name_cwd: app.state.workspaces[0].test_cwd.clone(),
         };
         let taken = app.state.workspaces[0]

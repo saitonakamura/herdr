@@ -3555,7 +3555,10 @@ async fn deferred_worktree_open_disconnect_keeps_other_clients_focus() {
     .await
     .unwrap();
     assert!(
-        server.app.state.workspaces[1].worktree_space().is_some(),
+        server.app.state.workspaces[0]
+            .tabs
+            .iter()
+            .any(|tab| tab.worktree.is_some()),
         "open completed successfully"
     );
     assert_eq!(
@@ -5343,7 +5346,7 @@ fn terminal_attach_client_exits_when_worktree_remove_succeeds() {
     let checkout = PathBuf::from("/repo/herdr-issue");
     let parent = crate::workspace::Workspace::test_new("parent");
     let mut workspace = crate::workspace::Workspace::test_new("worktree");
-    workspace.worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+    workspace.tabs[0].worktree = Some(crate::workspace::WorktreeSpaceMembership {
         key: "repo-key".into(),
         label: "herdr".into(),
         repo_root: "/repo/herdr".into(),
@@ -5358,10 +5361,6 @@ fn terminal_attach_client_exits_when_worktree_remove_succeeds() {
     server.app.state.active = Some(1);
     server.app.state.selected = 1;
     let checkout_key = crate::worktree::canonical_or_original(&checkout);
-    server
-        .app
-        .pending_api_worktree_removes
-        .insert(workspace_id.clone(), 7);
     server
         .app
         .pending_api_worktree_remove_paths

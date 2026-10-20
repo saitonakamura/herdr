@@ -37,26 +37,16 @@ mod machine_tests {
     fn simple_families_worktree_rejects_invalid_grammar_before_transport() {
         for values in [
             vec!["list", "--workspace"],
-            vec!["list", "--workspace", "2", "--cwd", "."],
             vec!["create", "--branch"],
             vec!["create", "--base"],
             vec!["create", "--path"],
             vec!["create", "--label"],
             vec!["create", "--focus=true"],
-            vec!["create", "--workspace", "2", "--cwd", "."],
             vec!["open"],
             vec!["open", "--json"],
             vec!["open", "--path", ".", "--branch", "topic"],
-            vec![
-                "open",
-                "--workspace",
-                "2",
-                "--cwd",
-                ".",
-                "--branch",
-                "topic",
-            ],
             vec!["remove"],
+            vec!["remove", "--tab", "2:3", "--workspace", "2"],
             vec!["remove", "--json", "--force", "--trust-repository"],
             vec!["remove", "--workspace"],
         ] {

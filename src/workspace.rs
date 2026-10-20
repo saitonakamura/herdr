@@ -169,8 +169,6 @@ pub struct Workspace {
     /// The workspace's name, set once and changed only by a rename. `None` only
     /// for an upstream snapshot's workspace until its first Git refresh names it.
     pub custom_name: Option<String>,
-    /// Explicit Herdr-managed worktree grouping provenance.
-    pub worktree_space: Option<WorktreeSpaceMembership>,
     pub(crate) metadata_tokens: crate::metadata_tokens::MetadataTokens,
     pub(crate) metadata_token_sequences: HashMap<String, u64>,
     /// Public pane numbers within this workspace. Closed pane numbers are not reused.
@@ -230,7 +228,6 @@ impl Workspace {
         Self {
             id,
             custom_name: label.or_else(|| Some(fallback_label_from_cwd(&name_cwd))),
-            worktree_space: None,
             metadata_tokens: crate::metadata_tokens::MetadataTokens::default(),
             metadata_token_sequences: HashMap::new(),
             public_pane_numbers,
@@ -375,7 +372,6 @@ impl Workspace {
             Self {
                 id,
                 custom_name: Some(fallback_label_from_cwd(&initial_cwd)),
-                worktree_space: None,
                 metadata_tokens: crate::metadata_tokens::MetadataTokens::default(),
                 metadata_token_sequences: HashMap::new(),
                 public_pane_numbers,
@@ -977,14 +973,24 @@ impl Workspace {
         tab.cwd_for_pane(tab.root_pane, terminals, terminal_runtimes)
     }
 
-    /// The Git checkout of the first tab's root pane, from its last repo refresh.
-    pub fn first_pane_git_space<'a>(
+    /// The live cwd of the active tab's focused pane.
+    pub fn focused_pane_cwd_from(
+        &self,
+        terminals: &HashMap<TerminalId, TerminalState>,
+        terminal_runtimes: &TerminalRuntimeRegistry,
+    ) -> Option<PathBuf> {
+        let tab = self.active_tab()?;
+        tab.cwd_for_pane(tab.layout.focused(), terminals, terminal_runtimes)
+    }
+
+    /// The Git checkout of the active tab's focused pane, from its last repo refresh.
+    pub fn focused_pane_git_space<'a>(
         &self,
         terminals: &'a HashMap<TerminalId, TerminalState>,
     ) -> Option<&'a GitSpaceMetadata> {
-        let tab = self.tabs.first()?;
+        let tab = self.active_tab()?;
         terminals
-            .get(tab.terminal_id(tab.root_pane)?)?
+            .get(tab.terminal_id(tab.layout.focused())?)?
             .repo
             .as_ref()?
             .facts
@@ -1027,10 +1033,6 @@ impl Workspace {
         self.first_pane_cwd_from(terminals, terminal_runtimes)
             .map(|cwd| fallback_label_from_cwd(&cwd))
             .unwrap_or_else(|| "workspace".into())
-    }
-
-    pub fn worktree_space(&self) -> Option<&WorktreeSpaceMembership> {
-        self.worktree_space.as_ref()
     }
 
     pub fn find_tab_index_for_pane(&self, pane_id: PaneId) -> Option<usize> {
@@ -1127,6 +1129,7 @@ impl Workspace {
         let tab = Tab {
             custom_name: None,
             followed_name: None,
+            worktree: None,
             number: 1,
             root_pane: root_id,
             layout,
@@ -1142,7 +1145,6 @@ impl Workspace {
         Self {
             id: generate_workspace_id(),
             custom_name: Some(name.to_string()),
-            worktree_space: None,
             metadata_tokens: crate::metadata_tokens::MetadataTokens::default(),
             metadata_token_sequences: HashMap::new(),
             public_pane_numbers,
@@ -1178,6 +1180,7 @@ impl Workspace {
         let tab = Tab {
             custom_name: name.map(str::to_string),
             followed_name: None,
+            worktree: None,
             number: self.next_public_tab_number,
             root_pane: root_id,
             layout,

@@ -140,34 +140,6 @@ impl App {
             return Vec::new();
         }
 
-        if let AppEvent::RestoredWorktreeSpaceChecked {
-            workspace_id,
-            expected,
-            valid,
-        } = ev
-        {
-            self.pending_restored_worktree_spaces
-                .retain(|(id, space)| id != &workspace_id || space != &expected);
-            let changed_workspace = (!valid)
-                .then(|| {
-                    self.state.workspaces.iter().position(|workspace| {
-                        workspace.id == workspace_id
-                            && workspace.worktree_space.as_ref() == Some(&expected)
-                    })
-                })
-                .flatten();
-            self.state
-                .handle_app_event(AppEvent::RestoredWorktreeSpaceChecked {
-                    workspace_id,
-                    expected,
-                    valid,
-                });
-            if let Some(ws_idx) = changed_workspace {
-                self.emit_workspace_updated(ws_idx);
-            }
-            return Vec::new();
-        }
-
         if let AppEvent::TabBarCommandFinished {
             generation,
             segment_index,
@@ -1163,12 +1135,11 @@ impl App {
                     "worktree.create is handled asynchronously by the app runtime",
                 );
             }
-            Method::WorktreeRemove(params) => {
-                let _ = params;
+            Method::WorktreeRemove(_) | Method::WorktreeRemoveTab(_) => {
                 return responses::encode_error(
                     request.id,
                     "invalid_request",
-                    "worktree.remove is handled asynchronously by the app runtime",
+                    "worktree removal is handled asynchronously by the app runtime",
                 );
             }
             Method::TabList(params) => return self.handle_tab_list(request.id, params),

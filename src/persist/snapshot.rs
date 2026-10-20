@@ -122,6 +122,12 @@ pub struct PaneSnapshot {
     pub agent_id: Option<crate::terminal::AgentId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_agent_id: Option<crate::terminal::AgentId>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub launch_env: Vec<(String, String)>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_launch: Option<crate::agent_resume::AgentLaunch>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_home: Option<crate::agent_resume::AgentHome>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -407,6 +413,11 @@ fn capture_tab(
                 launch_argv,
                 agent_id: terminal.and_then(|terminal| terminal.agent_id.clone()),
                 parent_agent_id: terminal.and_then(|terminal| terminal.parent_agent_id.clone()),
+                launch_env: terminal
+                    .map(|terminal| terminal.launch_env.clone())
+                    .unwrap_or_default(),
+                agent_launch: terminal.and_then(|terminal| terminal.agent_launch.clone()),
+                agent_home: terminal.and_then(|terminal| terminal.agent_home.clone()),
             },
         );
     }
@@ -762,6 +773,9 @@ mod tests {
                 launch_argv: None,
                 agent_id: None,
                 parent_agent_id: None,
+                launch_env: Vec::new(),
+                agent_launch: None,
+                agent_home: None,
             },
         );
         panes.insert(
@@ -776,6 +790,9 @@ mod tests {
                 launch_argv: None,
                 agent_id: None,
                 parent_agent_id: None,
+                launch_env: Vec::new(),
+                agent_launch: None,
+                agent_home: None,
             },
         );
 
@@ -1351,6 +1368,40 @@ mod tests {
     }
 
     #[test]
+    fn capture_contract_tracks_how_the_agent_was_started() {
+        let mut state = state_with_workspaces(&["one"]);
+        let root = state.workspaces[0].tabs[0].root_pane;
+        state.ensure_test_terminals();
+        let terminal_id = state.workspaces[0].tabs[0].panes[&root]
+            .attached_terminal_id
+            .clone();
+        let terminal = state.terminals.get_mut(&terminal_id).unwrap();
+        terminal.launch_env = vec![("LOOM_PARENT".into(), "1234abcd".into())];
+        terminal.agent_launch = Some(crate::agent_resume::AgentLaunch {
+            agent: "claude".into(),
+            args: vec!["--model".into(), "opus".into()],
+        });
+        terminal.agent_home = Some(crate::agent_resume::AgentHome {
+            agent: "claude".into(),
+            path: "/home/u/.claude-personal".into(),
+        });
+
+        let snapshot = capture_from_state(&state);
+        let pane = &snapshot.workspaces[0].tabs[0].panes[&root.raw()];
+        let json = serde_json::to_value(pane).unwrap();
+
+        assert_eq!(
+            json["launch_env"],
+            serde_json::json!([["LOOM_PARENT", "1234abcd"]])
+        );
+        assert_eq!(
+            json["agent_launch"],
+            serde_json::json!({"agent": "claude", "args": ["--model", "opus"]})
+        );
+        assert_eq!(json["agent_home"]["path"], "/home/u/.claude-personal");
+    }
+
+    #[test]
     fn capture_contract_tracks_hook_authority_agent_session() {
         let mut state = state_with_workspaces(&["one"]);
         let session_path = test_session_path("pi-session.jsonl");
@@ -1534,6 +1585,9 @@ mod tests {
                 launch_argv: None,
                 agent_id: None,
                 parent_agent_id: None,
+                launch_env: Vec::new(),
+                agent_launch: None,
+                agent_home: None,
             },
         );
         panes.insert(
@@ -1550,6 +1604,9 @@ mod tests {
                 launch_argv: None,
                 agent_id: None,
                 parent_agent_id: None,
+                launch_env: Vec::new(),
+                agent_launch: None,
+                agent_home: None,
             },
         );
 

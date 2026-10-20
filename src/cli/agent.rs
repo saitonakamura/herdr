@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
 use crate::api::schema::{
-    AgentPromptParams, AgentReadParams, AgentRenameParams, AgentSendKeysParams,
+    AgentPromptParams, AgentReadParams, AgentRenameParams, AgentSendKeysParams, AgentSetArgsParams,
     AgentSetParentParams, AgentStartParams, AgentTarget, AgentWaitParams, EmptyParams, ErrorBody,
     ErrorResponse, Method, PaneProcessInfoParams, PaneTarget, Request,
 };
@@ -56,6 +56,7 @@ pub(super) fn run_agent_command(args: &[String]) -> std::io::Result<i32> {
         Operation::Read(params) => agent_read(params),
         Operation::SendKeys(params) => agent_send_keys(params),
         Operation::Rename(params) => agent_rename(params),
+        Operation::SetArgs(params) => agent_set_args(params),
         Operation::SetParent(params) => agent_set_parent(params),
         Operation::Wait(params) => agent_wait(params),
         Operation::Prompt(params) => agent_prompt(params),
@@ -586,6 +587,13 @@ fn agent_get_request(target: &str, request_id: &str) -> Request {
             target: target.to_owned(),
         }),
     }
+}
+
+fn agent_set_args(params: AgentSetArgsParams) -> std::io::Result<i32> {
+    super::print_response(&super::send_request(&Request {
+        id: "cli:agent:set_args".into(),
+        method: Method::AgentSetArgs(params),
+    })?)
 }
 
 fn agent_set_parent(params: AgentSetParentParams) -> std::io::Result<i32> {

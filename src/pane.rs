@@ -142,6 +142,12 @@ pub(crate) struct PaneLaunchEnv {
     identity: PaneLaunchIdentity,
 }
 
+impl PaneLaunchEnv {
+    pub(crate) fn extra(&self) -> &[(String, String)] {
+        &self.extra
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 enum PaneLaunchIdentity {
     #[default]

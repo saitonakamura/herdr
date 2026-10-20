@@ -197,6 +197,10 @@ impl App {
         let shell_name = available_shell_name(runtime)
             .ok_or_else(|| AgentStartError::TargetBusy(params.pane_id.clone()))?;
 
+        let launch = crate::agent_resume::AgentLaunch {
+            agent: crate::detect::agent_label(kind).to_string(),
+            args: params.args.clone(),
+        };
         let mut argv = vec![crate::detect::interactive_agent_executable(kind).to_string()];
         argv.extend(params.args);
         let command = crate::platform::interactive_shell_command(&argv, &shell_name)
@@ -229,6 +233,8 @@ impl App {
         if let Some(session) = persisted_agent_session {
             terminal.set_managed_agent_launch_session(session);
         }
+        terminal.agent_launch = Some(launch);
+        terminal.agent_home = None;
         let identity_changed = self.assign_agent_identity(&terminal_id, Some(parent));
         self.state.mark_session_dirty();
         self.schedule_session_save();
@@ -403,6 +409,8 @@ impl App {
             agent_session: pane.agent_session,
             agent_id: pane.agent_id,
             parent_agent_id: pane.parent_agent_id,
+            launch_args: pane.launch_args,
+            agent_home: pane.agent_home,
             repo: pane.repo,
             workspace_id: pane.workspace_id,
             tab_id: pane.tab_id,

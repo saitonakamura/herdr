@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-dogfood-identity-findings
 title: "Dogfood: spawned children get no herdr Parent, and an attached agent takes a stale name"
-status: in-progress
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee:
-claimed_by: macos/w1:p7/f8a0c8a8-50b6-407f-866e-27225a1bb5f1
+claimed_by: macos/f8a0c8a8-50b6-407f-866e-27225a1bb5f1
 ---
 
 ## Question
@@ -37,7 +37,7 @@ Reproduce each in a throwaway session on the fork build, then fix them in herdr 
 
 ## Resolution
 
-Draft, in progress: [PR #17](https://github.com/saitonakamura/herdr/pull/17) (branch
+Merged 2026-10-20 as `864971ee`: [PR #17](https://github.com/saitonakamura/herdr/pull/17) (branch
 `fork/024-dogfood-identity-findings`) and dotfiles branch `herdr-fork/024-dogfood-identity-findings`.
 
 1. **Parent.** herdr's `agent start` without `--parent` reset `parent_agent_id` to none (`start_agent` passed

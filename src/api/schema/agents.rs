@@ -214,7 +214,7 @@ cli_params! {
         pub pane_id: String => Field::new(String::new()).input(bindings::pane()),
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         pub args: Vec<String> => Field::new(Vec::new()).input(bindings::agent_args()),
-        /// Agent id of the agent that starts this one.
+        /// Agent id of the agent that starts this one; omitted keeps the pane's current parent.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub parent: Option<String> => Field::new(None).input(bindings::parent_flag()),
         /// Startup timeout in milliseconds. Values must be greater than 3000 and at most 300000.

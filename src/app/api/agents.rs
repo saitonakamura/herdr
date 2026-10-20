@@ -3,8 +3,9 @@ use std::time::Duration;
 use bytes::Bytes;
 
 use crate::api::schema::{
-    AgentPromptParams, AgentRenameParams, AgentSendKeysParams, AgentSetArgsParams,
-    AgentSetParentParams, AgentStartParams, AgentTarget, PaneReadResult, ResponseResult,
+    AgentCloseParams, AgentPromptParams, AgentRenameParams, AgentSendKeysParams,
+    AgentSetArgsParams, AgentSetParentParams, AgentSetTaskStatusParams, AgentStartParams,
+    AgentTarget, PaneReadResult, ResponseResult,
 };
 use crate::app::App;
 
@@ -89,6 +90,26 @@ impl App {
         match self.set_agent_parent(&params.target, params.parent) {
             Ok(pane) => encode_success(id, ResponseResult::PaneInfo { pane }),
             Err(err) => encode_error_body(id, self.agent_parent_error_body(err)),
+        }
+    }
+
+    pub(super) fn handle_agent_set_task_status(
+        &mut self,
+        id: String,
+        params: AgentSetTaskStatusParams,
+    ) -> String {
+        match self.set_agent_task_status(&params.target, params.status) {
+            Ok(pane) => encode_success(id, ResponseResult::PaneInfo { pane }),
+            Err(err) => encode_error_body(id, self.agent_parent_error_body(err)),
+        }
+    }
+
+    pub(super) fn handle_agent_close(&mut self, id: String, params: AgentCloseParams) -> String {
+        match self.close_agent_subtrees(&id, params) {
+            Ok((agents, dry_run)) => {
+                encode_success(id, ResponseResult::AgentsClosed { agents, dry_run })
+            }
+            Err(body) => encode_error_body(id, body),
         }
     }
 

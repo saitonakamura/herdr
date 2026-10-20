@@ -128,6 +128,8 @@ pub struct PaneSnapshot {
     pub agent_launch: Option<crate::agent_resume::AgentLaunch>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_home: Option<crate::agent_resume::AgentHome>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_status: Option<crate::api::schema::TaskStatus>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -418,6 +420,7 @@ fn capture_tab(
                     .unwrap_or_default(),
                 agent_launch: terminal.and_then(|terminal| terminal.agent_launch.clone()),
                 agent_home: terminal.and_then(|terminal| terminal.agent_home.clone()),
+                task_status: terminal.and_then(|terminal| terminal.task_status),
             },
         );
     }
@@ -776,6 +779,7 @@ mod tests {
                 launch_env: Vec::new(),
                 agent_launch: None,
                 agent_home: None,
+                task_status: None,
             },
         );
         panes.insert(
@@ -793,6 +797,7 @@ mod tests {
                 launch_env: Vec::new(),
                 agent_launch: None,
                 agent_home: None,
+                task_status: None,
             },
         );
 
@@ -1358,6 +1363,7 @@ mod tests {
         let terminal = state.terminals.get_mut(&terminal_id).unwrap();
         terminal.agent_id = crate::terminal::AgentId::parse("1234abcd");
         terminal.parent_agent_id = crate::terminal::AgentId::parse("2345bcde");
+        terminal.task_status = Some(crate::api::schema::TaskStatus::NeedsUser);
 
         let snapshot = capture_from_state(&state);
         let pane = &snapshot.workspaces[0].tabs[0].panes[&root.raw()];
@@ -1365,6 +1371,7 @@ mod tests {
 
         assert_eq!(json["agent_id"], "1234abcd");
         assert_eq!(json["parent_agent_id"], "2345bcde");
+        assert_eq!(json["task_status"], "needs_user");
     }
 
     #[test]
@@ -1588,6 +1595,7 @@ mod tests {
                 launch_env: Vec::new(),
                 agent_launch: None,
                 agent_home: None,
+                task_status: None,
             },
         );
         panes.insert(
@@ -1607,6 +1615,7 @@ mod tests {
                 launch_env: Vec::new(),
                 agent_launch: None,
                 agent_home: None,
+                task_status: None,
             },
         );
 

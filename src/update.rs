@@ -3095,6 +3095,7 @@ mod tests {
                 ssh_agent_registration: false,
                 worktree_post_create: false,
                 agent_launch_resume: false,
+                agent_task_status: false,
             }),
         };
         let missing_baseline = crate::api::RuntimeStatus {
@@ -3172,6 +3173,7 @@ mod tests {
                     ssh_agent_registration: false,
                     worktree_post_create: false,
                     agent_launch_resume: false,
+                    agent_task_status: false,
                 }),
             },
         };
@@ -3433,6 +3435,7 @@ mod tests {
                     ssh_agent_registration: false,
                     worktree_post_create: false,
                     agent_launch_resume: false,
+                    agent_task_status: false,
                 }),
             },
         };

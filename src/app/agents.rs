@@ -236,7 +236,12 @@ impl App {
         terminal.agent_launch = Some(launch);
         terminal.agent_home = None;
         // Without --parent, keep a Parent set on the pane before the agent started in it.
-        let identity_changed = self.assign_agent_identity(&terminal_id, parent.map(Some));
+        let mut identity_changed = self.assign_agent_identity(&terminal_id, parent.map(Some));
+        if let Some(terminal) = self.state.terminals.get_mut(&terminal_id) {
+            identity_changed |=
+                terminal.task_status != Some(crate::api::schema::TaskStatus::Starting);
+            terminal.task_status = Some(crate::api::schema::TaskStatus::Starting);
+        }
         self.state.mark_session_dirty();
         self.schedule_session_save();
         if identity_changed {
@@ -412,6 +417,7 @@ impl App {
             parent_agent_id: pane.parent_agent_id,
             launch_args: pane.launch_args,
             agent_home: pane.agent_home,
+            task_status: pane.task_status,
             repo: pane.repo,
             workspace_id: pane.workspace_id,
             tab_id: pane.tab_id,

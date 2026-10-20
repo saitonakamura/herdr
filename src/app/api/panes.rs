@@ -2014,7 +2014,11 @@ impl App {
     }
 
     /// Close a pane; `Err` carries the encoded error response.
-    pub(super) fn close_pane(&mut self, id: String, target: &PaneTarget) -> Result<(), String> {
+    pub(in crate::app) fn close_pane(
+        &mut self,
+        id: String,
+        target: &PaneTarget,
+    ) -> Result<(), String> {
         let Some((ws_idx, pane_id)) = self.parse_pane_id(&target.pane_id) else {
             return Err(pane_not_found(id, &target.pane_id));
         };

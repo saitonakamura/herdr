@@ -274,6 +274,9 @@ pub struct AgentInfo {
     /// Profile directory the agent's session is written to; a resume selects it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_home: Option<String>,
+    /// What the agent last said about its brief.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_status: Option<TaskStatus>,
     /// The Git checkout containing `cwd`; absent outside one or before its first refresh.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repo: Option<super::panes::PaneRepoInfo>,
@@ -303,4 +306,66 @@ pub struct AgentSessionInfo {
     pub agent: String,
     pub kind: crate::agent_resume::AgentSessionRefKind,
     pub value: String,
+}
+
+/// What an agent says about its brief, stored next to the state herdr detects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskStatus {
+    Starting,
+    Running,
+    NeedsParent,
+    NeedsUser,
+    Complete,
+    Failed,
+    Closed,
+}
+
+cli_params! {
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+    pub struct AgentSetTaskStatusParams => AgentSetTaskStatusProjection {
+        /// Agent id, agent name, or pane id. A pane without an agent gets an agent id too.
+        pub target: String => Field::new(String::new()).input(bindings::target()),
+        pub status: TaskStatus => Field::new(TaskStatus::Running).input(bindings::task_status()),
+    }
+}
+
+cli_params! {
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+    pub struct AgentCloseParams => AgentCloseProjection {
+        /// Agent ids, agent names, or pane ids; each closes with every descendant.
+        pub targets: Vec<String> => Field::new(Vec::new()).input(bindings::close_targets()),
+        /// Close even while part of the subtree is working or blocked.
+        #[serde(default, skip_serializing_if = "super::is_false")]
+        pub force: bool => Field::new(false).input(crate::cli::projection::boolean("force", true)),
+        /// Report what would close without closing anything.
+        #[serde(default, skip_serializing_if = "super::is_false")]
+        pub dry_run: bool => Field::new(false).input(crate::cli::projection::boolean("dry-run", true)),
+        /// The caller's own pane: never counted as busy, and closed last.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub caller_pane_id: Option<String> => Field::new(None::<String>),
+    }
+}
+
+/// What closing one agent of a subtree took with it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentCloseScope {
+    Pane,
+    Tab,
+    Workspace,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ClosedAgentInfo {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub pane_id: String,
+    /// The pane, or the tab or workspace it was the last pane of.
+    pub scope: AgentCloseScope,
+    /// Why this agent's pane could not be closed; the rest of the subtree still closes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }

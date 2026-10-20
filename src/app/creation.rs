@@ -369,6 +369,7 @@ impl App {
                 .as_ref()
                 .map(|launch| launch.args.clone()),
             agent_home: terminal.agent_home.as_ref().map(|home| home.path.clone()),
+            task_status: terminal.task_status,
             repo: terminal
                 .repo
                 .as_ref()

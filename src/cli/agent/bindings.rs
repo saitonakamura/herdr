@@ -1,14 +1,16 @@
 use clap::{ArgGroup, ArgMatches, Command};
 
 use crate::api::schema::agents::{
-    AgentPromptProjection, AgentPromptWaitProjection, AgentReadProjection, AgentRenameProjection,
-    AgentSendKeysProjection, AgentSetArgsProjection, AgentSetParentProjection,
-    AgentStartProjection, AgentWaitProjection,
+    AgentCloseProjection, AgentPromptProjection, AgentPromptWaitProjection, AgentReadProjection,
+    AgentRenameProjection, AgentSendKeysProjection, AgentSetArgsProjection,
+    AgentSetParentProjection, AgentSetTaskStatusProjection, AgentStartProjection,
+    AgentWaitProjection,
 };
 use crate::api::schema::{
-    AgentPromptParams, AgentReadParams, AgentRenameParams, AgentSendKeysParams, AgentSetArgsParams,
-    AgentSetParentParams, AgentStartParams, AgentStatus, AgentTarget, AgentWaitParams, ReadFormat,
-    ReadSource, READ_FORMATS, READ_SOURCES,
+    AgentCloseParams, AgentPromptParams, AgentReadParams, AgentRenameParams, AgentSendKeysParams,
+    AgentSetArgsParams, AgentSetParentParams, AgentSetTaskStatusParams, AgentStartParams,
+    AgentStatus, AgentTarget, AgentWaitParams, ReadFormat, ReadSource, TaskStatus, READ_FORMATS,
+    READ_SOURCES,
 };
 pub(crate) use crate::cli::projection::optional_text;
 use crate::cli::projection::{
@@ -21,6 +23,15 @@ const STATUSES: &[Choice<AgentStatus>] = &[
     Choice::new("blocked", AgentStatus::Blocked),
     Choice::new("done", AgentStatus::Done),
     Choice::new("unknown", AgentStatus::Unknown),
+];
+const TASK_STATUSES: &[Choice<TaskStatus>] = &[
+    Choice::new("starting", TaskStatus::Starting),
+    Choice::new("running", TaskStatus::Running),
+    Choice::new("needs_parent", TaskStatus::NeedsParent),
+    Choice::new("needs_user", TaskStatus::NeedsUser),
+    Choice::new("complete", TaskStatus::Complete),
+    Choice::new("failed", TaskStatus::Failed),
+    Choice::new("closed", TaskStatus::Closed),
 ];
 const EXPLAIN_FORMATS: &[Choice<bool>] = &[Choice::new("text", false), Choice::new("json", true)];
 
@@ -194,6 +205,25 @@ pub(crate) fn clear_parent() -> Input<Option<String>> {
     .help("Make the agent top-level")
 }
 
+pub(crate) fn task_status() -> Input<TaskStatus> {
+    Input::positional("status", 1, |slot, value| {
+        *slot = parse_choice(TASK_STATUSES, "task status", value)?;
+        Ok(())
+    })
+    .value_name("STATUS")
+    .configure(|arg| choices(arg, TASK_STATUSES))
+}
+
+pub(crate) fn close_targets() -> Input<Vec<String>> {
+    Input::<Vec<String>>::positional("target", 0, |slot, value| {
+        slot.push(value.to_owned());
+        Ok(())
+    })
+    .value_name("TARGET")
+    // Variadic, so a hyphen value would swallow --force and --dry-run after the targets.
+    .configure(|arg| arg.num_args(1..).allow_hyphen_values(false))
+}
+
 pub(crate) fn wait_presence() -> Input<Option<crate::api::schema::AgentPromptWaitOptions>> {
     Input::flag("wait", |slot, _| {
         *slot = Some(crate::api::schema::AgentPromptWaitOptions {
@@ -256,6 +286,8 @@ pub(crate) enum Operation {
     Rename(AgentRenameParams),
     SetArgs(AgentSetArgsParams),
     SetParent(AgentSetParentParams),
+    SetTaskStatus(AgentSetTaskStatusParams),
+    Close(AgentCloseParams),
     Wait(AgentWaitParams),
     Prompt(AgentPromptParams),
     Start(AgentStartParams),
@@ -288,6 +320,12 @@ pub(crate) fn command() -> Command {
             .override_usage("herdr agent set-parent <TARGET> <PARENT>|--clear")
             .group(ArgGroup::new("set_parent").args(["parent", "clear"]).required(true))
             .after_help("TARGET is an agent id, agent name or pane id; a pane without an agent gets an agent id too. PARENT is an agent id. When the parent's pane closes, the agent becomes top-level."))
+        .subcommand(leaf("set-task-status", AgentSetTaskStatusProjection::arguments(), "Record what an agent says about its brief")
+            .override_usage("herdr agent set-task-status <TARGET> <STATUS>")
+            .after_help("TARGET is an agent id, agent name or pane id; a pane without an agent gets an agent id too. The task status sits next to the state herdr detects and never changes it."))
+        .subcommand(leaf("close", AgentCloseProjection::arguments(), "Close agents with their whole subtree, deepest first")
+            .override_usage("herdr agent close <TARGET>... [--force] [--dry-run]")
+            .after_help("Each TARGET closes with every descendant (by parent). Refused with agent_subtree_busy while any of them is working or blocked, unless --force; the pane running this command is never counted and closes last. Closing an agent closes its pane, and the tab or workspace too when that pane is the last one left in it."))
         .subcommand(leaf("wait", AgentWaitProjection::arguments(), "Wait until an agent reaches one of the requested states")
             .override_usage("herdr agent wait <TARGET> [OPTIONS]")
             .after_help("Without --until, matches idle, done, or blocked. Use --until unknown explicitly when needed. Without --timeout, waits indefinitely."))
@@ -321,6 +359,10 @@ pub(crate) fn from_matches(matches: &ArgMatches) -> Result<Operation, ParseError
         "rename" => Operation::Rename(AgentRenameProjection::from_matches(matches)?),
         "set-args" => Operation::SetArgs(AgentSetArgsProjection::from_matches(matches)?),
         "set-parent" => Operation::SetParent(AgentSetParentProjection::from_matches(matches)?),
+        "set-task-status" => {
+            Operation::SetTaskStatus(AgentSetTaskStatusProjection::from_matches(matches)?)
+        }
+        "close" => Operation::Close(AgentCloseProjection::from_matches(matches)?),
         "wait" => Operation::Wait(AgentWaitProjection::from_matches(matches)?),
         "prompt" => {
             let mut params = AgentPromptProjection::from_matches(matches)?;
@@ -341,5 +383,30 @@ mod choice_tests {
     #[test]
     fn agent_statuses_cover_every_api_value() {
         crate::cli::projection::assert_choices_cover_api_enum(super::STATUSES);
+    }
+
+    #[test]
+    fn task_statuses_cover_every_api_value() {
+        crate::cli::projection::assert_choices_cover_api_enum(super::TASK_STATUSES);
+    }
+
+    #[test]
+    fn close_takes_several_targets_with_flags_on_either_side() {
+        let parse = |args: &[&str]| {
+            let matches = super::command()
+                .try_get_matches_from(["agent", "close"].iter().chain(args))
+                .unwrap();
+            match super::from_matches(&matches) {
+                Ok(super::Operation::Close(params)) => params,
+                _ => panic!("not a close: {args:?}"),
+            }
+        };
+
+        let params = parse(&["1234abcd", "w1:p2", "--dry-run"]);
+        assert_eq!(params.targets, ["1234abcd", "w1:p2"]);
+        assert!(params.dry_run && !params.force);
+        let params = parse(&["--force", "1234abcd"]);
+        assert_eq!(params.targets, ["1234abcd"]);
+        assert!(params.force && !params.dry_run);
     }
 }

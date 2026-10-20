@@ -1036,6 +1036,17 @@
             "tab_id": {
               "type": "string"
             },
+            "task_status": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/event/$defs/TaskStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "What the agent last said about its brief."
+            },
             "terminal_id": {
               "type": "string"
             },
@@ -1347,6 +1358,19 @@
           ],
           "type": "string"
         },
+        "TaskStatus": {
+          "description": "What an agent says about its brief, stored next to the state herdr detects.",
+          "enum": [
+            "starting",
+            "running",
+            "needs_parent",
+            "needs_user",
+            "complete",
+            "failed",
+            "closed"
+          ],
+          "type": "string"
+        },
         "WorkspaceInfo": {
           "properties": {
             "active_tab_id": {
@@ -1510,6 +1534,36 @@
           ],
           "type": "string"
         },
+        "AgentCloseParams": {
+          "properties": {
+            "caller_pane_id": {
+              "description": "The caller's own pane: never counted as busy, and closed last.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "dry_run": {
+              "description": "Report what would close without closing anything.",
+              "type": "boolean"
+            },
+            "force": {
+              "description": "Close even while part of the subtree is working or blocked.",
+              "type": "boolean"
+            },
+            "targets": {
+              "description": "Agent ids, agent names, or pane ids; each closes with every descendant.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "targets"
+          ],
+          "type": "object"
+        },
         "AgentPromptParams": {
           "properties": {
             "target": {
@@ -1661,6 +1715,22 @@
           },
           "required": [
             "target"
+          ],
+          "type": "object"
+        },
+        "AgentSetTaskStatusParams": {
+          "properties": {
+            "status": {
+              "$ref": "#/schemas/request/$defs/TaskStatus"
+            },
+            "target": {
+              "description": "Agent id, agent name, or pane id. A pane without an agent gets an agent id too.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "target",
+            "status"
           ],
           "type": "object"
         },
@@ -4819,6 +4889,19 @@
           ],
           "type": "object"
         },
+        "TaskStatus": {
+          "description": "What an agent says about its brief, stored next to the state herdr detects.",
+          "enum": [
+            "starting",
+            "running",
+            "needs_parent",
+            "needs_user",
+            "complete",
+            "failed",
+            "closed"
+          ],
+          "type": "string"
+        },
         "ToastHerdrPosition": {
           "enum": [
             "top-left",
@@ -6870,6 +6953,38 @@
             "params"
           ],
           "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "agent.set_task_status",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/AgentSetTaskStatusParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "agent.close",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/AgentCloseParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
         }
       ],
       "properties": {
@@ -7127,6 +7242,15 @@
           ],
           "type": "string"
         },
+        "AgentCloseScope": {
+          "description": "What closing one agent of a subtree took with it.",
+          "enum": [
+            "pane",
+            "tab",
+            "workspace"
+          ],
+          "type": "string"
+        },
         "AgentInfo": {
           "properties": {
             "agent": {
@@ -7267,6 +7391,17 @@
             },
             "tab_id": {
               "type": "string"
+            },
+            "task_status": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/success_response/$defs/TaskStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "What the agent last said about its brief."
             },
             "terminal_id": {
               "type": "string"
@@ -7422,6 +7557,41 @@
             "no_foreground_client"
           ],
           "type": "string"
+        },
+        "ClosedAgentInfo": {
+          "properties": {
+            "agent_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "error": {
+              "description": "Why this agent's pane could not be closed; the rest of the subtree still closes.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "name": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "pane_id": {
+              "type": "string"
+            },
+            "scope": {
+              "$ref": "#/schemas/success_response/$defs/AgentCloseScope",
+              "description": "The pane, or the tab or workspace it was the last pane of."
+            }
+          },
+          "required": [
+            "pane_id",
+            "scope"
+          ],
+          "type": "object"
         },
         "ConfigReloadStatus": {
           "enum": [
@@ -8773,6 +8943,17 @@
             },
             "tab_id": {
               "type": "string"
+            },
+            "task_status": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/success_response/$defs/TaskStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "What the agent last said about its brief."
             },
             "terminal_id": {
               "type": "string"
@@ -11334,6 +11515,29 @@
                 "messages"
               ],
               "type": "object"
+            },
+            {
+              "properties": {
+                "agents": {
+                  "description": "Deepest first, in the order they were (or would be) closed.",
+                  "items": {
+                    "$ref": "#/schemas/success_response/$defs/ClosedAgentInfo"
+                  },
+                  "type": "array"
+                },
+                "dry_run": {
+                  "type": "boolean"
+                },
+                "type": {
+                  "const": "agents_closed",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "agents"
+              ],
+              "type": "object"
             }
           ]
         },
@@ -11342,6 +11546,11 @@
             "agent_launch_resume": {
               "default": false,
               "description": "Resumes a restored agent with its `agent start` args, its pane's `--env`\nand its session's profile directory.",
+              "type": "boolean"
+            },
+            "agent_task_status": {
+              "default": false,
+              "description": "Keeps a task status per agent (`agent.set_task_status`) and closes subtrees (`agent.close`).",
               "type": "boolean"
             },
             "detached_server_daemon": {
@@ -11519,6 +11728,19 @@
             "following",
             "number",
             "unknown"
+          ],
+          "type": "string"
+        },
+        "TaskStatus": {
+          "description": "What an agent says about its brief, stored next to the state herdr detects.",
+          "enum": [
+            "starting",
+            "running",
+            "needs_parent",
+            "needs_user",
+            "complete",
+            "failed",
+            "closed"
           ],
           "type": "string"
         },

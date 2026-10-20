@@ -153,6 +153,8 @@ operations::define_operations! {
     MessageList(MessageListParams) => "message.list", false, false;
     MessageGet(MessageTarget) => "message.get", false, false;
     MessageWithdraw(MessageTarget) => "message.withdraw", false, false;
+    AgentSetTaskStatus(AgentSetTaskStatusParams) => "agent.set_task_status", false, false;
+    AgentClose(AgentCloseParams) => "agent.close", true, false;
 }
 
 #[cfg(test)]

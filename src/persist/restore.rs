@@ -477,6 +477,7 @@ fn restore_agent_identity(
         terminal.launch_env = pane.launch_env.clone();
         terminal.agent_launch = pane.agent_launch.clone();
         terminal.agent_home = pane.agent_home.clone();
+        terminal.task_status = pane.task_status;
     }
 }
 
@@ -1589,6 +1590,7 @@ mod tests {
                             launch_env: Vec::new(),
                             agent_launch: None,
                             agent_home: None,
+                            task_status: Some(crate::api::schema::TaskStatus::Complete),
                         },
                     )]),
                     zoomed: false,
@@ -1646,6 +1648,10 @@ mod tests {
             terminal.parent_agent_id.as_ref().map(|id| id.as_str()),
             Some("2345bcde")
         );
+        assert_eq!(
+            terminal.task_status,
+            Some(crate::api::schema::TaskStatus::Complete)
+        );
     }
 
     #[tokio::test]
@@ -1687,6 +1693,7 @@ mod tests {
                                 launch_env: Vec::new(),
                                 agent_launch: None,
                                 agent_home: None,
+                                task_status: None,
                             },
                         ),
                         (
@@ -1704,6 +1711,7 @@ mod tests {
                                 launch_env: Vec::new(),
                                 agent_launch: None,
                                 agent_home: None,
+                                task_status: None,
                             },
                         ),
                     ]),
@@ -1764,6 +1772,7 @@ mod tests {
                     launch_env: Vec::new(),
                     agent_launch: None,
                     agent_home: None,
+                    task_status: None,
                 },
             )
         };
@@ -1785,6 +1794,7 @@ mod tests {
             launch_env: Vec::new(),
             agent_launch: None,
             agent_home: None,
+            task_status: None,
         };
         let snapshot = SessionSnapshot {
             version: super::super::snapshot::SNAPSHOT_VERSION,
@@ -1949,6 +1959,7 @@ mod tests {
                             launch_env: Vec::new(),
                             agent_launch: None,
                             agent_home: None,
+                            task_status: None,
                         },
                     )]),
                     zoomed: false,
@@ -2041,6 +2052,7 @@ mod tests {
             launch_argv: None,
             agent_id: None,
             parent_agent_id: None,
+            task_status: None,
             launch_env: vec![("LOOM_PARENT".into(), "1234abcd".into())],
             agent_launch: Some(crate::agent_resume::AgentLaunch {
                 agent: "codex".into(),
@@ -2350,6 +2362,7 @@ mod tests {
                 launch_env: Vec::new(),
                 agent_launch: None,
                 agent_home: None,
+                task_status: None,
             },
         );
         let mut history = SessionHistorySnapshot {

@@ -62,4 +62,7 @@ pub struct ServerCapabilities {
     /// and its session's profile directory.
     #[serde(default)]
     pub agent_launch_resume: bool,
+    /// Keeps a task status per agent (`agent.set_task_status`) and closes subtrees (`agent.close`).
+    #[serde(default)]
+    pub agent_task_status: bool,
 }

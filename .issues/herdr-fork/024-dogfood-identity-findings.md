@@ -34,3 +34,22 @@ Reproduce each in a throwaway session on the fork build, then fix them in herdr 
 ## Parent
 
 [000-map](./000-map.md)
+
+## Resolution
+
+Draft, in progress: [PR #17](https://github.com/saitonakamura/herdr/pull/17) (branch
+`fork/024-dogfood-identity-findings`) and dotfiles branch `herdr-fork/024-dogfood-identity-findings`.
+
+1. **Parent.** herdr's `agent start` without `--parent` reset `parent_agent_id` to none (`start_agent` passed
+   `Some(None)` to `assign_agent_identity`), wiping the Parent that loom's spawn had just set on the shell pane.
+   Reproduced on `0.9.5+fork.1` in a throwaway session (`1e51e345` → `null`). The PR keeps the pane's Parent unless
+   `--parent` is given. loom's spawn also sets it again after the start, so the deployed build is covered, and it now
+   warns when herdr refuses a herdr id as Parent. The loom node files have no `agent_id` field by design: since 010
+   a node's `id` is the herdr agent id.
+2. **Stale name.** No identity was reused. The session snapshot from just before the attach shows no pane with an
+   `agent_id`, and 82993002 was minted by the attach. The name came from tab `w1:t1`'s label. On 2026-10-16, loom
+   wrote that label with `tab rename` while following a smoke-test claude's title under a pre-009 build. Herdr
+   persisted it as `custom_name`, which 009 reads as a pin, and loom's names sync handed the pin to the newly attached
+   node over `--name herdr-fork`. On a herdr that names tabs, loom's names sync now unpins a pinned label equal to
+   the one it recorded writing. Reproduced and fixed live with `loom attach` in a throwaway session.
+3. **`--name`:** still to decide. It depends on how an explicit name should interact with tabs following titles.

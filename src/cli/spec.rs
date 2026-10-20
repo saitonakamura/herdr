@@ -42,6 +42,7 @@ pub(super) fn command() -> Command {
         .subcommand(tab_command())
         .subcommand(notification_command())
         .subcommand(agent_command())
+        .subcommand(super::message::command())
         .subcommand(pane_command())
         .subcommand(terminal_command())
         .subcommand(session_command())

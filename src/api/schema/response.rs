@@ -278,6 +278,12 @@ pub enum ResponseResult {
         projection_revision: u64,
     },
     Ok {},
+    MessageInfo {
+        message: super::messages::MessageInfo,
+    },
+    MessageList {
+        messages: Vec<super::messages::MessageInfo>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

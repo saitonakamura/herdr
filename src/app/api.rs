@@ -5,6 +5,7 @@ mod agents;
 mod env;
 mod integrations;
 mod layouts;
+mod messages;
 mod panes;
 pub(crate) mod plugins;
 pub(super) mod responses;
@@ -692,6 +693,9 @@ impl App {
         };
         let workspace_id = self.public_workspace_id(update.ws_idx);
 
+        if update.previous_state != update.state && self.state.messages.has_pending() {
+            self.state.message_delivery_due = true;
+        }
         if update.previous_agent_label != update.agent_label {
             self.sync_agent_identities();
         }
@@ -1164,6 +1168,12 @@ impl App {
             Method::AgentRename(params) => return self.handle_agent_rename(request.id, params),
             Method::AgentSetParent(params) => {
                 return self.handle_agent_set_parent(request.id, params)
+            }
+            Method::MessageSend(params) => return self.handle_message_send(request.id, params),
+            Method::MessageList(params) => return self.handle_message_list(request.id, params),
+            Method::MessageGet(target) => return self.handle_message_get(request.id, target),
+            Method::MessageWithdraw(target) => {
+                return self.handle_message_withdraw(request.id, target)
             }
             Method::AgentViewSet(params) => return self.handle_agent_view_set(request.id, params),
             Method::AgentViewClear(params) => {

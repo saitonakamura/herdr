@@ -58,4 +58,7 @@ pub struct ServerCapabilities {
     /// Runs `[worktrees] post_create` in each new checkout before opening it.
     #[serde(default)]
     pub worktree_post_create: bool,
+    /// Keeps a task status per agent (`agent.set_task_status`) and closes subtrees (`agent.close`).
+    #[serde(default)]
+    pub agent_task_status: bool,
 }

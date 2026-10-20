@@ -284,6 +284,12 @@ pub enum ResponseResult {
     MessageList {
         messages: Vec<super::messages::MessageInfo>,
     },
+    AgentsClosed {
+        /// Deepest first, in the order they were (or would be) closed.
+        agents: Vec<super::agents::ClosedAgentInfo>,
+        #[serde(default, skip_serializing_if = "super::is_false")]
+        dry_run: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

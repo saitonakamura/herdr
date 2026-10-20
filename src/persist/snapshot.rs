@@ -122,6 +122,8 @@ pub struct PaneSnapshot {
     pub agent_id: Option<crate::terminal::AgentId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_agent_id: Option<crate::terminal::AgentId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_status: Option<crate::api::schema::TaskStatus>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -407,6 +409,7 @@ fn capture_tab(
                 launch_argv,
                 agent_id: terminal.and_then(|terminal| terminal.agent_id.clone()),
                 parent_agent_id: terminal.and_then(|terminal| terminal.parent_agent_id.clone()),
+                task_status: terminal.and_then(|terminal| terminal.task_status),
             },
         );
     }
@@ -762,6 +765,7 @@ mod tests {
                 launch_argv: None,
                 agent_id: None,
                 parent_agent_id: None,
+                task_status: None,
             },
         );
         panes.insert(
@@ -776,6 +780,7 @@ mod tests {
                 launch_argv: None,
                 agent_id: None,
                 parent_agent_id: None,
+                task_status: None,
             },
         );
 
@@ -1341,6 +1346,7 @@ mod tests {
         let terminal = state.terminals.get_mut(&terminal_id).unwrap();
         terminal.agent_id = crate::terminal::AgentId::parse("1234abcd");
         terminal.parent_agent_id = crate::terminal::AgentId::parse("2345bcde");
+        terminal.task_status = Some(crate::api::schema::TaskStatus::NeedsUser);
 
         let snapshot = capture_from_state(&state);
         let pane = &snapshot.workspaces[0].tabs[0].panes[&root.raw()];
@@ -1348,6 +1354,7 @@ mod tests {
 
         assert_eq!(json["agent_id"], "1234abcd");
         assert_eq!(json["parent_agent_id"], "2345bcde");
+        assert_eq!(json["task_status"], "needs_user");
     }
 
     #[test]
@@ -1534,6 +1541,7 @@ mod tests {
                 launch_argv: None,
                 agent_id: None,
                 parent_agent_id: None,
+                task_status: None,
             },
         );
         panes.insert(
@@ -1550,6 +1558,7 @@ mod tests {
                 launch_argv: None,
                 agent_id: None,
                 parent_agent_id: None,
+                task_status: None,
             },
         );
 

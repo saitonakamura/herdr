@@ -239,6 +239,7 @@ fn reply_to_probe(request: ApiRequestMessage) {
                 agent_session: None,
                 agent_id: None,
                 parent_agent_id: None,
+                task_status: None,
                 scroll: None,
                 revision: 0,
             },

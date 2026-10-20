@@ -229,7 +229,12 @@ impl App {
         if let Some(session) = persisted_agent_session {
             terminal.set_managed_agent_launch_session(session);
         }
-        let identity_changed = self.assign_agent_identity(&terminal_id, Some(parent));
+        let mut identity_changed = self.assign_agent_identity(&terminal_id, Some(parent));
+        if let Some(terminal) = self.state.terminals.get_mut(&terminal_id) {
+            identity_changed |=
+                terminal.task_status != Some(crate::api::schema::TaskStatus::Starting);
+            terminal.task_status = Some(crate::api::schema::TaskStatus::Starting);
+        }
         self.state.mark_session_dirty();
         self.schedule_session_save();
         if identity_changed {
@@ -403,6 +408,7 @@ impl App {
             agent_session: pane.agent_session,
             agent_id: pane.agent_id,
             parent_agent_id: pane.parent_agent_id,
+            task_status: pane.task_status,
             repo: pane.repo,
             workspace_id: pane.workspace_id,
             tab_id: pane.tab_id,

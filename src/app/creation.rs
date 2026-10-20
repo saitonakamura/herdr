@@ -364,6 +364,7 @@ impl App {
             agent_session: terminal_agent_session_info(terminal),
             agent_id: terminal.agent_id.as_ref().map(ToString::to_string),
             parent_agent_id: terminal.parent_agent_id.as_ref().map(ToString::to_string),
+            task_status: terminal.task_status,
             repo: terminal
                 .repo
                 .as_ref()

@@ -474,6 +474,7 @@ fn restore_agent_identity(
     if let Some(pane) = pane {
         terminal.agent_id = pane.agent_id.clone();
         terminal.parent_agent_id = pane.parent_agent_id.clone();
+        terminal.task_status = pane.task_status;
     }
 }
 
@@ -1566,6 +1567,7 @@ mod tests {
                             launch_argv: None,
                             agent_id: crate::terminal::AgentId::parse("1234abcd"),
                             parent_agent_id: crate::terminal::AgentId::parse("2345bcde"),
+                            task_status: Some(crate::api::schema::TaskStatus::Complete),
                         },
                     )]),
                     zoomed: false,
@@ -1623,6 +1625,10 @@ mod tests {
             terminal.parent_agent_id.as_ref().map(|id| id.as_str()),
             Some("2345bcde")
         );
+        assert_eq!(
+            terminal.task_status,
+            Some(crate::api::schema::TaskStatus::Complete)
+        );
     }
 
     #[tokio::test]
@@ -1661,6 +1667,7 @@ mod tests {
                                 launch_argv: None,
                                 agent_id: None,
                                 parent_agent_id: None,
+                                task_status: None,
                             },
                         ),
                         (
@@ -1675,6 +1682,7 @@ mod tests {
                                 launch_argv: None,
                                 agent_id: None,
                                 parent_agent_id: None,
+                                task_status: None,
                             },
                         ),
                     ]),
@@ -1732,6 +1740,7 @@ mod tests {
                     launch_argv: None,
                     agent_id: None,
                     parent_agent_id: None,
+                    task_status: None,
                 },
             )
         };
@@ -1750,6 +1759,7 @@ mod tests {
             launch_argv: None,
             agent_id: None,
             parent_agent_id: None,
+            task_status: None,
         };
         let snapshot = SessionSnapshot {
             version: super::super::snapshot::SNAPSHOT_VERSION,
@@ -1911,6 +1921,7 @@ mod tests {
                             launch_argv: None,
                             agent_id: None,
                             parent_agent_id: None,
+                            task_status: None,
                         },
                     )]),
                     zoomed: false,
@@ -2220,6 +2231,7 @@ mod tests {
                 launch_argv: None,
                 agent_id: None,
                 parent_agent_id: None,
+                task_status: None,
             },
         );
         let mut history = SessionHistorySnapshot {

@@ -544,6 +544,9 @@ pub struct PaneInfo {
     /// The agent that started this one; absent for a top-level agent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_agent_id: Option<String>,
+    /// What the agent last said about its brief.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_status: Option<super::agents::TaskStatus>,
     /// The Git checkout containing `cwd`; absent outside one or before its first refresh.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repo: Option<PaneRepoInfo>,

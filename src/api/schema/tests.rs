@@ -729,6 +729,7 @@ fn success_response_round_trips() {
                 health_check: true,
                 ssh_agent_registration: false,
                 worktree_post_create: false,
+                agent_task_status: false,
             }),
         },
     };
@@ -844,6 +845,7 @@ fn worktree_request_and_response_round_trip() {
                 agent_session: None,
                 agent_id: None,
                 parent_agent_id: None,
+                task_status: None,
                 scroll: None,
                 revision: 0,
             },
@@ -1278,6 +1280,7 @@ fn create_response_round_trips_with_root_pane() {
                 agent_session: None,
                 agent_id: None,
                 parent_agent_id: None,
+                task_status: None,
                 scroll: None,
                 revision: 0,
             },

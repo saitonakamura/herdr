@@ -1,9 +1,9 @@
 use std::time::{Duration, Instant};
 
 use crate::api::schema::{
-    AgentPromptParams, AgentReadParams, AgentRenameParams, AgentSendKeysParams,
-    AgentSetParentParams, AgentStartParams, AgentTarget, AgentWaitParams, EmptyParams, ErrorBody,
-    ErrorResponse, Method, PaneProcessInfoParams, PaneTarget, Request,
+    AgentCloseParams, AgentPromptParams, AgentReadParams, AgentRenameParams, AgentSendKeysParams,
+    AgentSetParentParams, AgentSetTaskStatusParams, AgentStartParams, AgentTarget, AgentWaitParams,
+    EmptyParams, ErrorBody, ErrorResponse, Method, PaneProcessInfoParams, PaneTarget, Request,
 };
 
 const AGENT_START_POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -57,6 +57,8 @@ pub(super) fn run_agent_command(args: &[String]) -> std::io::Result<i32> {
         Operation::SendKeys(params) => agent_send_keys(params),
         Operation::Rename(params) => agent_rename(params),
         Operation::SetParent(params) => agent_set_parent(params),
+        Operation::SetTaskStatus(params) => agent_set_task_status(params),
+        Operation::Close(params) => agent_close(params),
         Operation::Wait(params) => agent_wait(params),
         Operation::Prompt(params) => agent_prompt(params),
         Operation::Start(params) => agent_start(params),
@@ -592,6 +594,21 @@ fn agent_set_parent(params: AgentSetParentParams) -> std::io::Result<i32> {
     super::print_response(&super::send_request(&Request {
         id: "cli:agent:set_parent".into(),
         method: Method::AgentSetParent(params),
+    })?)
+}
+
+fn agent_set_task_status(params: AgentSetTaskStatusParams) -> std::io::Result<i32> {
+    super::print_response(&super::send_request(&Request {
+        id: "cli:agent:set_task_status".into(),
+        method: Method::AgentSetTaskStatus(params),
+    })?)
+}
+
+fn agent_close(mut params: AgentCloseParams) -> std::io::Result<i32> {
+    params.caller_pane_id = super::target::caller_pane_id();
+    super::print_response(&super::send_request(&Request {
+        id: "cli:agent:close".into(),
+        method: Method::AgentClose(params),
     })?)
 }
 

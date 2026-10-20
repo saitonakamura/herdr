@@ -1752,7 +1752,7 @@
               "type": "string"
             },
             "parent": {
-              "description": "Agent id of the agent that starts this one.",
+              "description": "Agent id of the agent that starts this one; omitted keeps the pane's current parent.",
               "type": [
                 "string",
                 "null"

@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-dogfood-identity-findings
 title: "Dogfood: spawned children get no herdr Parent, and an attached agent takes a stale name"
-status: in-progress
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee:
-claimed_by: macos/w1:p7/f8a0c8a8-50b6-407f-866e-27225a1bb5f1
+claimed_by: macos/f8a0c8a8-50b6-407f-866e-27225a1bb5f1
 ---
 
 ## Question
@@ -37,7 +37,7 @@ Reproduce each in a throwaway session on the fork build, then fix them in herdr 
 
 ## Resolution
 
-Draft, in progress: [PR #17](https://github.com/saitonakamura/herdr/pull/17) (branch
+Merged 2026-10-20 as `864971ee`: [PR #17](https://github.com/saitonakamura/herdr/pull/17) (branch
 `fork/024-dogfood-identity-findings`) and dotfiles branch `herdr-fork/024-dogfood-identity-findings`.
 
 1. **Parent.** herdr's `agent start` without `--parent` reset `parent_agent_id` to none (`start_agent` passed
@@ -52,4 +52,15 @@ Draft, in progress: [PR #17](https://github.com/saitonakamura/herdr/pull/17) (br
    persisted it as `custom_name`, which 009 reads as a pin, and loom's names sync handed the pin to the newly attached
    node over `--name herdr-fork`. On a herdr that names tabs, loom's names sync now unpins a pinned label equal to
    the one it recorded writing. Reproduced and fixed live with `loom attach` in a throwaway session.
-3. **`--name`:** still to decide. It depends on how an explicit name should interact with tabs following titles.
+3. **`--name` is a pin** (the user's call, 2026-10-20). Until now a node's name followed its tab, and the tab its
+   task title, so every child the cockpit spawned was renamed within seconds. In loom only: `spawn` pins the new tab
+   (a `--root` pins its workspace), and `attach --name` pins the pane's tab over whatever label it had, unless
+   another agent shares the tab. Renaming the tab to nothing hands it back to the title. `docs/setup/herdr.md` in
+   the dotfiles says so.
+
+On-box once both merge: pull the dotfiles (loom runs from the tree), and install a fork build carrying PR #17
+whenever convenient. loom's Parent re-set covers the deployed `0.9.5+fork.1` until then. The live `fork` session's
+registry was left as it was: 7ad1e596 still has no herdr Parent (`herdr agent set-parent w1:p7 82993002` fixes it),
+and the cockpit's tab is still pinned to `sleep-15-smoke-test`. The first `names sync` after the dotfiles pull
+unpins that tab, because `names.json` still records loom writing it. The cockpit then follows its title; to keep
+the name `herdr-fork`, rename its tab to that by hand.

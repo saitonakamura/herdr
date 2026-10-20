@@ -235,7 +235,8 @@ impl App {
         }
         terminal.agent_launch = Some(launch);
         terminal.agent_home = None;
-        let mut identity_changed = self.assign_agent_identity(&terminal_id, Some(parent));
+        // Without --parent, keep a Parent set on the pane before the agent started in it.
+        let mut identity_changed = self.assign_agent_identity(&terminal_id, parent.map(Some));
         if let Some(terminal) = self.state.terminals.get_mut(&terminal_id) {
             identity_changed |=
                 terminal.task_status != Some(crate::api::schema::TaskStatus::Starting);

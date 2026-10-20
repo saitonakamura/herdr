@@ -218,7 +218,8 @@ pub(crate) fn close_targets() -> Input<Vec<String>> {
         Ok(())
     })
     .value_name("TARGET")
-    .configure(|arg| arg.num_args(1..))
+    // Variadic, so a hyphen value would swallow --force and --dry-run after the targets.
+    .configure(|arg| arg.num_args(1..).allow_hyphen_values(false))
 }
 
 pub(crate) fn wait_presence() -> Input<Option<crate::api::schema::AgentPromptWaitOptions>> {
@@ -380,5 +381,25 @@ mod choice_tests {
     #[test]
     fn task_statuses_cover_every_api_value() {
         crate::cli::projection::assert_choices_cover_api_enum(super::TASK_STATUSES);
+    }
+
+    #[test]
+    fn close_takes_several_targets_with_flags_on_either_side() {
+        let parse = |args: &[&str]| {
+            let matches = super::command()
+                .try_get_matches_from(["agent", "close"].iter().chain(args))
+                .unwrap();
+            match super::from_matches(&matches) {
+                Ok(super::Operation::Close(params)) => params,
+                _ => panic!("not a close: {args:?}"),
+            }
+        };
+
+        let params = parse(&["1234abcd", "w1:p2", "--dry-run"]);
+        assert_eq!(params.targets, ["1234abcd", "w1:p2"]);
+        assert!(params.dry_run && !params.force);
+        let params = parse(&["--force", "1234abcd"]);
+        assert_eq!(params.targets, ["1234abcd"]);
+        assert!(params.force && !params.dry_run);
     }
 }

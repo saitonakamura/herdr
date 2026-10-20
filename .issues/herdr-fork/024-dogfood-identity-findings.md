@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-dogfood-identity-findings
 title: "Dogfood: spawned children get no herdr Parent, and an attached agent takes a stale name"
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee:
-claimed_by:
+claimed_by: macos/w1:p7/f8a0c8a8-50b6-407f-866e-27225a1bb5f1
 ---
 
 ## Question

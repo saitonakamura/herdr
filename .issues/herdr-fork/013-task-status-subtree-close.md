@@ -29,7 +29,7 @@ Same change in loom: `report --kind` maps onto task status (blocked → needs_pa
 
 Draft, open until merged: [PR #18](https://github.com/saitonakamura/herdr/pull/18) (branch
 `fork/013-task-status-subtree-close`) and dotfiles branch `herdr-fork/013-task-status-subtree-close`
-(b0206b9).
+(merged with master 570a343, now 6975fa8).
 
 - herdr keeps `task_status` per agent terminal, next to the detected state: `agent start` sets
   `starting`, `agent set-task-status` the rest. Persisted, on `pane get/list` and `agent get/list`,

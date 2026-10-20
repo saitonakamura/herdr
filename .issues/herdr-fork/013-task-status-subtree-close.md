@@ -1,14 +1,14 @@
 ---
 id: herdr-fork-task-status-subtree-close
 title: Task status and closing a subtree
-status: in-progress
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
   - herdr-fork-agent-identity-parent
 assignee:
-claimed_by: macos/w1:p4/70ab02b8-412f-4a9d-9f96-af7db87595ce
+claimed_by:
 ---
 
 ## Question
@@ -27,9 +27,8 @@ Same change in loom: `report --kind` maps onto task status (blocked → needs_pa
 
 ## Resolution
 
-Draft, open until merged: [PR #18](https://github.com/saitonakamura/herdr/pull/18) (branch
-`fork/013-task-status-subtree-close`) and dotfiles branch `herdr-fork/013-task-status-subtree-close`
-(merged with master 570a343, now 6975fa8).
+Merged 2026-10-20 as `b5539aaf`: [PR #18](https://github.com/saitonakamura/herdr/pull/18); dotfiles
+branch `herdr-fork/013-task-status-subtree-close` merged as `a7164c9`.
 
 - herdr keeps `task_status` per agent terminal, next to the detected state: `agent start` sets
   `starting`, `agent set-task-status` the rest. Persisted, on `pane get/list` and `agent get/list`,

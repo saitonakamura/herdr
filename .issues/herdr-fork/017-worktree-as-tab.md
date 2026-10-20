@@ -1,7 +1,7 @@
 ---
 id: herdr-fork-worktree-as-tab
 title: A worktree opens as a tab
-status: in-progress
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
@@ -9,7 +9,7 @@ blocked_by:
   - herdr-fork-workspace-is-effort
   - herdr-fork-worktree-post-create
 assignee:
-claimed_by: macos/w1:p6/613e7272-4a71-452d-8e2e-56e0acb9081b
+claimed_by:
 ---
 
 ## Question
@@ -27,8 +27,8 @@ claimed_by: macos/w1:p6/613e7272-4a71-452d-8e2e-56e0acb9081b
 
 ## Resolution
 
-Draft, pending [PR #19](https://github.com/saitonakamura/herdr/pull/19) and dotfiles branch
-`herdr-fork/017-worktree-as-tab` (4fa2d87).
+Merged 2026-10-20 as `5b872e40`: [PR #19](https://github.com/saitonakamura/herdr/pull/19); dotfiles
+branch `herdr-fork/017-worktree-as-tab` merged as `104ff7a`.
 
 - A tab records the checkout it was opened for (`Tab.worktree`); workspaces no longer do. Worktree
   child workspaces, workspace groups and the restored-membership validation are gone;

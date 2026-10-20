@@ -1,7 +1,7 @@
 ---
 id: herdr-fork-loom-migrate
 title: Move live loom lanes into herdr
-status: blocked
+status: open
 labels:
   - wayfinder:task
 parent: herdr-fork-map

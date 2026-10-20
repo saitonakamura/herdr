@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-flaky-windows-tests
 title: Stabilize or quarantine two flaky Windows CI tests
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee:
-claimed_by:
+claimed_by: macos/w1:pC/5beb57a7-1553-47e9-9cc6-5cc5db4ad45b
 ---
 
 ## Question

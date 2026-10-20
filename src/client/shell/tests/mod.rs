@@ -67,6 +67,14 @@ pub(super) fn snapshot() -> ClientShellSnapshot {
 }
 
 fn worktree_list_result(open_workspace_id: Option<&str>) -> crate::api::schema::ResponseResult {
+    worktree_list_result_on_tab(open_workspace_id, None)
+}
+
+/// A tab-aware server also reports the tab a worktree is open in.
+fn worktree_list_result_on_tab(
+    open_workspace_id: Option<&str>,
+    open_tab_id: Option<&str>,
+) -> crate::api::schema::ResponseResult {
     crate::api::schema::ResponseResult::WorktreeList {
         source: crate::api::schema::WorktreeSourceInfo {
             repo_key: "repo-key".into(),
@@ -83,6 +91,7 @@ fn worktree_list_result(open_workspace_id: Option<&str>) -> crate::api::schema::
             is_prunable: false,
             is_linked_worktree: true,
             open_workspace_id: open_workspace_id.map(str::to_owned),
+            open_tab_id: open_tab_id.map(str::to_owned),
             label: "repo".into(),
         }],
     }

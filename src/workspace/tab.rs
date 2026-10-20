@@ -40,6 +40,8 @@ pub struct Tab {
     pub custom_name: Option<String>,
     /// The last name taken from the tab's one agent's title.
     pub followed_name: Option<String>,
+    /// The worktree checkout this tab was opened for; `worktree remove` takes both down.
+    pub worktree: Option<super::WorktreeSpaceMembership>,
     pub number: usize,
     /// Identity source for this tab's pane tree.
     pub root_pane: PaneId,
@@ -186,6 +188,7 @@ impl Tab {
             Self {
                 custom_name: None,
                 followed_name: None,
+                worktree: None,
                 number,
                 root_pane: root_id,
                 layout,
@@ -467,6 +470,7 @@ impl Tab {
         Self {
             custom_name: custom_name.filter(|name| !super::tab_name::label_unpins(name)),
             followed_name: None,
+            worktree: None,
             number,
             root_pane: pane_id,
             layout: TileLayout::from_saved(Node::Pane(pane_id), pane_id),

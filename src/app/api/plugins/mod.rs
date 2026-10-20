@@ -2708,6 +2708,7 @@ command = ["sh", "-c", "printf %s ${{HERDR_PANE_ID-unset}} > '{}'; sleep 1"]
                     is_prunable: false,
                     is_linked_worktree: true,
                     open_workspace_id: Some(workspace.workspace_id),
+                    open_tab_id: None,
                     label: "feature".into(),
                 },
             },
@@ -3061,6 +3062,7 @@ command = ["sh", "-c", "printf '%s' \"$HERDR_PLUGIN_CONTEXT_JSON\" > {}"]
                     is_prunable: false,
                     is_linked_worktree: true,
                     open_workspace_id: Some(target_workspace.workspace_id.clone()),
+                    open_tab_id: None,
                     label: "feature".into(),
                 },
             },
@@ -3168,13 +3170,14 @@ command = ["sh", "-c", "printf '%s' \"$HERDR_PLUGIN_CONTEXT_JSON\" > {}"]
             Some(active_public_pane_id.as_str())
         );
 
-        app.state.workspaces[0].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
-            key: "repo-key".into(),
-            label: "herdr".into(),
-            repo_root: "/repo/herdr".into(),
-            checkout_path: "/repo/herdr-issue".into(),
-            is_linked_worktree: true,
-        });
+        app.state.workspaces[0].tabs[0].worktree =
+            Some(crate::workspace::WorktreeSpaceMembership {
+                key: "repo-key".into(),
+                label: "herdr".into(),
+                repo_root: "/repo/herdr".into(),
+                checkout_path: "/repo/herdr-issue".into(),
+                is_linked_worktree: true,
+            });
         let workspace = app.workspace_info(0);
         let worktree = crate::api::schema::WorktreeInfo {
             path: "/repo/herdr-issue".into(),
@@ -3184,15 +3187,17 @@ command = ["sh", "-c", "printf '%s' \"$HERDR_PLUGIN_CONTEXT_JSON\" > {}"]
             is_prunable: false,
             is_linked_worktree: true,
             open_workspace_id: None,
+            open_tab_id: None,
             label: "herdr".into(),
         };
-        app.state.workspaces[0].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
-            key: "repo-key".into(),
-            label: "herdr".into(),
-            repo_root: "/repo/herdr".into(),
-            checkout_path: "/repo/herdr-other".into(),
-            is_linked_worktree: true,
-        });
+        app.state.workspaces[0].tabs[0].worktree =
+            Some(crate::workspace::WorktreeSpaceMembership {
+                key: "repo-key".into(),
+                label: "herdr".into(),
+                repo_root: "/repo/herdr".into(),
+                checkout_path: "/repo/herdr-other".into(),
+                is_linked_worktree: true,
+            });
         let changed_context = app.plugin_context_for_event(
             &crate::api::schema::EventEnvelope {
                 event: crate::api::schema::EventKind::WorktreeRemoved,
@@ -3206,10 +3211,7 @@ command = ["sh", "-c", "printf '%s' \"$HERDR_PLUGIN_CONTEXT_JSON\" > {}"]
             "worktree.removed",
         );
         assert_eq!(
-            changed_context
-                .worktree
-                .as_ref()
-                .map(|worktree| worktree.checkout_path.as_str()),
+            changed_context.workspace_cwd.as_deref(),
             Some("/repo/herdr-issue")
         );
 
@@ -3231,10 +3233,7 @@ command = ["sh", "-c", "printf '%s' \"$HERDR_PLUGIN_CONTEXT_JSON\" > {}"]
             Some(workspace_id.as_str())
         );
         assert_eq!(
-            removed_context
-                .worktree
-                .as_ref()
-                .map(|worktree| worktree.checkout_path.as_str()),
+            removed_context.workspace_cwd.as_deref(),
             Some("/repo/herdr-issue")
         );
     }
@@ -3452,13 +3451,14 @@ action = "missing"
         app.state.active = Some(0);
         app.state.selected = 0;
         app.state.workspaces[0].custom_name = Some("Plugin Work".into());
-        app.state.workspaces[0].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
-            key: "repo-key".into(),
-            label: "herdr".into(),
-            repo_root: "/repo/herdr".into(),
-            checkout_path: "/repo/herdr-issue".into(),
-            is_linked_worktree: true,
-        });
+        app.state.workspaces[0].tabs[0].worktree =
+            Some(crate::workspace::WorktreeSpaceMembership {
+                key: "repo-key".into(),
+                label: "herdr".into(),
+                repo_root: "/repo/herdr".into(),
+                checkout_path: "/repo/herdr-issue".into(),
+                is_linked_worktree: true,
+            });
         let pane_id = app.state.workspaces[0].tabs[0].root_pane;
         let pane_public = app.public_pane_id(0, pane_id).unwrap();
         let tab_public = app.public_tab_id(0, 0).unwrap();

@@ -1,7 +1,5 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
 use std::time::Instant;
 
 use tracing::warn;
@@ -43,69 +41,11 @@ impl App {
         if self.state.workspaces.is_empty() {
             return;
         }
-        self.pending_restored_worktree_spaces = self
-            .state
-            .workspaces
-            .iter()
-            .filter_map(|workspace| {
-                workspace
-                    .worktree_space
-                    .clone()
-                    .map(|space| (workspace.id.clone(), space))
-            })
-            .collect();
         let now = Instant::now();
-        self.start_restored_worktree_validation(now);
         self.request_git_identity_refresh(now);
         // Start once even without an attached TUI or sidebar Git tokens. Reuse
         // the single detached worker so stalled I/O cannot block server shutdown.
         self.start_git_status_refresh_if_due(now);
-    }
-
-    pub(crate) fn start_restored_worktree_validation(&mut self, now: Instant) {
-        self.restored_worktree_validation_retry_at = None;
-        let jobs = Arc::new(self.pending_restored_worktree_spaces.clone());
-        let next = Arc::new(AtomicUsize::new(0));
-        let worker_count = jobs.len().min(4);
-        let mut started = 0;
-        // These one-shot checks are independent of the optional Git cache. A
-        // stalled checkout keeps its slot; never retry it on each refresh tick.
-        for _ in 0..worker_count {
-            let jobs = Arc::clone(&jobs);
-            let next = Arc::clone(&next);
-            let event_tx = self.event_tx.clone();
-            let spawned = crate::thread_spawn::spawn_named("herdr-worktree-check", move || {
-                while let Some((workspace_id, expected)) =
-                    jobs.get(next.fetch_add(1, Ordering::Relaxed))
-                {
-                    let valid =
-                        crate::persist::restored_worktree_space_membership(Some(expected.clone()))
-                            .is_some();
-                    if event_tx
-                        .blocking_send(AppEvent::RestoredWorktreeSpaceChecked {
-                            workspace_id: workspace_id.clone(),
-                            expected: expected.clone(),
-                            valid,
-                        })
-                        .is_err()
-                    {
-                        break;
-                    }
-                }
-            });
-            match spawned {
-                Ok(_) => started += 1,
-                Err(err) => {
-                    warn!(err = %err, "failed to spawn restored worktree check thread");
-                }
-            }
-        }
-        // Any started worker drains the shared queue. With none, memberships
-        // stay unvalidated (worktree actions keep waiting) and we retry later.
-        if worker_count > 0 && started == 0 {
-            self.restored_worktree_validation_retry_at =
-                Some(now + GIT_REMOTE_STATUS_REFRESH_INTERVAL);
-        }
     }
 
     pub(crate) fn start_git_status_refresh_if_due(&mut self, now: Instant) {
@@ -662,51 +602,6 @@ mod tests {
     }
 
     #[test]
-    fn failed_restored_worktree_check_spawns_keep_spaces_pending_and_retry() {
-        let mut app = test_app(&crate::config::Config::default());
-        let mut workspace = Workspace::test_new("restored");
-        let membership = crate::workspace::WorktreeSpaceMembership {
-            key: "repo".into(),
-            label: "repo".into(),
-            repo_root: "/nonexistent/repo".into(),
-            checkout_path: "/nonexistent/repo".into(),
-            is_linked_worktree: false,
-        };
-        workspace.worktree_space = Some(membership.clone());
-        app.pending_restored_worktree_spaces
-            .push((workspace.id.clone(), membership.clone()));
-        app.state.workspaces.push(workspace);
-
-        let now = Instant::now();
-        crate::thread_spawn::test_hook::fail_next_spawns(1);
-        app.start_restored_worktree_validation(now);
-
-        assert_eq!(app.pending_restored_worktree_spaces.len(), 1);
-        let retry_at = now + GIT_REMOTE_STATUS_REFRESH_INTERVAL;
-        assert_eq!(app.restored_worktree_validation_retry_at, Some(retry_at));
-        assert!(app
-            .next_headless_loop_deadline_with_git_refresh(now, false, false)
-            .is_some_and(|deadline| deadline <= retry_at));
-
-        app.start_restored_worktree_validation(retry_at);
-        assert_eq!(app.restored_worktree_validation_retry_at, None);
-        let deadline = Instant::now() + std::time::Duration::from_secs(5);
-        let event = loop {
-            match app.event_rx.try_recv() {
-                Ok(event @ AppEvent::RestoredWorktreeSpaceChecked { .. }) => break event,
-                Ok(_) => {}
-                Err(_) => {
-                    assert!(Instant::now() < deadline, "validation retry never reported");
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                }
-            }
-        };
-        app.handle_internal_event(event);
-        assert!(app.pending_restored_worktree_spaces.is_empty());
-        assert_eq!(app.state.workspaces[0].worktree_space, Some(membership));
-    }
-
-    #[test]
     fn cwd_identity_refresh_runs_without_sidebar_git_tokens() {
         let mut config = crate::config::Config::default();
         config.ui.sidebar.spaces.rows = vec![vec![crate::config::SpaceSidebarToken::Workspace]];
@@ -736,13 +631,6 @@ mod tests {
         let mut app = test_app(&config);
         let mut workspace = Workspace::test_new("restored");
         workspace.test_cwd = nested.clone();
-        workspace.worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
-            key: "replaced-repo".into(),
-            label: "old".into(),
-            repo_root: repo.clone(),
-            checkout_path: repo.clone(),
-            is_linked_worktree: false,
-        });
         app.state.workspaces.push(workspace);
         app.state.active = Some(0);
         app.state.ensure_test_terminals();
@@ -753,9 +641,8 @@ mod tests {
 
         app.refresh_restored_workspace_git_metadata();
         assert!(app.git_refresh_in_flight);
-        assert_eq!(app.pending_restored_worktree_spaces.len(), 1);
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            while app.git_refresh_in_flight || !app.pending_restored_worktree_spaces.is_empty() {
+            while app.git_refresh_in_flight {
                 let event = app.event_rx.recv().await.expect("Git worker completion");
                 app.handle_internal_event(event);
             }
@@ -763,7 +650,6 @@ mod tests {
         .await
         .expect("restored Git metadata refresh completes");
 
-        let workspace = &app.state.workspaces[0];
         let repo_facts = app
             .state
             .terminals
@@ -780,9 +666,6 @@ mod tests {
                 .map(|space| space.repo_name.as_str()),
             repo.file_name().and_then(|name| name.to_str())
         );
-        assert!(workspace.worktree_space.is_none());
-        assert!(app.pending_restored_worktree_spaces.is_empty());
-        assert!(app.state.session_dirty);
         app.state.assert_invariants_for_test();
         std::fs::remove_dir_all(repo).unwrap();
     }
@@ -801,58 +684,6 @@ mod tests {
         app.start_git_status_refresh_if_due(now);
 
         assert!(app.git_refresh_in_flight);
-    }
-
-    #[test]
-    fn restored_worktree_validation_notifies_only_matching_rejections() {
-        let mut app = test_app(&crate::config::Config::default());
-        app.state = crate::app::AppState::test_with_adversarial_identity_state();
-        let workspace_id = app.state.workspaces[0].id.clone();
-        let expected = crate::workspace::WorktreeSpaceMembership {
-            key: "saved".into(),
-            label: "saved".into(),
-            repo_root: "/repo".into(),
-            checkout_path: "/checkout".into(),
-            is_linked_worktree: true,
-        };
-        app.state.workspaces[0].worktree_space = Some(expected.clone());
-        app.pending_restored_worktree_spaces
-            .push((workspace_id.clone(), expected.clone()));
-        app.handle_internal_event(AppEvent::RestoredWorktreeSpaceChecked {
-            workspace_id: workspace_id.clone(),
-            expected: expected.clone(),
-            valid: true,
-        });
-        assert!(app.pending_restored_worktree_spaces.is_empty());
-        assert!(app.event_hub.events_after(0).is_empty());
-        assert_eq!(
-            app.state.workspaces[0].worktree_space,
-            Some(expected.clone())
-        );
-
-        let stale = crate::workspace::WorktreeSpaceMembership {
-            key: "stale".into(),
-            ..expected.clone()
-        };
-        app.handle_internal_event(AppEvent::RestoredWorktreeSpaceChecked {
-            workspace_id: workspace_id.clone(),
-            expected: stale,
-            valid: false,
-        });
-        assert!(app.event_hub.events_after(0).is_empty());
-        app.handle_internal_event(AppEvent::RestoredWorktreeSpaceChecked {
-            workspace_id,
-            expected,
-            valid: false,
-        });
-        let events = app.event_hub.events_after(0);
-        assert_eq!(events.len(), 1);
-        assert_eq!(
-            events[0].1.event,
-            crate::api::schema::EventKind::WorkspaceUpdated
-        );
-        assert!(app.state.workspaces[0].worktree_space.is_none());
-        app.state.assert_invariants_for_test();
     }
 
     #[test]

@@ -14,8 +14,8 @@ pub struct ApiWorktreeAddRequest {
     pub id: String,
     pub operation_id: u64,
     pub checkout_key: std::path::PathBuf,
-    pub source_workspace_id: Option<String>,
-    pub source_existing_membership: Option<crate::workspace::WorktreeSpaceMembership>,
+    /// The workspace the new tab opens in, by its stable id.
+    pub target_workspace_id: Option<String>,
     pub source_checkout_path: std::path::PathBuf,
     pub source_repo_root: std::path::PathBuf,
     pub repo_key: String,
@@ -60,8 +60,8 @@ pub struct WorktreeReadResult {
     pub(crate) _permit: tokio::sync::OwnedSemaphorePermit,
     pub(crate) client_local: bool,
     pub(crate) request: crate::api::schema::Request,
+    /// The workspace a tab would open in, by its stable id.
     pub(crate) source_workspace_id: Option<String>,
-    pub(crate) source_cwd: Option<std::path::PathBuf>,
     pub(crate) result: Result<WorktreeReadData, (String, String)>,
     pub(crate) respond_to: std::sync::mpsc::Sender<String>,
 }
@@ -192,12 +192,6 @@ pub enum AppEvent {
     GitStatusRefreshed {
         results: Vec<PaneGitStatus>,
         cache_updates: Vec<(std::path::PathBuf, GitStatusCacheEntry)>,
-    },
-    /// Background validation of a saved membership after session restore.
-    RestoredWorktreeSpaceChecked {
-        workspace_id: String,
-        expected: crate::workspace::WorktreeSpaceMembership,
-        valid: bool,
     },
     /// A configured tab bar status command finished.
     TabBarCommandFinished {

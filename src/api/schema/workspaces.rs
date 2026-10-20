@@ -104,3 +104,15 @@ pub struct WorkspaceWorktreeInfo {
     pub checkout_path: String,
     pub is_linked_worktree: bool,
 }
+
+impl From<&crate::workspace::WorktreeSpaceMembership> for WorkspaceWorktreeInfo {
+    fn from(space: &crate::workspace::WorktreeSpaceMembership) -> Self {
+        Self {
+            repo_key: space.key.clone(),
+            repo_name: space.label.clone(),
+            repo_root: space.repo_root.display().to_string(),
+            checkout_path: space.checkout_path.display().to_string(),
+            is_linked_worktree: space.is_linked_worktree,
+        }
+    }
+}

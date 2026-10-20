@@ -130,13 +130,9 @@ pub struct App {
     pub(crate) git_identity_refresh_requested: bool,
     /// A refresh worker failed to start; retry it even without a client.
     pub(crate) git_refresh_spawn_retry_pending: bool,
-    pub(crate) pending_restored_worktree_spaces:
-        Vec<(String, crate::workspace::WorktreeSpaceMembership)>,
-    pub(crate) restored_worktree_validation_retry_at: Option<Instant>,
     pub(crate) git_status_cache: HashMap<std::path::PathBuf, crate::workspace::GitStatusCacheEntry>,
     pub(crate) pending_api_worktree_creates: HashMap<std::path::PathBuf, u64>,
     pub(crate) worktree_read_slots: std::sync::Arc<tokio::sync::Semaphore>,
-    pub(crate) pending_api_worktree_removes: HashMap<String, u64>,
     pub(crate) pending_api_worktree_remove_paths: HashMap<std::path::PathBuf, u64>,
     pub(crate) pending_worktree_remove_runtime_exits: HashMap<crate::layout::PaneId, usize>,
     pub(crate) pending_worktree_remove_runtime_restores: HashMap<crate::layout::PaneId, u64>,
@@ -652,12 +648,9 @@ impl App {
             git_refresh_due_after_in_flight: false,
             git_identity_refresh_requested: false,
             git_refresh_spawn_retry_pending: false,
-            pending_restored_worktree_spaces: Vec::new(),
-            restored_worktree_validation_retry_at: None,
             git_status_cache: HashMap::new(),
             pending_api_worktree_creates: HashMap::new(),
             worktree_read_slots: std::sync::Arc::new(tokio::sync::Semaphore::new(8)),
-            pending_api_worktree_removes: HashMap::new(),
             pending_api_worktree_remove_paths: HashMap::new(),
             pending_worktree_remove_runtime_exits: HashMap::new(),
             pending_worktree_remove_runtime_restores: HashMap::new(),
@@ -3216,46 +3209,6 @@ mod tests {
 
         assert_eq!(response["result"]["type"], "ok");
         assert!(app.state.workspaces.is_empty());
-    }
-
-    #[test]
-    fn pane_close_request_requires_confirmation_before_closing_parent_worktree_group() {
-        let mut app = test_app();
-        let mut parent = Workspace::test_new("api-pane-close-parent");
-        parent.worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
-            key: "repo-key".into(),
-            label: "herdr".into(),
-            repo_root: "/repo/herdr".into(),
-            checkout_path: "/repo/herdr".into(),
-            is_linked_worktree: false,
-        });
-        let mut child = Workspace::test_new("api-pane-close-child");
-        child.worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
-            key: "repo-key".into(),
-            label: "herdr".into(),
-            repo_root: "/repo/herdr".into(),
-            checkout_path: "/repo/herdr-child".into(),
-            is_linked_worktree: true,
-        });
-        app.state.workspaces = vec![parent, child];
-        app.state.ensure_test_terminals();
-        app.state.active = Some(0);
-        app.state.selected = 1;
-
-        let target_pane = app.state.workspaces[0].tabs[0].root_pane;
-        let target_pane_id = app.pane_info(0, target_pane).unwrap().pane_id;
-
-        let response = app.handle_api_request(crate::api::schema::Request {
-            id: "req_pane_close_parent_group".into(),
-            method: crate::api::schema::Method::PaneClose(crate::api::schema::PaneTarget {
-                pane_id: target_pane_id,
-            }),
-        });
-        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
-
-        assert_eq!(response["error"]["code"], "confirmation_required");
-        assert_eq!(app.state.selected, 1);
-        assert_eq!(app.state.workspaces.len(), 2);
     }
 
     #[test]

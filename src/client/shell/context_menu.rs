@@ -45,11 +45,19 @@ impl ClientContextMenuOverlay {
                     Action::ToggleGroup,
                 ),
             ],
-            ClientContextMenuTarget::Tab { .. } => vec![
-                item("New tab", Action::NewTab),
-                item("Rename", Action::Rename),
-                item("Close", Action::Close),
-            ],
+            ClientContextMenuTarget::Tab {
+                in_linked_worktree, ..
+            } => {
+                let mut items = vec![
+                    item("New tab", Action::NewTab),
+                    item("Rename", Action::Rename),
+                    item("Close", Action::Close),
+                ];
+                if *in_linked_worktree {
+                    items.push(item("Delete worktree checkout...", Action::RemoveWorktree));
+                }
+                items
+            }
             ClientContextMenuTarget::Pane {
                 source_pane_id,
                 has_manual_label,
@@ -131,10 +139,32 @@ impl ClientShellState {
         else {
             return;
         };
+        // A hint for showing the entry; the server checks the tab's real provenance.
+        let worktree_directory = self
+            .endpoint_worktree_directory()
+            .filter(|directory| !directory.is_empty());
+        let in_linked_worktree = self.snapshot.as_deref().is_some_and(|snapshot| {
+            snapshot.agents.iter().any(|agent| {
+                agent.tab_id == tab_id
+                    && agent
+                        .repo
+                        .as_ref()
+                        .is_some_and(|repo| repo.worktree.is_some())
+            }) || worktree_directory.as_deref().is_some_and(|directory| {
+                snapshot.panes.iter().any(|pane| {
+                    pane.tab_id == tab_id
+                        && pane
+                            .cwd
+                            .as_deref()
+                            .is_some_and(|cwd| std::path::Path::new(cwd).starts_with(directory))
+                })
+            })
+        });
         self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
             target: ClientContextMenuTarget::Tab {
                 tab_id,
                 workspace_id: tab.workspace_id.clone(),
+                in_linked_worktree,
             },
             x,
             y,
@@ -200,6 +230,7 @@ impl ClientShellState {
             ClientContextMenuTarget::Tab {
                 tab_id,
                 workspace_id,
+                ..
             } => self.activate_tab_context_action(tab_id, workspace_id, action, outcome),
             ClientContextMenuTarget::Pane {
                 pane_id,
@@ -350,6 +381,9 @@ impl ClientShellState {
             }
             ClientContextMenuAction::Close => {
                 self.request_tab_close(tab_id, outcome);
+            }
+            ClientContextMenuAction::RemoveWorktree => {
+                self.begin_worktree_remove_for_tab(workspace_id, tab_id, outcome);
             }
             _ => {}
         }

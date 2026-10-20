@@ -282,6 +282,7 @@ struct ServerCapabilitiesJson {
     health_check: bool,
     ssh_agent_registration: bool,
     worktree_post_create: bool,
+    worktree_tabs: bool,
     agent_launch_resume: bool,
     agent_task_status: bool,
 }
@@ -331,6 +332,7 @@ fn server_status_json(server: &ServerRuntimeStatus) -> ServerStatusJson {
                     health_check: capabilities.health_check,
                     ssh_agent_registration: capabilities.ssh_agent_registration,
                     worktree_post_create: capabilities.worktree_post_create,
+                    worktree_tabs: capabilities.worktree_tabs,
                     agent_launch_resume: capabilities.agent_launch_resume,
                     agent_task_status: capabilities.agent_task_status,
                 }),
@@ -432,6 +434,7 @@ mod tests {
                 health_check: true,
                 ssh_agent_registration: false,
                 worktree_post_create: false,
+                worktree_tabs: false,
                 agent_launch_resume: false,
                 agent_task_status: false,
             }),

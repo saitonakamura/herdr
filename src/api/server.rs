@@ -76,6 +76,7 @@ fn default_capabilities() -> Option<ServerCapabilities> {
         health_check: true,
         ssh_agent_registration: false,
         worktree_post_create: true,
+        worktree_tabs: true,
         agent_launch_resume: true,
         agent_task_status: true,
     })
@@ -1408,6 +1409,7 @@ mod tests {
                 health_check: true,
                 ssh_agent_registration: false,
                 worktree_post_create: false,
+                worktree_tabs: false,
                 agent_launch_resume: false,
                 agent_task_status: false,
             }),

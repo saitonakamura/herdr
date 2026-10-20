@@ -729,6 +729,7 @@ fn success_response_round_trips() {
                 health_check: true,
                 ssh_agent_registration: false,
                 worktree_post_create: false,
+                worktree_tabs: false,
                 agent_launch_resume: false,
                 agent_task_status: false,
             }),
@@ -822,6 +823,7 @@ fn worktree_request_and_response_round_trip() {
                 pane_count: 1,
                 agent_status: AgentStatus::Unknown,
                 label_source: None,
+                worktree: None,
             },
             root_pane: PaneInfo {
                 repo: None,
@@ -860,6 +862,7 @@ fn worktree_request_and_response_round_trip() {
                 is_prunable: false,
                 is_linked_worktree: true,
                 open_workspace_id: Some("w_1".into()),
+                open_tab_id: Some("w_1:1".into()),
                 label: "herdr".into(),
             },
         },
@@ -916,6 +919,7 @@ fn worktree_lifecycle_events_round_trip() {
         is_prunable: false,
         is_linked_worktree: true,
         open_workspace_id: Some("w_2".into()),
+        open_tab_id: Some("w_2:1".into()),
         label: "herdr".into(),
     };
 
@@ -942,6 +946,7 @@ fn worktree_lifecycle_events_round_trip() {
                 workspace: Some(workspace.clone()),
                 worktree: WorktreeInfo {
                     open_workspace_id: None,
+                    open_tab_id: None,
                     ..worktree.clone()
                 },
                 forced: false,
@@ -1259,6 +1264,7 @@ fn create_response_round_trips_with_root_pane() {
                 pane_count: 1,
                 agent_status: AgentStatus::Unknown,
                 label_source: None,
+                worktree: None,
             },
             root_pane: PaneInfo {
                 repo: None,

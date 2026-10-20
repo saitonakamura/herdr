@@ -2,14 +2,13 @@ use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::api::schema::{
-    EventData, EventEnvelope, EventKind, Request, ResponseResult, WorktreeCreateParams,
-    WorktreeRemoveParams,
+    Request, ResponseResult, TabTarget, WorktreeCreateParams, WorktreeRemoveTabParams,
 };
 use crate::app::App;
 use crate::events::{ApiWorktreeAddRequest, ApiWorktreeRemoveRequest, AppEvent};
 
 use super::super::responses::{encode_error, encode_success};
-use super::{absolute_user_path, WorktreeSource};
+use super::{absolute_user_path, ApiFailure, WorktreeSource};
 
 impl App {
     pub(crate) fn handle_deferred_worktree_api_request(
@@ -24,11 +23,33 @@ impl App {
                 self.start_api_worktree_read(request, respond_to, client_local);
                 true
             }
-            crate::api::schema::Method::WorktreeCreate(params) => {
-                self.start_api_worktree_create(request.id, params, respond_to);
+            crate::api::schema::Method::WorktreeCreate(ref params) => {
+                if let Err(err) = validate_worktree_create(params) {
+                    Self::send_api_response(
+                        respond_to,
+                        encode_error(request.id, err.code, err.message),
+                    );
+                } else {
+                    self.start_api_worktree_read(request, respond_to, client_local);
+                }
                 true
             }
+            // The workspace-addressed form: a worktree is a tab now, so this
+            // removes the workspace's one worktree tab.
             crate::api::schema::Method::WorktreeRemove(params) => {
+                self.start_api_worktree_remove(
+                    request.id,
+                    WorktreeRemoveTabParams {
+                        tab_id: None,
+                        workspace_id: Some(params.workspace_id),
+                        force: params.force,
+                        trust_repository: params.trust_repository,
+                    },
+                    respond_to,
+                );
+                true
+            }
+            crate::api::schema::Method::WorktreeRemoveTab(params) => {
                 self.start_api_worktree_remove(request.id, params, respond_to);
                 true
             }
@@ -46,64 +67,12 @@ impl App {
         id
     }
 
-    fn api_create_source_workspace_idx(&self, api: &ApiWorktreeAddRequest) -> Option<usize> {
-        let Some(source_workspace_id) = api.source_workspace_id.as_ref() else {
-            return self.find_parent_workspace_by_key(&api.repo_key);
-        };
-        let Some(ws_idx) = self
-            .state
-            .workspaces
-            .iter()
-            .position(|ws| &ws.id == source_workspace_id)
-        else {
-            return self.find_parent_workspace_by_key(&api.repo_key);
-        };
-        let workspace = &self.state.workspaces[ws_idx];
-        if let Some(expected) = api.source_existing_membership.as_ref() {
-            if workspace.worktree_space() == Some(expected) {
-                return Some(ws_idx);
-            }
-            return self.find_parent_workspace_by_key(&api.repo_key);
-        }
-
-        if let Some(current) = workspace.worktree_space() {
-            let expected = crate::workspace::WorktreeSpaceMembership {
-                key: api.repo_key.clone(),
-                label: api.repo_name.clone(),
-                repo_root: api.source_repo_root.clone(),
-                checkout_path: api.source_checkout_path.clone(),
-                is_linked_worktree: false,
-            };
-            if current == &expected {
-                return Some(ws_idx);
-            }
-            return self.find_parent_workspace_by_key(&api.repo_key);
-        }
-        let git_space = workspace
-            .first_pane_git_space(&self.state.terminals)
-            .cloned()
-            .or_else(|| {
-                workspace
-                    .first_pane_cwd_from(&self.state.terminals, &self.terminal_runtimes)
-                    .as_deref()
-                    .and_then(crate::workspace::git_space_metadata)
-            });
-        if git_space.is_some_and(|space| {
-            !space.is_linked_worktree
-                && space.key == api.repo_key
-                && crate::worktree::canonical_or_original(&space.repo_root)
-                    == crate::worktree::canonical_or_original(&api.source_repo_root)
-        }) {
-            Some(ws_idx)
-        } else {
-            self.find_parent_workspace_by_key(&api.repo_key)
-        }
-    }
-
-    fn start_api_worktree_create(
+    /// Starts `git worktree add` once background discovery has found the repo.
+    pub(super) fn start_api_worktree_add(
         &mut self,
         id: String,
         params: WorktreeCreateParams,
+        source: WorktreeSource,
         respond_to: std::sync::mpsc::Sender<String>,
     ) {
         let branch = params
@@ -117,21 +86,7 @@ impl App {
             })
             .trim()
             .to_string();
-        if branch.is_empty() {
-            Self::send_api_response(
-                respond_to,
-                encode_error(id, "invalid_request", "branch is required"),
-            );
-            return;
-        }
         let base = params.base.unwrap_or_else(|| "HEAD".into());
-        let source = match self.resolve_worktree_source(params.workspace_id, params.cwd) {
-            Ok(source) => source,
-            Err(err) => {
-                Self::send_api_response(respond_to, encode_error(id, err.code, err.message));
-                return;
-            }
-        };
         let checkout_path = match params.path {
             Some(path) => match absolute_user_path(&path) {
                 Ok(path) => path,
@@ -169,22 +124,14 @@ impl App {
             .insert(checkout_key.clone(), operation_id);
 
         let parent_dir = checkout_path.parent().map(Path::to_path_buf);
-        let source_workspace_id = source
+        let target_workspace_id = source
             .workspace_idx
             .and_then(|idx| self.state.workspaces.get(idx).map(|ws| ws.id.clone()));
-        let source_existing_membership = source_workspace_id.as_ref().and_then(|workspace_id| {
-            self.state
-                .workspaces
-                .iter()
-                .find(|ws| &ws.id == workspace_id)
-                .and_then(|ws| ws.worktree_space().cloned())
-        });
         let api_request = ApiWorktreeAddRequest {
             id,
             operation_id,
             checkout_key,
-            source_workspace_id,
-            source_existing_membership,
+            target_workspace_id,
             source_checkout_path: source.source_checkout_path,
             source_repo_root: source.source_repo_root,
             repo_key: source.repo_key,
@@ -255,39 +202,73 @@ impl App {
         }
     }
 
+    /// The worktree tab a remove targets: the tab named, or the workspace's one
+    /// worktree tab (its active tab when that is one).
+    pub(super) fn worktree_remove_target(
+        &self,
+        params: &WorktreeRemoveTabParams,
+    ) -> Result<(usize, usize), ApiFailure> {
+        match (&params.tab_id, &params.workspace_id) {
+            (Some(tab_id), None) => self
+                .parse_tab_id(tab_id)
+                .ok_or_else(|| ApiFailure::new("tab_not_found", format!("tab {tab_id} not found"))),
+            (None, Some(workspace_id)) => {
+                let ws_idx = self.parse_workspace_id(workspace_id).ok_or_else(|| {
+                    ApiFailure::new(
+                        "workspace_not_found",
+                        format!("workspace {workspace_id} not found"),
+                    )
+                })?;
+                let ws = &self.state.workspaces[ws_idx];
+                let is_linked = |tab_idx: &usize| {
+                    ws.tabs[*tab_idx]
+                        .worktree
+                        .as_ref()
+                        .is_some_and(|space| space.is_linked_worktree)
+                };
+                if is_linked(&ws.active_tab) {
+                    return Ok((ws_idx, ws.active_tab));
+                }
+                let linked = (0..ws.tabs.len()).filter(is_linked).collect::<Vec<_>>();
+                match linked.as_slice() {
+                    [tab_idx] => Ok((ws_idx, *tab_idx)),
+                    [] => Err(ApiFailure::new(
+                        "not_linked_worktree",
+                        "workspace has no worktree tab",
+                    )),
+                    _ => Err(ApiFailure::new(
+                        "ambiguous_worktree_tab",
+                        "workspace has several worktree tabs; name one with tab_id",
+                    )),
+                }
+            }
+            _ => Err(ApiFailure::new(
+                "invalid_request",
+                "exactly one of tab_id or workspace_id is required",
+            )),
+        }
+    }
+
     fn start_api_worktree_remove(
         &mut self,
         id: String,
-        params: WorktreeRemoveParams,
+        params: WorktreeRemoveTabParams,
         respond_to: std::sync::mpsc::Sender<String>,
     ) {
-        let Some(ws_idx) = self.parse_workspace_id(&params.workspace_id) else {
-            Self::send_api_response(
-                respond_to,
-                encode_error(
-                    id,
-                    "workspace_not_found",
-                    format!("workspace {} not found", params.workspace_id),
-                ),
-            );
-            return;
+        let (ws_idx, tab_idx) = match self.worktree_remove_target(&params) {
+            Ok(target) => target,
+            Err(err) => {
+                Self::send_api_response(respond_to, encode_error(id, err.code, err.message));
+                return;
+            }
         };
-        if let Err(err) = self.require_restored_worktree_ready(ws_idx) {
-            Self::send_api_response(respond_to, encode_error(id, err.code, err.message));
-            return;
-        }
-        let Some(space) = self
-            .state
-            .workspaces
-            .get(ws_idx)
-            .and_then(|ws| ws.worktree_space().cloned())
-        else {
+        let Some(space) = self.state.workspaces[ws_idx].tabs[tab_idx].worktree.clone() else {
             Self::send_api_response(
                 respond_to,
                 encode_error(
                     id,
                     "not_linked_worktree",
-                    "workspace is not a Herdr-managed worktree checkout",
+                    "tab is not a Herdr-managed worktree checkout",
                 ),
             );
             return;
@@ -298,12 +279,45 @@ impl App {
                 encode_error(
                     id,
                     "not_linked_worktree",
-                    "workspace is not a linked worktree checkout",
+                    "tab is not a linked worktree checkout",
                 ),
             );
             return;
         }
 
+        let checkout_key = crate::worktree::canonical_or_original(&space.checkout_path);
+        let tabs = self.tabs_for_checkout(&space.checkout_path);
+        let pane_ids = tabs
+            .iter()
+            .flat_map(|&(ws_idx, tab_idx)| {
+                self.state.workspaces[ws_idx].tabs[tab_idx]
+                    .layout
+                    .pane_ids()
+            })
+            .collect::<Vec<_>>();
+        if self
+            .pending_api_worktree_remove_paths
+            .contains_key(&checkout_key)
+            || self
+                .pending_api_worktree_creates
+                .contains_key(&checkout_key)
+            || pane_ids.iter().any(|pane_id| {
+                self.pending_worktree_remove_runtime_restores
+                    .contains_key(pane_id)
+            })
+        {
+            Self::send_api_response(
+                respond_to,
+                encode_error(
+                    id,
+                    "worktree_operation_in_progress",
+                    "worktree operation is already in progress for this checkout",
+                ),
+            );
+            return;
+        }
+
+        // After the in-progress check: a duplicate must not run `git status` beside the removal.
         #[cfg(windows)]
         {
             if !params.force
@@ -325,47 +339,14 @@ impl App {
             }
         }
 
-        let workspace_internal_id = self.state.workspaces[ws_idx].id.clone();
-        let checkout_key = crate::worktree::canonical_or_original(&space.checkout_path);
-        if self
-            .pending_api_worktree_removes
-            .contains_key(&workspace_internal_id)
-            || self
-                .pending_api_worktree_remove_paths
-                .contains_key(&checkout_key)
-            || self
-                .pending_api_worktree_creates
-                .contains_key(&checkout_key)
-            || self
-                .state
-                .pane_ids_for_workspace(ws_idx)
-                .iter()
-                .any(|pane_id| {
-                    self.pending_worktree_remove_runtime_restores
-                        .contains_key(pane_id)
-                })
-        {
-            Self::send_api_response(
-                respond_to,
-                encode_error(
-                    id,
-                    "worktree_operation_in_progress",
-                    "worktree operation is already in progress for this checkout",
-                ),
-            );
-            return;
-        }
-
         let shutdown_panes =
             if Self::should_shutdown_workspace_terminal_runtimes_for_worktree_remove(params.force) {
-                self.shutdown_workspace_terminal_runtimes_for_worktree_remove(ws_idx)
+                self.shutdown_terminal_runtimes_for_worktree_remove(&pane_ids)
             } else {
                 Vec::new()
             };
 
         let operation_id = self.next_api_worktree_operation_id();
-        self.pending_api_worktree_removes
-            .insert(workspace_internal_id.clone(), operation_id);
         self.pending_api_worktree_remove_paths
             .insert(checkout_key.clone(), operation_id);
         let workspace_snapshot = self.workspace_info(ws_idx);
@@ -383,12 +364,12 @@ impl App {
             shutdown_panes,
             respond_to,
         };
-        let repo_root = space.repo_root;
+        let repo_root = space.repo_root.clone();
         let trust_repository = params.trust_repository;
         let event_tx = self.event_tx.clone();
         let finished = crate::events::WorktreeRemoveResult {
-            workspace_id: workspace_internal_id,
-            path: space.checkout_path,
+            workspace_id: self.state.workspaces[ws_idx].id.clone(),
+            path: space.checkout_path.clone(),
             workspace: Some(Box::new(workspace_snapshot)),
             worktree: Some(Box::new(worktree)),
             forced: params.force,
@@ -399,13 +380,20 @@ impl App {
             "herdr-worktree-remove",
             finished,
             move |mut finished| {
-                finished.result = crate::worktree::run_worktree_remove_command_with_recovery(
-                    &command,
-                    &repo_root,
-                    &finished.path,
-                    finished.forced,
-                    trust_repository,
-                );
+                // A saved tab can outlive its checkout; never remove a directory
+                // that has since become some other repo's.
+                finished.result =
+                    if crate::persist::restored_worktree_space_membership(Some(space)).is_none() {
+                        Err("worktree checkout no longer belongs to this repository".into())
+                    } else {
+                        crate::worktree::run_worktree_remove_command_with_recovery(
+                            &command,
+                            &repo_root,
+                            &finished.path,
+                            finished.forced,
+                            trust_repository,
+                        )
+                    };
                 let _ =
                     event_tx.blocking_send(AppEvent::WorktreeRemoveFinished(Box::new(finished)));
             },
@@ -458,81 +446,63 @@ impl App {
             return;
         }
 
-        let source_workspace_idx = self.api_create_source_workspace_idx(&api);
-        let mut source = WorktreeSource {
-            workspace_idx: source_workspace_idx,
+        let source = WorktreeSource {
+            workspace_idx: self.worktree_target_workspace_by_id(api.target_workspace_id.as_deref()),
             source_checkout_path: api.source_checkout_path,
             source_repo_root: api.source_repo_root,
             repo_key: api.repo_key,
             repo_name: api.repo_name,
         };
-        if let Err(err) = self.ensure_source_parent_membership(&mut source, true) {
-            Self::send_api_response(api.respond_to, encode_error(api.id, err.code, err.message));
-            return;
-        }
-
-        let (ws_idx, created_workspace) =
-            if let Some(ws_idx) = self.open_workspace_idx_for_checkout(&result.path) {
-                if api.focus {
-                    self.state.switch_workspace(ws_idx);
-                }
-                (ws_idx, false)
-            } else {
-                match self.create_workspace_with_options(result.path.clone(), api.focus) {
-                    Ok(ws_idx) => (ws_idx, true),
-                    Err(err) => {
-                        Self::send_api_response(
-                            api.respond_to,
-                            encode_error(
-                                api.id,
-                                "worktree_open_failed",
-                                format!("created worktree but failed to open workspace: {err}"),
-                            ),
-                        );
-                        return;
-                    }
-                }
-            };
-
-        self.mark_worktree_membership(
+        let opened = match self.open_worktree_tab(
             &source,
-            ws_idx,
             result.path.clone(),
             true,
-            !created_workspace,
-        );
-        if let Some(label) = api.label {
-            if let Some(ws) = self.state.workspaces.get_mut(ws_idx) {
-                ws.set_custom_name(label);
+            api.label,
+            api.focus,
+        ) {
+            Ok(opened) => opened,
+            Err(err) => {
+                Self::send_api_response(
+                    api.respond_to,
+                    encode_error(
+                        api.id,
+                        err.code,
+                        format!(
+                            "created worktree but failed to open its tab: {}",
+                            err.message
+                        ),
+                    ),
+                );
+                return;
             }
-        }
-        self.state.mark_session_dirty();
-        if created_workspace {
-            self.emit_workspace_open_events(ws_idx);
-        }
-        let Some(worktree) = self.worktree_info_for_workspace(ws_idx) else {
+        };
+        let Some(membership) = self.state.workspaces[opened.ws_idx].tabs[opened.tab_idx]
+            .worktree
+            .clone()
+        else {
             Self::send_api_response(
                 api.respond_to,
                 encode_error(
                     api.id,
                     "worktree_open_failed",
-                    "created worktree but failed to record workspace membership",
+                    "created worktree but failed to record its tab",
                 ),
             );
             return;
         };
-        self.emit_worktree_created_event(ws_idx, worktree.clone());
-        let tab_idx = self.state.workspaces[ws_idx].active_tab;
+        let worktree =
+            self.worktree_info_for_membership(&membership, Some((opened.ws_idx, opened.tab_idx)));
+        self.emit_worktree_created_event(opened.ws_idx, worktree.clone());
         let response = encode_success(
             api.id,
             ResponseResult::WorktreeCreated {
-                workspace: self.workspace_info(ws_idx),
+                workspace: self.workspace_info(opened.ws_idx),
                 tab: self
-                    .tab_info(ws_idx, tab_idx)
-                    .expect("created worktree workspace should have an active tab"),
+                    .tab_info(opened.ws_idx, opened.tab_idx)
+                    .expect("created worktree tab should exist"),
                 root_pane: self
-                    .root_pane_info(ws_idx, tab_idx)
-                    .expect("created worktree workspace should have an active root pane"),
+                    .root_pane_info(opened.ws_idx, opened.tab_idx)
+                    .expect("created worktree tab should have a root pane"),
                 worktree,
             },
         );
@@ -547,13 +517,9 @@ impl App {
             return Vec::new();
         };
         let operation_matches = self
-            .pending_api_worktree_removes
-            .get(&result.workspace_id)
-            .is_some_and(|operation_id| *operation_id == api.operation_id)
-            && self
-                .pending_api_worktree_remove_paths
-                .get(&api.checkout_key)
-                .is_some_and(|operation_id| *operation_id == api.operation_id);
+            .pending_api_worktree_remove_paths
+            .get(&api.checkout_key)
+            .is_some_and(|operation_id| *operation_id == api.operation_id);
         if !operation_matches {
             Self::send_api_response(
                 api.respond_to,
@@ -565,8 +531,6 @@ impl App {
             );
             return Vec::new();
         }
-        self.pending_api_worktree_removes
-            .remove(&result.workspace_id);
         self.pending_api_worktree_remove_paths
             .remove(&api.checkout_key);
 
@@ -586,52 +550,27 @@ impl App {
             return pane_updates;
         }
 
-        let mut workspace_id = result.workspace_id.clone();
-        let mut workspace_snapshot = result.workspace.as_deref().cloned();
-        let mut worktree = result.worktree.as_deref().cloned();
-        if let Some(ws_idx) = self
+        let workspace_snapshot = result.workspace.as_deref().cloned();
+        let workspace_id = self
             .state
             .workspaces
             .iter()
             .position(|ws| ws.id == result.workspace_id)
-        {
-            let current_matches =
-                self.state.workspaces[ws_idx]
-                    .worktree_space()
-                    .is_some_and(|space| {
-                        space.is_linked_worktree && space.checkout_path == result.path
-                    });
-            if current_matches {
-                workspace_id = self.public_workspace_id(ws_idx);
-                workspace_snapshot.get_or_insert_with(|| self.workspace_info(ws_idx));
-                if worktree.is_none() {
-                    worktree = self.state.workspaces[ws_idx]
-                        .worktree_space()
-                        .cloned()
-                        .map(|space| self.worktree_info_for_membership(&space, None));
-                }
-                self.close_removed_linked_worktree_workspace(ws_idx);
-                self.shutdown_detached_terminal_runtimes();
-                self.emit_event(EventEnvelope {
-                    event: EventKind::WorkspaceClosed,
-                    data: EventData::WorkspaceClosed {
-                        workspace_id: workspace_id.clone(),
-                        workspace: workspace_snapshot.clone(),
-                    },
-                });
-            } else if let Some(snapshot) = workspace_snapshot.as_ref() {
-                workspace_id = snapshot.workspace_id.clone();
-            }
-        } else if let Some(snapshot) = workspace_snapshot.as_ref() {
-            workspace_id = snapshot.workspace_id.clone();
-        }
+            .map(|ws_idx| self.public_workspace_id(ws_idx))
+            .or_else(|| {
+                workspace_snapshot
+                    .as_ref()
+                    .map(|snapshot| snapshot.workspace_id.clone())
+            })
+            .unwrap_or_else(|| result.workspace_id.clone());
+        self.close_removed_worktree_tabs(&result.path);
         let pane_updates = self.restore_shutdown_worktree_panes(
             &api.shutdown_panes,
             api.operation_id,
             &result.path,
         );
 
-        let Some(worktree) = worktree else {
+        let Some(worktree) = result.worktree.as_deref().cloned() else {
             Self::send_api_response(
                 api.respond_to,
                 encode_error(
@@ -660,6 +599,16 @@ impl App {
         pane_updates
     }
 
+    /// Closes every tab opened for a removed checkout, the way `tab.close` does.
+    pub(super) fn close_removed_worktree_tabs(&mut self, checkout_path: &Path) {
+        // Close from the back so earlier indices stay valid.
+        for (ws_idx, tab_idx) in self.tabs_for_checkout(checkout_path).into_iter().rev() {
+            if let Some(tab_id) = self.public_tab_id(ws_idx, tab_idx) {
+                let _ = self.handle_tab_close(String::new(), TabTarget { tab_id });
+            }
+        }
+    }
+
     fn restore_shutdown_worktree_panes(
         &mut self,
         shutdown_panes: &[crate::layout::PaneId],
@@ -682,7 +631,8 @@ impl App {
             if runtime_missing {
                 let workspace = &self.state.workspaces[ws_idx];
                 let current_checkout = workspace
-                    .worktree_space()
+                    .find_tab_index_for_pane(pane_id)
+                    .and_then(|tab_idx| workspace.tabs[tab_idx].worktree.as_ref())
                     .map(|space| space.checkout_path.clone())
                     .or_else(|| {
                         workspace
@@ -727,4 +677,19 @@ impl App {
         }
         pane_updates
     }
+}
+
+/// The checks that need no repo, answered before any discovery runs.
+fn validate_worktree_create(params: &WorktreeCreateParams) -> Result<(), ApiFailure> {
+    if params
+        .branch
+        .as_deref()
+        .is_some_and(|branch| branch.trim().is_empty())
+    {
+        return Err(ApiFailure::new("invalid_request", "branch is required"));
+    }
+    if let Some(path) = params.path.as_deref() {
+        absolute_user_path(path)?;
+    }
+    Ok(())
 }

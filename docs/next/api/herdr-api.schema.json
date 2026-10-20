@@ -1335,6 +1335,17 @@
             },
             "workspace_id": {
               "type": "string"
+            },
+            "worktree": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/event/$defs/WorkspaceWorktreeInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The worktree checkout the tab was opened for."
             }
           },
           "required": [
@@ -1485,6 +1496,13 @@
             },
             "label": {
               "type": "string"
+            },
+            "open_tab_id": {
+              "description": "The tab open on this checkout, if any; `open_workspace_id` is its workspace.",
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "open_workspace_id": {
               "type": [
@@ -5222,6 +5240,31 @@
             "workspace_id"
           ],
           "type": "object"
+        },
+        "WorktreeRemoveTabParams": {
+          "description": "Removes the checkout behind a worktree tab and closes the tab: the tab\nnamed, or the one worktree tab of the workspace named.",
+          "properties": {
+            "force": {
+              "default": false,
+              "type": "boolean"
+            },
+            "tab_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "trust_repository": {
+              "type": "boolean"
+            },
+            "workspace_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "type": "object"
         }
       },
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -5666,6 +5709,22 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/WorktreeRemoveParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "worktree.remove_tab",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/WorktreeRemoveTabParams"
             }
           },
           "required": [
@@ -11588,6 +11647,11 @@
               "default": false,
               "description": "Runs `[worktrees] post_create` in each new checkout before opening it.",
               "type": "boolean"
+            },
+            "worktree_tabs": {
+              "default": false,
+              "description": "Opens worktrees as tabs in a workspace and removes them by tab.",
+              "type": "boolean"
             }
           },
           "required": [
@@ -11708,6 +11772,17 @@
             },
             "workspace_id": {
               "type": "string"
+            },
+            "worktree": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/success_response/$defs/WorkspaceWorktreeInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The worktree checkout the tab was opened for."
             }
           },
           "required": [
@@ -11858,6 +11933,13 @@
             },
             "label": {
               "type": "string"
+            },
+            "open_tab_id": {
+              "description": "The tab open on this checkout, if any; `open_workspace_id` is its workspace.",
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "open_workspace_id": {
               "type": [

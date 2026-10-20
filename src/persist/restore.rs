@@ -410,12 +410,21 @@ fn restore_workspace(
     if tabs.is_empty() {
         return (None, failed_imports);
     }
+    // Upstream opened a linked checkout as its own workspace; here its tabs carry it.
+    if let Some(space) = snap
+        .worktree_space
+        .as_ref()
+        .filter(|space| space.is_linked_worktree)
+    {
+        for tab in tabs.iter_mut().filter(|tab| tab.worktree.is_none()) {
+            tab.worktree = Some(space.clone());
+        }
+    }
 
     (
         Some(Workspace {
             id: workspace_id,
             custom_name: snap.custom_name.clone(),
-            worktree_space: snap.worktree_space.clone(),
             metadata_tokens: crate::metadata_tokens::MetadataTokens::default(),
             metadata_token_sequences: HashMap::new(),
             public_pane_numbers,
@@ -821,6 +830,7 @@ fn restore_tab(
             crate::workspace::Tab {
                 custom_name: snap.custom_name.clone(),
                 followed_name: snap.followed_name.clone(),
+                worktree: snap.worktree.clone(),
                 number,
                 root_pane,
                 layout,
@@ -1514,10 +1524,13 @@ mod tests {
                 "a launch failure must not delete a workspace"
             );
             assert_eq!(captured.workspaces[0].tabs.len(), 2);
-            assert_eq!(
-                captured.workspaces[0].worktree_space,
-                Some(membership),
-                "an unavailable checkout must retain its saved repository group across restart"
+            assert_eq!(captured.workspaces[0].worktree_space, None);
+            assert!(
+                captured.workspaces[0]
+                    .tabs
+                    .iter()
+                    .all(|tab| tab.worktree.as_ref() == Some(&membership)),
+                "an upstream worktree workspace's checkout moves onto its tabs, unavailable or not"
             );
             let pane = captured.workspaces[0].tabs[0]
                 .panes
@@ -1569,6 +1582,7 @@ mod tests {
                 tabs: vec![TabSnapshot {
                     custom_name: None,
                     followed_name: None,
+                    worktree: None,
                     layout: LayoutSnapshot::Pane(0),
                     panes: HashMap::from([(
                         0,
@@ -1671,6 +1685,7 @@ mod tests {
                 tabs: vec![TabSnapshot {
                     custom_name: None,
                     followed_name: None,
+                    worktree: None,
                     layout: LayoutSnapshot::Split {
                         direction: super::super::snapshot::DirectionSnapshot::Horizontal,
                         ratio: 0.5,
@@ -1811,6 +1826,7 @@ mod tests {
                     TabSnapshot {
                         custom_name: None,
                         followed_name: None,
+                        worktree: None,
                         layout: LayoutSnapshot::Pane(10),
                         panes: HashMap::from([pane_snap("10")]),
                         zoomed: false,
@@ -1820,6 +1836,7 @@ mod tests {
                     TabSnapshot {
                         custom_name: None,
                         followed_name: None,
+                        worktree: None,
                         layout: LayoutSnapshot::Pane(11),
                         panes: HashMap::from([pane_snap("11")]),
                         zoomed: false,
@@ -1829,6 +1846,7 @@ mod tests {
                     TabSnapshot {
                         custom_name: None,
                         followed_name: None,
+                        worktree: None,
                         layout: LayoutSnapshot::Pane(12),
                         panes: HashMap::from([pane_snap("12")]),
                         zoomed: false,
@@ -1838,6 +1856,7 @@ mod tests {
                     TabSnapshot {
                         custom_name: None,
                         followed_name: None,
+                        worktree: None,
                         layout: LayoutSnapshot::Pane(13),
                         panes: HashMap::from([(13, final_pane)]),
                         zoomed: false,
@@ -1898,6 +1917,7 @@ mod tests {
             tabs: vec![TabSnapshot {
                 custom_name: None,
                 followed_name: None,
+                worktree: None,
                 layout: LayoutSnapshot::Split {
                     direction: super::super::snapshot::DirectionSnapshot::Horizontal,
                     ratio: 0.5,
@@ -1938,6 +1958,7 @@ mod tests {
                 tabs: vec![TabSnapshot {
                     custom_name: None,
                     followed_name: None,
+                    worktree: None,
                     layout: LayoutSnapshot::Pane(0),
                     panes: HashMap::from([(
                         0,
@@ -2077,6 +2098,7 @@ mod tests {
                 tabs: vec![TabSnapshot {
                     custom_name: None,
                     followed_name: None,
+                    worktree: None,
                     layout: LayoutSnapshot::Pane(0),
                     panes: HashMap::from([(0, pane)]),
                     zoomed: false,
@@ -2398,6 +2420,7 @@ mod tests {
                 tabs: vec![TabSnapshot {
                     custom_name: None,
                     followed_name: None,
+                    worktree: None,
                     layout: LayoutSnapshot::Pane(0),
                     panes,
                     zoomed: false,

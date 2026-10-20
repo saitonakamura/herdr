@@ -3044,6 +3044,7 @@ impl HeadlessServer {
             &msg.request.method,
             api::schema::Method::WorktreeCreate(_)
                 | api::schema::Method::WorktreeRemove(_)
+                | api::schema::Method::WorktreeRemoveTab(_)
                 | api::schema::Method::WorktreeList(_)
                 | api::schema::Method::WorktreeOpen(_)
         ) {
@@ -3315,14 +3316,6 @@ impl HeadlessServer {
                 }
                 changed = true;
             }
-        }
-
-        if self
-            .app
-            .restored_worktree_validation_retry_at
-            .is_some_and(|deadline| now >= deadline)
-        {
-            self.app.start_restored_worktree_validation(now);
         }
 
         if self.git_refresh_scheduled() {

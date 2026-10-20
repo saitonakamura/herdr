@@ -60,6 +60,7 @@ pub struct WorkspaceSnapshot {
     #[serde(default)]
     pub custom_name: Option<String>,
     pub identity_cwd: PathBuf,
+    /// Read from upstream snapshots only: restore moves a linked checkout onto the tabs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worktree_space: Option<crate::workspace::WorktreeSpaceMembership>,
     #[serde(default)]
@@ -94,6 +95,8 @@ pub struct TabSnapshot {
     pub custom_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub followed_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree: Option<crate::workspace::WorktreeSpaceMembership>,
     pub layout: LayoutSnapshot,
     pub panes: HashMap<u32, PaneSnapshot>,
     pub zoomed: bool,
@@ -177,6 +180,7 @@ impl From<LegacyWorkspaceSnapshot> for WorkspaceSnapshot {
         let tab = TabSnapshot {
             custom_name: None,
             followed_name: None,
+            worktree: None,
             layout: snap.layout,
             panes: snap.panes,
             zoomed: snap.zoomed,
@@ -331,7 +335,7 @@ fn capture_workspace(
         id: Some(ws.id.clone()),
         custom_name: ws.custom_name.clone(),
         identity_cwd,
-        worktree_space: ws.worktree_space.clone(),
+        worktree_space: None,
         public_pane_numbers: ws
             .public_pane_numbers
             .iter()
@@ -427,6 +431,7 @@ fn capture_tab(
     TabSnapshot {
         custom_name: tab.custom_name.clone(),
         followed_name: tab.followed_name.clone(),
+        worktree: tab.worktree.clone(),
         layout: capture_node(tab.layout.root()),
         panes,
         zoomed: tab.zoomed,
@@ -814,6 +819,7 @@ mod tests {
                 tabs: vec![TabSnapshot {
                     custom_name: Some("api".to_string()),
                     followed_name: Some("review-the-api".to_string()),
+                    worktree: None,
                     layout: LayoutSnapshot::Split {
                         direction: DirectionSnapshot::Horizontal,
                         ratio: 0.5,
@@ -1027,9 +1033,9 @@ mod tests {
     }
 
     #[test]
-    fn capture_contract_tracks_worktree_space_membership() {
+    fn capture_contract_tracks_tab_worktree_membership() {
         let mut state = state_with_workspaces(&["main"]);
-        state.workspaces[0].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+        state.workspaces[0].tabs[0].worktree = Some(crate::workspace::WorktreeSpaceMembership {
             key: "repo-key".into(),
             label: "herdr".into(),
             repo_root: PathBuf::from("/repo/herdr"),
@@ -1040,9 +1046,10 @@ mod tests {
         let snapshot = capture_from_state(&state);
 
         assert_eq!(
-            snapshot.workspaces[0].worktree_space,
-            state.workspaces[0].worktree_space
+            snapshot.workspaces[0].tabs[0].worktree,
+            state.workspaces[0].tabs[0].worktree
         );
+        assert_eq!(snapshot.workspaces[0].worktree_space, None);
     }
 
     #[test]
@@ -1633,6 +1640,7 @@ mod tests {
                 tabs: vec![TabSnapshot {
                     custom_name: None,
                     followed_name: None,
+                    worktree: None,
                     layout: LayoutSnapshot::Split {
                         direction: DirectionSnapshot::Horizontal,
                         ratio: 0.5,

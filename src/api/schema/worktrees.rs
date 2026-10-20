@@ -4,7 +4,8 @@ use crate::cli::projection::{cli_params, Field, Input};
 use crate::cli::workspace_bindings as bindings;
 
 pub(crate) fn workspace() -> Input<Option<String>> {
-    super::tabs::workspace_option("ID").configure(|arg| arg.conflicts_with("cwd"))
+    // With `cwd` too, the worktree comes from `cwd` and its tab opens in the workspace.
+    super::tabs::workspace_option("ID")
 }
 
 fn json_compatibility() -> Input<bool> {
@@ -75,18 +76,34 @@ cli_params! {
     }
 }
 
+// The workspace-addressed remove older clients send; the CLI uses
+// `WorktreeRemoveTabParams`. No doc comments: they would change the frozen shape.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct WorktreeRemoveParams {
+    pub workspace_id: String,
+    #[serde(default)]
+    pub force: bool,
+    #[serde(default, skip_serializing_if = "super::is_false")]
+    pub trust_repository: bool,
+}
+
 cli_params! {
-    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-    pub struct WorktreeRemoveParams => WorktreeRemoveProjection {
-        pub workspace_id: String => Field::new(String::new()).input(Input::value("workspace", "ID", |slot, value| {
-            *slot = crate::cli::normalize_workspace_id(value);
+    /// Removes the checkout behind a worktree tab and closes the tab: the tab
+    /// named, or the one worktree tab of the workspace named.
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema, Default)]
+    pub struct WorktreeRemoveTabParams => WorktreeRemoveTabProjection {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub tab_id: Option<String> => Field::new(None).input(Input::value("tab", "ID", |slot, value| {
+            *slot = Some(crate::cli::normalize_tab_id(value));
             Ok(())
-        }).required().order(0)),
+        }).order(0)),
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub workspace_id: Option<String> => Field::new(None).input(super::tabs::workspace_option("ID").order(1)),
         #[serde(default)]
-        pub force: bool => Field::new(false).input(bindings::boolean("force", true).order(1)),
+        pub force: bool => Field::new(false).input(bindings::boolean("force", true).order(2)),
         #[serde(default, skip_serializing_if = "super::is_false")]
         pub trust_repository: bool => Field::new(false)
-            .input(bindings::boolean("trust-repository", true).order(2))
+            .input(bindings::boolean("trust-repository", true).order(3))
             .input(json_compatibility()),
     }
 }
@@ -112,5 +129,8 @@ pub struct WorktreeInfo {
     pub is_linked_worktree: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub open_workspace_id: Option<String>,
+    /// The tab open on this checkout, if any; `open_workspace_id` is its workspace.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub open_tab_id: Option<String>,
     pub label: String,
 }

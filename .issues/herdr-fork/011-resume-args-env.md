@@ -8,7 +8,7 @@ parent: herdr-fork-map
 blocked_by:
   - herdr-fork-agent-identity-parent
 assignee:
-claimed_by: macos/w6:pM/7477c398-abf3-46d0-8945-55619bf26ec2
+claimed_by: macos/w1:p3/8f9df145-aeab-4086-be38-5cfee881565a
 ---
 
 ## Question

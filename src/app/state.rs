@@ -896,6 +896,13 @@ pub struct AppState {
     pub(crate) terminal_runtime_shutdowns: Vec<crate::terminal::TerminalId>,
     /// Set when an agent's terminal went away, so its children's parent must be dropped.
     pub(crate) agent_identities_dirty: bool,
+    /// Messages between agents, persisted with the session.
+    pub(crate) messages: crate::app::messages::MessageStore,
+    /// Set when a message was queued or an agent's state changed, so delivery runs again.
+    pub(crate) message_delivery_due: bool,
+    /// Each recipient's state change sequence at its last delivery attempt: one attempt per change.
+    pub(crate) message_delivery_attempts:
+        std::collections::HashMap<crate::terminal::AgentId, Option<u64>>,
 }
 
 impl AppState {
@@ -1132,6 +1139,9 @@ impl AppState {
             session_dirty: false,
             terminal_runtime_shutdowns: Vec::new(),
             agent_identities_dirty: false,
+            messages: Default::default(),
+            message_delivery_due: false,
+            message_delivery_attempts: std::collections::HashMap::new(),
         }
     }
 
@@ -1143,7 +1153,7 @@ impl AppState {
             for tab in &ws.tabs {
                 for pane in tab.panes.values() {
                     if !self.terminals.contains_key(&pane.attached_terminal_id) {
-                        let cwd = ws.identity_cwd.clone();
+                        let cwd = ws.test_cwd.clone();
                         self.terminals.insert(
                             pane.attached_terminal_id.clone(),
                             TerminalState::new(pane.attached_terminal_id.clone(), cwd),

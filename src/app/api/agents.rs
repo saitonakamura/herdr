@@ -309,9 +309,6 @@ impl App {
             expected_agent,
             agent,
         } = validated;
-        let Some(runtime) = self.lookup_runtime_sender(ws_idx, pane_id) else {
-            return Err(agent_not_found(id, &params.target));
-        };
         #[cfg(windows)]
         let submit_deadline = params
             .wait
@@ -319,20 +316,43 @@ impl App {
             .and_then(|wait| wait.submission_deadline);
         #[cfg(not(windows))]
         let submit_deadline = None;
+        let completion = match self.queue_agent_submission(
+            ws_idx,
+            pane_id,
+            expected_agent,
+            &params.text,
+            submit_deadline,
+        ) {
+            Ok(completion) => completion,
+            Err(AgentSubmissionError::NotFound) => return Err(agent_not_found(id, &params.target)),
+            Err(AgentSubmissionError::Failed(message)) => {
+                return Err(encode_error(id, "agent_prompt_failed", message))
+            }
+        };
+        Ok((id, agent, completion))
+    }
+
+    /// Types `text` into the agent's composer and submits it after a short delay.
+    pub(in crate::app) fn queue_agent_submission(
+        &self,
+        ws_idx: usize,
+        pane_id: crate::layout::PaneId,
+        expected_agent: crate::detect::Agent,
+        text: &str,
+        submit_deadline: Option<std::time::Instant>,
+    ) -> Result<std::sync::mpsc::Receiver<std::io::Result<()>>, AgentSubmissionError> {
+        let Some(runtime) = self.lookup_runtime_sender(ws_idx, pane_id) else {
+            return Err(AgentSubmissionError::NotFound);
+        };
         if expected_agent == crate::detect::Agent::GithubCopilot {
             // Copilot ignores synthetic Enter after focus loss until it receives focus gained.
-            let focus = match crate::ghostty::encode_focus(crate::ghostty::FocusEvent::Gained) {
-                Ok(focus) => focus,
-                Err(err) => {
-                    return Err(encode_error(id, "agent_prompt_failed", err.to_string()));
-                }
-            };
-            if let Err(err) = runtime.try_send_bytes(Bytes::from(focus)) {
-                return Err(encode_error(id, "agent_prompt_failed", err.to_string()));
-            }
+            let focus = crate::ghostty::encode_focus(crate::ghostty::FocusEvent::Gained)
+                .map_err(|err| AgentSubmissionError::Failed(err.to_string()))?;
+            runtime
+                .try_send_bytes(Bytes::from(focus))
+                .map_err(|err| AgentSubmissionError::Failed(err.to_string()))?;
         }
-        let (text, enter) =
-            crate::app::api_helpers::encode_api_submission_parts(runtime, &params.text);
+        let (text, enter) = crate::app::api_helpers::encode_api_submission_parts(runtime, text);
         #[cfg(windows)]
         let text = if expected_agent == crate::detect::Agent::Codex {
             let mut text = text;
@@ -341,15 +361,14 @@ impl App {
         } else {
             text
         };
-        let completion = runtime
+        runtime
             .queue_user_input_submission(
                 Bytes::from(text),
                 Bytes::from(enter),
                 AGENT_PROMPT_SUBMIT_DELAY,
                 submit_deadline,
             )
-            .map_err(|err| encode_error(id.clone(), "agent_prompt_failed", err.to_string()))?;
-        Ok((id, agent, completion))
+            .map_err(|err| AgentSubmissionError::Failed(err.to_string()))
     }
 
     pub(super) fn handle_agent_read(
@@ -508,6 +527,11 @@ impl App {
 
         encode_success(id, ResponseResult::Ok {})
     }
+}
+
+pub(in crate::app) enum AgentSubmissionError {
+    NotFound,
+    Failed(String),
 }
 
 struct ValidatedAgentPrompt {

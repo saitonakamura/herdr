@@ -167,7 +167,8 @@ fn desktop_composition_keeps_shell_outside_origin_relative_surface() {
         .join("\n");
     assert!(text.contains("spaces"));
     assert!(text.contains("client-shell"));
-    assert!(text.contains("main"));
+    // A workspace row shows no branch; repo facts belong to agent rows.
+    assert!(!text.contains("main"));
     assert!(text.contains("LIVE"));
     assert!(!text.contains("1 1"));
     assert_eq!(
@@ -938,6 +939,7 @@ fn sidebar_scrollbars_use_proportional_shared_geometry_and_drag() {
     }
     for index in 1..=10 {
         projected.agents.push(crate::protocol::ClientShellAgent {
+            repo: None,
             pane_id: format!("agent-pane-{index}"),
             workspace_id: "ws_1".into(),
             tab_id: "tab_1".into(),

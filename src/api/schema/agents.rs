@@ -274,6 +274,9 @@ pub struct AgentInfo {
     /// Profile directory the agent's session is written to; a resume selects it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_home: Option<String>,
+    /// The Git checkout containing `cwd`; absent outside one or before its first refresh.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repo: Option<super::panes::PaneRepoInfo>,
     pub workspace_id: String,
     pub tab_id: String,
     pub pane_id: String,

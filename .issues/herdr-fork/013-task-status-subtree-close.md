@@ -1,14 +1,14 @@
 ---
 id: herdr-fork-task-status-subtree-close
 title: Task status and closing a subtree
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
   - herdr-fork-agent-identity-parent
 assignee:
-claimed_by:
+claimed_by: macos/w1:p4/70ab02b8-412f-4a9d-9f96-af7db87595ce
 ---
 
 ## Question

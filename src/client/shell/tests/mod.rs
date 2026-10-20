@@ -176,6 +176,7 @@ fn pane_scroll_result(
 ) -> crate::api::schema::ResponseResult {
     crate::api::schema::ResponseResult::PaneInfo {
         pane: crate::api::schema::PaneInfo {
+            repo: None,
             blocked_reason: None,
             pane_id: "pane_1".into(),
             terminal_id: "terminal_1".into(),

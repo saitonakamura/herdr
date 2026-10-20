@@ -190,6 +190,8 @@ pub struct TerminalState {
     agent_process_acquisition_pending: bool,
     pub pending_agent_resume_plan: Option<crate::agent_resume::AgentResumePlan>,
     pub restore_error: Option<String>,
+    /// Repo facts for the checkout containing `cwd`, from the last Git refresh.
+    pub repo: Option<crate::workspace::PaneRepo>,
 }
 
 impl TerminalState {
@@ -238,7 +240,19 @@ impl TerminalState {
             agent_process_acquisition_pending: false,
             pending_agent_resume_plan: None,
             restore_error: None,
+            repo: None,
         }
+    }
+
+    /// Stores refreshed repo facts; true when anything a reader can see changed.
+    pub(crate) fn set_repo(&mut self, repo: Option<crate::workspace::PaneRepo>) -> bool {
+        let visible_change =
+            self.repo.as_ref().map(|repo| &repo.facts) != repo.as_ref().map(|repo| &repo.facts);
+        self.repo = repo;
+        if visible_change {
+            self.revision = self.revision.wrapping_add(1);
+        }
+        visible_change
     }
 
     pub fn set_detected_agent_process_at(

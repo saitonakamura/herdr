@@ -306,6 +306,17 @@ pub(super) fn agent_row(
             terminal_title: agent.terminal_title.as_deref(),
             terminal_title_stripped: agent.terminal_title_stripped.as_deref(),
             canonical_agent,
+            repo: agent
+                .repo
+                .as_ref()
+                .map(|repo| crate::ui::RepoTokenContext {
+                    repo: Some(repo.repo_name.as_str()),
+                    branch: repo.branch.as_deref(),
+                    ahead_behind: repo.ahead_behind,
+                    dirty: repo.dirty,
+                    worktree: repo.worktree.as_deref(),
+                })
+                .unwrap_or_default(),
             tokens: &tokens,
         },
         state_text,

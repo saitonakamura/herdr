@@ -21,6 +21,9 @@ pub(crate) enum ResolvedTokenKind {
     TerminalTitle(String),
     Branch(String),
     GitStatus { ahead: usize, behind: usize },
+    Repo(String),
+    GitDirty(usize),
+    Worktree(String),
     Custom(String),
 }
 
@@ -35,8 +38,10 @@ impl ResolvedTokenKind {
             | Self::Agent(value)
             | Self::TerminalTitle(value)
             | Self::Branch(value)
+            | Self::Repo(value)
+            | Self::Worktree(value)
             | Self::Custom(value) => Some(value),
-            Self::StateIcon | Self::GitStatus { .. } => None,
+            Self::StateIcon | Self::GitStatus { .. } | Self::GitDirty(_) => None,
         }
     }
 }
@@ -52,6 +57,17 @@ impl ResolvedToken {
     }
 }
 
+/// Repo facts of an agent's pane, as the sidebar shows them.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct RepoTokenContext<'a> {
+    pub(crate) repo: Option<&'a str>,
+    pub(crate) branch: Option<&'a str>,
+    pub(crate) ahead_behind: Option<(usize, usize)>,
+    pub(crate) dirty: Option<usize>,
+    /// The checkout's directory name, set only for a linked worktree.
+    pub(crate) worktree: Option<&'a str>,
+}
+
 pub(crate) struct AgentTokenContext<'a> {
     pub(crate) machine: Option<&'a str>,
     pub(crate) workspace: &'a str,
@@ -61,6 +77,7 @@ pub(crate) struct AgentTokenContext<'a> {
     pub(crate) terminal_title: Option<&'a str>,
     pub(crate) terminal_title_stripped: Option<&'a str>,
     pub(crate) canonical_agent: Option<crate::detect::Agent>,
+    pub(crate) repo: RepoTokenContext<'a>,
     pub(crate) tokens: &'a std::collections::HashMap<String, String>,
 }
 
@@ -103,6 +120,28 @@ pub(crate) fn agent_rows(
                         AgentSidebarToken::TerminalTitleStripped => context
                             .terminal_title_stripped
                             .map(|value| ResolvedTokenKind::TerminalTitle(value.to_string())),
+                        AgentSidebarToken::Repo => context
+                            .repo
+                            .repo
+                            .map(|value| ResolvedTokenKind::Repo(value.to_string())),
+                        AgentSidebarToken::Branch => context
+                            .repo
+                            .branch
+                            .map(|value| ResolvedTokenKind::Branch(value.to_string())),
+                        AgentSidebarToken::GitStatus => context
+                            .repo
+                            .ahead_behind
+                            .filter(|(ahead, behind)| *ahead > 0 || *behind > 0)
+                            .map(|(ahead, behind)| ResolvedTokenKind::GitStatus { ahead, behind }),
+                        AgentSidebarToken::GitDirty => context
+                            .repo
+                            .dirty
+                            .filter(|count| *count > 0)
+                            .map(ResolvedTokenKind::GitDirty),
+                        AgentSidebarToken::Worktree => context
+                            .repo
+                            .worktree
+                            .map(|value| ResolvedTokenKind::Worktree(value.to_string())),
                         AgentSidebarToken::Custom(name) => context
                             .tokens
                             .get(name)
@@ -123,11 +162,8 @@ pub(crate) fn agent_rows(
 
 pub(crate) struct SpaceTokenContext<'a> {
     pub(crate) workspace: &'a str,
-    pub(crate) branch: Option<&'a str>,
     pub(crate) state_text: &'a str,
-    pub(crate) ahead_behind: Option<(usize, usize)>,
     pub(crate) tokens: &'a std::collections::HashMap<String, String>,
-    pub(crate) suppress_git_details: bool,
 }
 
 pub(crate) fn space_rows(
@@ -150,15 +186,8 @@ pub(crate) fn space_rows(
                         SpaceSidebarToken::Workspace => {
                             Some(ResolvedTokenKind::Workspace(context.workspace.to_string()))
                         }
-                        SpaceSidebarToken::Branch if !context.suppress_git_details => context
-                            .branch
-                            .map(|branch| ResolvedTokenKind::Branch(branch.to_string())),
-                        SpaceSidebarToken::Branch => None,
-                        SpaceSidebarToken::GitStatus if !context.suppress_git_details => context
-                            .ahead_behind
-                            .filter(|(ahead, behind)| *ahead > 0 || *behind > 0)
-                            .map(|(ahead, behind)| ResolvedTokenKind::GitStatus { ahead, behind }),
-                        SpaceSidebarToken::GitStatus => None,
+                        // A workspace has no repo; see `SpaceSidebarToken::Branch`.
+                        SpaceSidebarToken::Branch | SpaceSidebarToken::GitStatus => None,
                         SpaceSidebarToken::Custom(name) => context
                             .tokens
                             .get(name)
@@ -179,7 +208,10 @@ pub(crate) fn space_rows(
 
 pub(crate) fn separator(previous: &ResolvedToken, current: &ResolvedToken) -> &'static str {
     if matches!(previous.kind, ResolvedTokenKind::StateIcon)
-        || matches!(current.kind, ResolvedTokenKind::GitStatus { .. })
+        || matches!(
+            current.kind,
+            ResolvedTokenKind::GitStatus { .. } | ResolvedTokenKind::GitDirty(_)
+        )
     {
         " "
     } else {
@@ -226,6 +258,7 @@ mod tests {
             terminal_title: entry.terminal_title.as_deref(),
             terminal_title_stripped: entry.terminal_title_stripped.as_deref(),
             canonical_agent: entry.canonical_agent,
+            repo: RepoTokenContext::default(),
             tokens: &entry.tokens,
         }
     }
@@ -327,10 +360,7 @@ rows = [[{ token = "$load", rules = [{ lt = 50, dim = true }] }]]
                 &config.spaces,
                 SpaceTokenContext {
                     workspace: "repo",
-                    branch: None,
                     state_text: "working",
-                    ahead_behind: None,
-                    suppress_git_details: false,
                     tokens: &entry.tokens,
                 },
             );
@@ -376,10 +406,7 @@ rows = [[{ token = "$load", rules = [{ lt = 50, hide = true }] }], ["workspace"]
                 &config.spaces,
                 SpaceTokenContext {
                     workspace: "repo",
-                    branch: None,
                     state_text: "working",
-                    ahead_behind: None,
-                    suppress_git_details: false,
                     tokens: &entry.tokens,
                 },
             );
@@ -537,19 +564,22 @@ rows = [[{ token = "$load", rules = [{ lt = 50, hide = true }] }], ["workspace"]
     }
 
     #[test]
-    fn grouped_children_suppress_all_builtin_git_details() {
-        let config = SpacesSidebarConfig::default();
+    fn space_rows_never_show_repo_tokens() {
+        let config = SpacesSidebarConfig {
+            rows: vec![
+                vec![SpaceSidebarToken::StateIcon, SpaceSidebarToken::Workspace],
+                vec![SpaceSidebarToken::Branch, SpaceSidebarToken::GitStatus],
+            ],
+            ..Default::default()
+        };
 
         assert_eq!(
             space_rows(
                 &config,
                 SpaceTokenContext {
                     workspace: "feature",
-                    branch: Some("worktree/feature"),
                     state_text: "idle",
-                    ahead_behind: Some((2, 1)),
                     tokens: &std::collections::HashMap::new(),
-                    suppress_git_details: true,
                 },
             ),
             vec![vec![
@@ -557,6 +587,51 @@ rows = [[{ token = "$load", rules = [{ lt = 50, hide = true }] }], ["workspace"]
                 ResolvedToken::unstyled(ResolvedTokenKind::Workspace("feature".into())),
             ]]
         );
+    }
+
+    #[test]
+    fn agent_repo_tokens_show_known_facts_and_hide_clean_or_missing_ones() {
+        let config: AgentsSidebarConfig =
+            toml::from_str(r#"rows = [["repo", "branch", "git_status", "git_dirty", "worktree"]]"#)
+                .unwrap();
+        let entry = entry();
+        let mut context = context(&entry);
+        context.repo = RepoTokenContext {
+            repo: Some("herdr"),
+            branch: Some("fork/016"),
+            ahead_behind: Some((2, 0)),
+            dirty: Some(3),
+            worktree: Some("repo-facts"),
+        };
+
+        assert_eq!(
+            agent_rows(&config, context, "idle"),
+            vec![vec![
+                ResolvedToken::unstyled(ResolvedTokenKind::Repo("herdr".into())),
+                ResolvedToken::unstyled(ResolvedTokenKind::Branch("fork/016".into())),
+                ResolvedToken::unstyled(ResolvedTokenKind::GitStatus {
+                    ahead: 2,
+                    behind: 0
+                }),
+                ResolvedToken::unstyled(ResolvedTokenKind::GitDirty(3)),
+                ResolvedToken::unstyled(ResolvedTokenKind::Worktree("repo-facts".into())),
+            ]]
+        );
+
+        let mut context = self::context(&entry);
+        context.repo = RepoTokenContext {
+            repo: Some("herdr"),
+            ahead_behind: Some((0, 0)),
+            dirty: Some(0),
+            ..Default::default()
+        };
+        assert_eq!(
+            agent_rows(&config, context, "idle"),
+            vec![vec![ResolvedToken::unstyled(ResolvedTokenKind::Repo(
+                "herdr".into()
+            ))]]
+        );
+        assert!(agent_rows(&config, self::context(&entry), "idle").is_empty());
     }
 
     #[test]
@@ -572,11 +647,8 @@ rows = [[{ token = "$load", rules = [{ lt = 50, hide = true }] }], ["workspace"]
                 &config,
                 SpaceTokenContext {
                     workspace: "repo",
-                    branch: None,
                     state_text: "idle",
-                    ahead_behind: None,
                     tokens: &tokens,
-                    suppress_git_details: false,
                 },
             ),
             vec![vec![ResolvedToken::unstyled(ResolvedTokenKind::Custom(

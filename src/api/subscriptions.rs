@@ -163,6 +163,10 @@ impl ActiveSubscription {
                 Ok(event_subscription(EventKind::PaneAgentDetected))
             }
             Subscription::LayoutUpdated {} => Ok(event_subscription(EventKind::LayoutUpdated)),
+            Subscription::MessageQueued {} => Ok(event_subscription(EventKind::MessageQueued)),
+            Subscription::MessageDelivered {} => {
+                Ok(event_subscription(EventKind::MessageDelivered))
+            }
             Subscription::PaneOutputMatched {
                 pane_id,
                 source,
@@ -704,6 +708,7 @@ mod tests {
 
     fn pane_info_with_scroll(scroll: Option<PaneScrollInfo>) -> PaneInfo {
         PaneInfo {
+            repo: None,
             blocked_reason: None,
             pane_id: "pane_1".into(),
             terminal_id: "terminal_1".into(),

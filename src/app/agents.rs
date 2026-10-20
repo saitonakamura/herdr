@@ -411,6 +411,7 @@ impl App {
             parent_agent_id: pane.parent_agent_id,
             launch_args: pane.launch_args,
             agent_home: pane.agent_home,
+            repo: pane.repo,
             workspace_id: pane.workspace_id,
             tab_id: pane.tab_id,
             pane_id: pane.pane_id,

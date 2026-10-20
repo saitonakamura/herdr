@@ -62,6 +62,12 @@ impl App {
                 changed.push(terminal_id.clone());
             }
         }
+        let dropped = self.state.messages.retain_recipients(&live);
+        if dropped > 0 {
+            tracing::info!(dropped, "dropped messages to agents that are gone");
+            self.state.mark_session_dirty();
+            self.schedule_session_save();
+        }
         if changed.is_empty() {
             return;
         }

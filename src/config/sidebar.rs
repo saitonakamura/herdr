@@ -115,6 +115,15 @@ pub enum AgentSidebarToken {
     Agent,
     TerminalTitle,
     TerminalTitleStripped,
+    /// The repo of the pane's checkout.
+    Repo,
+    Branch,
+    /// Ahead/behind its upstream.
+    GitStatus,
+    /// Changed paths in the checkout.
+    GitDirty,
+    /// The checkout's directory, shown only for a linked worktree.
+    Worktree,
     Custom(String),
     Styled {
         token: Box<AgentSidebarToken>,
@@ -128,6 +137,8 @@ pub enum SpaceSidebarToken {
     StateIcon,
     StateText,
     Workspace,
+    /// Parsed so upstream configs load, but renders nothing: repo facts belong
+    /// to panes, so `branch` and `git_status` are agent-row tokens.
     Branch,
     GitStatus,
     Custom(String),
@@ -200,7 +211,10 @@ impl RawSidebarToken {
                     return Err("sidebar tokens may contain at most 16 rules".into());
                 }
                 if !token.rules.is_empty()
-                    && matches!(token.token.as_str(), "state_icon" | "git_status")
+                    && matches!(
+                        token.token.as_str(),
+                        "state_icon" | "git_status" | "git_dirty"
+                    )
                 {
                     return Err("sidebar rules require a text-valued token".into());
                 }
@@ -279,6 +293,11 @@ fn agent_token_name(token: &AgentSidebarToken) -> String {
         AgentSidebarToken::Agent => "agent".into(),
         AgentSidebarToken::TerminalTitle => "terminal_title".into(),
         AgentSidebarToken::TerminalTitleStripped => "terminal_title_stripped".into(),
+        AgentSidebarToken::Repo => "repo".into(),
+        AgentSidebarToken::Branch => "branch".into(),
+        AgentSidebarToken::GitStatus => "git_status".into(),
+        AgentSidebarToken::GitDirty => "git_dirty".into(),
+        AgentSidebarToken::Worktree => "worktree".into(),
         AgentSidebarToken::Custom(name) => format!("${name}"),
         AgentSidebarToken::Styled { token, .. } => agent_token_name(token),
     }
@@ -338,6 +357,11 @@ impl<'de> Deserialize<'de> for AgentSidebarToken {
                 ("agent", Self::Agent),
                 ("terminal_title", Self::TerminalTitle),
                 ("terminal_title_stripped", Self::TerminalTitleStripped),
+                ("repo", Self::Repo),
+                ("branch", Self::Branch),
+                ("git_status", Self::GitStatus),
+                ("git_dirty", Self::GitDirty),
+                ("worktree", Self::Worktree),
             ],
         )
         .map_err(serde::de::Error::custom)?;
@@ -447,7 +471,11 @@ impl Default for AgentsSidebarConfig {
                     AgentSidebarToken::Workspace,
                     AgentSidebarToken::Tab,
                 ],
-                vec![AgentSidebarToken::Agent],
+                vec![
+                    AgentSidebarToken::Agent,
+                    AgentSidebarToken::Branch,
+                    AgentSidebarToken::GitStatus,
+                ],
             ],
             rows_by_agent: BTreeMap::new(),
             row_gap: DEFAULT_SIDEBAR_ROW_GAP,
@@ -466,10 +494,10 @@ pub struct SpacesSidebarConfig {
 impl Default for SpacesSidebarConfig {
     fn default() -> Self {
         Self {
-            rows: vec![
-                vec![SpaceSidebarToken::StateIcon, SpaceSidebarToken::Workspace],
-                vec![SpaceSidebarToken::Branch, SpaceSidebarToken::GitStatus],
-            ],
+            rows: vec![vec![
+                SpaceSidebarToken::StateIcon,
+                SpaceSidebarToken::Workspace,
+            ]],
             row_gap: DEFAULT_SIDEBAR_ROW_GAP,
         }
     }
@@ -482,12 +510,32 @@ pub struct SidebarConfig {
     pub spaces: SpacesSidebarConfig,
 }
 
+impl SpacesSidebarConfig {
+    /// `branch` and `git_status` still parse in space rows, but show nothing there.
+    pub(crate) fn repo_token_diagnostic(&self) -> Option<String> {
+        self.rows
+            .iter()
+            .flatten()
+            .any(|token| {
+                matches!(
+                    token.parts().0,
+                    SpaceSidebarToken::Branch | SpaceSidebarToken::GitStatus
+                )
+            })
+            .then(|| {
+                "ui.sidebar.spaces rows: branch and git_status show nothing on a workspace row; \
+                 repo facts belong to panes, so put them in ui.sidebar.agents rows"
+                    .to_string()
+            })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn defaults_match_the_compact_agent_and_existing_space_layouts() {
+    fn defaults_put_repo_facts_on_agent_rows_and_keep_space_rows_to_name_and_state() {
         let config = SidebarConfig::default();
         assert_eq!(
             config.agents.rows,
@@ -498,19 +546,57 @@ mod tests {
                     AgentSidebarToken::Workspace,
                     AgentSidebarToken::Tab,
                 ],
-                vec![AgentSidebarToken::Agent],
+                vec![
+                    AgentSidebarToken::Agent,
+                    AgentSidebarToken::Branch,
+                    AgentSidebarToken::GitStatus,
+                ],
             ]
         );
         assert!(config.agents.rows_by_agent.is_empty());
         assert_eq!(config.agents.row_gap, 0);
         assert_eq!(
             config.spaces.rows,
-            vec![
-                vec![SpaceSidebarToken::StateIcon, SpaceSidebarToken::Workspace],
-                vec![SpaceSidebarToken::Branch, SpaceSidebarToken::GitStatus],
-            ]
+            vec![vec![
+                SpaceSidebarToken::StateIcon,
+                SpaceSidebarToken::Workspace
+            ]]
         );
         assert_eq!(config.spaces.row_gap, 0);
+    }
+
+    #[test]
+    fn repo_tokens_parse_on_agent_rows_and_are_flagged_on_space_rows() {
+        let config: crate::config::Config = toml::from_str(
+            r##"
+[ui.sidebar.agents]
+rows = [["repo", "branch", "git_status", "git_dirty", "worktree"]]
+[ui.sidebar.spaces]
+rows = [["workspace"], ["branch", { token = "git_status", fg = "#fff" }]]
+"##,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.ui.sidebar.agents.rows[0],
+            vec![
+                AgentSidebarToken::Repo,
+                AgentSidebarToken::Branch,
+                AgentSidebarToken::GitStatus,
+                AgentSidebarToken::GitDirty,
+                AgentSidebarToken::Worktree,
+            ]
+        );
+        assert!(config.ui.sidebar.spaces.repo_token_diagnostic().is_some());
+        assert!(config
+            .collect_diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.starts_with("ui.sidebar.spaces rows")));
+        assert_eq!(SpacesSidebarConfig::default().repo_token_diagnostic(), None);
+        assert!(toml::from_str::<AgentsSidebarConfig>(
+            r##"rows = [[{ token = "git_dirty", rules = [{ equals = "1", fg = "#fff" }] }]]"##
+        )
+        .is_err());
     }
 
     #[test]

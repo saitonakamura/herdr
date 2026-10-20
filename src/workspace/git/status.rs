@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use crate::workspace::{GitSpaceMetadata, WorkspaceGitStatusSnapshot};
+use crate::workspace::GitSpaceMetadata;
 
 use super::{
     config::{deps_current, read_config, stamp, upstream_full_ref, ConfigCtx, FileDep},
@@ -13,10 +13,16 @@ use super::{
     },
 };
 
+/// How often a checkout's working tree is rescanned while its HEAD stays put.
+const DIRTY_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct GitStatusRefreshDemand {
     pub branch: bool,
     pub ahead_behind: bool,
+    /// Count changed paths with `git status`; the only fact that spawns a
+    /// process on every refresh, so only while something displays it.
+    pub dirty: bool,
 }
 
 impl GitStatusRefreshDemand {
@@ -24,18 +30,32 @@ impl GitStatusRefreshDemand {
     pub const ALL: Self = Self {
         branch: true,
         ahead_behind: true,
+        dirty: true,
     };
 
     pub fn is_empty(self) -> bool {
-        !self.branch && !self.ahead_behind
+        !self.branch && !self.ahead_behind && !self.dirty
     }
+}
+
+/// Repo facts for one checkout, computed off the main thread.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitStatusSnapshot {
+    pub auto_label: String,
+    pub branch: Option<String>,
+    pub ahead_behind: Option<(usize, usize)>,
+    /// Changed paths (staged, unstaged and untracked); `None` when not demanded.
+    pub dirty: Option<usize>,
+    pub space: Option<GitSpaceMetadata>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitStatusCacheEntry {
     pub fingerprint: Option<GitStatusFingerprint>,
     pub retry_after: Option<Instant>,
-    pub snapshot: WorkspaceGitStatusSnapshot,
+    /// When `snapshot.dirty` was last counted.
+    pub dirty_checked_at: Option<Instant>,
+    pub snapshot: GitStatusSnapshot,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -85,15 +105,11 @@ pub fn git_status_cache_key(cwd: &Path) -> Option<PathBuf> {
     git_worktree_info(cwd).map(|info| canonicalize_best_effort_path(&info.repo_root))
 }
 
-pub fn git_status_cache_key_for_space(space: &GitSpaceMetadata) -> PathBuf {
-    canonicalize_best_effort_path(&space.repo_root)
-}
-
 #[cfg(test)]
 pub fn git_status_snapshot_for_cwd(
     cwd: &Path,
     cached: Option<&GitStatusCacheEntry>,
-) -> (WorkspaceGitStatusSnapshot, Option<GitStatusCacheEntry>) {
+) -> (GitStatusSnapshot, Option<GitStatusCacheEntry>) {
     git_status_snapshot_for_cwd_with_demand(cwd, cached, GitStatusRefreshDemand::ALL)
 }
 
@@ -101,7 +117,72 @@ pub fn git_status_snapshot_for_cwd_with_demand(
     cwd: &Path,
     cached: Option<&GitStatusCacheEntry>,
     demand: GitStatusRefreshDemand,
-) -> (WorkspaceGitStatusSnapshot, Option<GitStatusCacheEntry>) {
+) -> (GitStatusSnapshot, Option<GitStatusCacheEntry>) {
+    let (snapshot, entry) = git_status_snapshot_without_dirty(cwd, cached, demand);
+    if !demand.dirty {
+        return (snapshot, entry);
+    }
+    with_dirty_count(cwd, cached, snapshot, entry)
+}
+
+/// Adds the changed-path count, reusing the cached one while HEAD and upstream
+/// are unchanged and the count is younger than `DIRTY_REFRESH_INTERVAL`.
+fn with_dirty_count(
+    cwd: &Path,
+    cached: Option<&GitStatusCacheEntry>,
+    mut snapshot: GitStatusSnapshot,
+    entry: Option<GitStatusCacheEntry>,
+) -> (GitStatusSnapshot, Option<GitStatusCacheEntry>) {
+    let Some(mut entry) = entry else {
+        return (snapshot, None);
+    };
+    if entry.fingerprint.is_none() {
+        return (snapshot, Some(entry));
+    }
+    let now = Instant::now();
+    let reusable = cached.filter(|cached| {
+        cached.fingerprint == entry.fingerprint
+            && cached
+                .dirty_checked_at
+                .is_some_and(|at| now.saturating_duration_since(at) < DIRTY_REFRESH_INTERVAL)
+    });
+    if let Some(cached) = reusable {
+        snapshot.dirty = cached.snapshot.dirty;
+        entry.dirty_checked_at = cached.dirty_checked_at;
+    } else {
+        snapshot.dirty = git_dirty_count(cwd);
+        entry.dirty_checked_at = Some(now);
+    }
+    entry.snapshot = snapshot.clone();
+    (snapshot, Some(entry))
+}
+
+fn git_dirty_count(cwd: &Path) -> Option<usize> {
+    // --no-optional-locks: never take index.lock under an agent's own git commands.
+    let output = crate::noninteractive_process::command("git")
+        .arg("--no-optional-locks")
+        .arg("-C")
+        .arg(cwd)
+        .args(["status", "--porcelain", "--untracked-files=normal"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(
+        output
+            .stdout
+            .split(|byte| *byte == b'\n')
+            .filter(|line| !line.is_empty())
+            .count(),
+    )
+}
+
+fn git_status_snapshot_without_dirty(
+    cwd: &Path,
+    cached: Option<&GitStatusCacheEntry>,
+    demand: GitStatusRefreshDemand,
+) -> (GitStatusSnapshot, Option<GitStatusCacheEntry>) {
     if let Some(cached) = cached.filter(|entry| {
         entry.fingerprint.is_none()
             && entry
@@ -117,10 +198,11 @@ pub fn git_status_snapshot_for_cwd_with_demand(
         .filter(|context| deps_current(&context.2))
         .or_else(|| repo_context(cwd));
     let Some(repository_context) = repository_context else {
-        let snapshot = WorkspaceGitStatusSnapshot {
+        let snapshot = GitStatusSnapshot {
             auto_label: fallback_label_from_cwd(cwd),
             branch: None,
             ahead_behind: None,
+            dirty: None,
             space: None,
         };
         return (
@@ -128,6 +210,7 @@ pub fn git_status_snapshot_for_cwd_with_demand(
             Some(GitStatusCacheEntry {
                 fingerprint: None,
                 retry_after: Some(Instant::now() + Duration::from_secs(30)),
+                dirty_checked_at: None,
                 snapshot,
             }),
         );
@@ -142,10 +225,11 @@ pub fn git_status_snapshot_for_cwd_with_demand(
             .then(|| fingerprint.as_ref()?.branch_name())
             .flatten()
             .map(str::to_string);
-        let snapshot = WorkspaceGitStatusSnapshot {
+        let snapshot = GitStatusSnapshot {
             auto_label,
             branch,
             ahead_behind: None,
+            dirty: None,
             space: Some(space),
         };
         return (
@@ -153,6 +237,7 @@ pub fn git_status_snapshot_for_cwd_with_demand(
             fingerprint.map(|fingerprint| GitStatusCacheEntry {
                 fingerprint: Some(fingerprint),
                 retry_after: None,
+                dirty_checked_at: None,
                 snapshot,
             }),
         );
@@ -160,10 +245,11 @@ pub fn git_status_snapshot_for_cwd_with_demand(
 
     let Some(fingerprint) = fingerprint(repository_context, true) else {
         return (
-            WorkspaceGitStatusSnapshot {
+            GitStatusSnapshot {
                 auto_label,
                 branch: None,
                 ahead_behind: None,
+                dirty: None,
                 space: Some(space),
             },
             None,
@@ -172,10 +258,11 @@ pub fn git_status_snapshot_for_cwd_with_demand(
     let branch = fingerprint.branch_name().map(str::to_string);
 
     if let Some(cached) = cached.filter(|entry| entry.fingerprint.as_ref() == Some(&fingerprint)) {
-        let snapshot = WorkspaceGitStatusSnapshot {
+        let snapshot = GitStatusSnapshot {
             auto_label,
             branch,
             ahead_behind: cached.snapshot.ahead_behind,
+            dirty: None,
             space: Some(space),
         };
         return (
@@ -183,6 +270,7 @@ pub fn git_status_snapshot_for_cwd_with_demand(
             Some(GitStatusCacheEntry {
                 fingerprint: Some(fingerprint),
                 retry_after: None,
+                dirty_checked_at: None,
                 snapshot,
             }),
         );
@@ -192,10 +280,11 @@ pub fn git_status_snapshot_for_cwd_with_demand(
         .head_oid()
         .zip(fingerprint.upstream_oid())
         .and_then(|(head_oid, upstream_oid)| git_ahead_behind_between(cwd, head_oid, upstream_oid));
-    let snapshot = WorkspaceGitStatusSnapshot {
+    let snapshot = GitStatusSnapshot {
         auto_label,
         branch,
         ahead_behind,
+        dirty: None,
         space: Some(space),
     };
     (
@@ -203,6 +292,7 @@ pub fn git_status_snapshot_for_cwd_with_demand(
         Some(GitStatusCacheEntry {
             fingerprint: Some(fingerprint),
             retry_after: None,
+            dirty_checked_at: None,
             snapshot,
         }),
     )
@@ -347,27 +437,65 @@ mod tests {
     use super::*;
     use crate::workspace::git::{
         git_space_metadata,
-        test_support::{run_git, temp_test_dir, write_fake_tracked_repo},
+        test_support::{init_repo_with_commit, run_git, temp_test_dir, write_fake_tracked_repo},
     };
 
-    #[cfg(target_os = "linux")]
+    const BRANCH_AND_DIRTY: GitStatusRefreshDemand = GitStatusRefreshDemand {
+        branch: true,
+        ahead_behind: false,
+        dirty: true,
+    };
+
     #[test]
-    fn cache_key_from_space_preserves_non_utf8_checkout_path() {
-        use std::os::unix::ffi::OsStringExt;
+    fn dirty_count_is_taken_only_when_demanded() {
+        let root = temp_test_dir("dirty-demand");
+        init_repo_with_commit(&root);
+        std::fs::write(root.join("untracked.txt"), "x").unwrap();
+        std::fs::write(root.join("other.txt"), "y").unwrap();
 
-        let base = temp_test_dir("non-utf8-key");
-        let root = base.join(std::ffi::OsString::from_vec(vec![
-            b'r', b'e', b'p', b'o', 0x80,
-        ]));
-        write_fake_tracked_repo(&root);
-        let space = git_space_metadata(&root).expect("Git metadata");
-
-        assert_eq!(
-            git_status_cache_key_for_space(&space),
-            std::fs::canonicalize(&root).unwrap()
+        let (without, entry) = git_status_snapshot_for_cwd_with_demand(
+            &root,
+            None,
+            GitStatusRefreshDemand {
+                dirty: false,
+                ..BRANCH_AND_DIRTY
+            },
         );
+        assert_eq!(without.dirty, None);
+        assert_eq!(entry.unwrap().dirty_checked_at, None);
 
-        std::fs::remove_dir_all(base).unwrap();
+        let (with, entry) = git_status_snapshot_for_cwd_with_demand(&root, None, BRANCH_AND_DIRTY);
+        assert_eq!(with.dirty, Some(2));
+        assert!(entry.unwrap().dirty_checked_at.is_some());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn dirty_count_is_reused_until_it_ages_or_head_moves() {
+        let root = temp_test_dir("dirty-reuse");
+        init_repo_with_commit(&root);
+        let (_, entry) = git_status_snapshot_for_cwd_with_demand(&root, None, BRANCH_AND_DIRTY);
+        let mut entry = entry.unwrap();
+        assert_eq!(entry.snapshot.dirty, Some(0));
+
+        std::fs::write(root.join("new.txt"), "x").unwrap();
+        let (reused, _) =
+            git_status_snapshot_for_cwd_with_demand(&root, Some(&entry), BRANCH_AND_DIRTY);
+        assert_eq!(reused.dirty, Some(0), "a fresh count is not rescanned");
+
+        entry.dirty_checked_at = Some(Instant::now() - DIRTY_REFRESH_INTERVAL);
+        let (aged, _) =
+            git_status_snapshot_for_cwd_with_demand(&root, Some(&entry), BRANCH_AND_DIRTY);
+        assert_eq!(aged.dirty, Some(1));
+
+        let (_, entry) = git_status_snapshot_for_cwd_with_demand(&root, None, BRANCH_AND_DIRTY);
+        let entry = entry.unwrap();
+        run_git(&root, &["add", "new.txt"]);
+        run_git(&root, &["commit", "--quiet", "-m", "add"]);
+        let (moved, _) =
+            git_status_snapshot_for_cwd_with_demand(&root, Some(&entry), BRANCH_AND_DIRTY);
+        assert_eq!(moved.dirty, Some(0), "a moved HEAD recounts at once");
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -437,6 +565,7 @@ mod tests {
             GitStatusRefreshDemand {
                 branch: true,
                 ahead_behind: false,
+                dirty: false,
             },
         );
 
@@ -455,10 +584,12 @@ mod tests {
         let cached = GitStatusCacheEntry {
             fingerprint: Some(fingerprint),
             retry_after: None,
-            snapshot: WorkspaceGitStatusSnapshot {
+            dirty_checked_at: None,
+            snapshot: GitStatusSnapshot {
                 auto_label: "repo".into(),
                 branch: Some("main".into()),
                 ahead_behind: Some((2, 1)),
+                dirty: None,
                 space: git_space_metadata(&root),
             },
         };
@@ -480,10 +611,12 @@ mod tests {
         let cached = GitStatusCacheEntry {
             fingerprint: Some(fingerprint),
             retry_after: None,
-            snapshot: WorkspaceGitStatusSnapshot {
+            dirty_checked_at: None,
+            snapshot: GitStatusSnapshot {
                 auto_label: "repo".into(),
                 branch: Some("main".into()),
                 ahead_behind: Some((4, 0)),
+                dirty: None,
                 space: git_space_metadata(&root),
             },
         };
@@ -515,10 +648,12 @@ mod tests {
         let cached = GitStatusCacheEntry {
             fingerprint: Some(fingerprint),
             retry_after: None,
-            snapshot: WorkspaceGitStatusSnapshot {
+            dirty_checked_at: None,
+            snapshot: GitStatusSnapshot {
                 auto_label: "repo".into(),
                 branch: Some("main".into()),
                 ahead_behind: Some((0, 3)),
+                dirty: None,
                 space: git_space_metadata(&root),
             },
         };

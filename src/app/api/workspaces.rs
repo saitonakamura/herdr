@@ -436,7 +436,7 @@ mod tests {
         ));
         std::fs::create_dir_all(&focused_cwd).unwrap();
         let ws = &app.state.workspaces[0];
-        let root_cwd = ws.identity_cwd.clone();
+        let root_cwd = ws.test_cwd.clone();
         let focused_pane = ws.focused_pane_id().unwrap();
         assert_ne!(focused_pane, ws.tabs[0].root_pane);
         let terminal_id = ws.terminal_id(focused_pane).cloned().unwrap();
@@ -458,7 +458,7 @@ mod tests {
             success.result,
             ResponseResult::WorkspaceCreated { .. }
         ));
-        let created_cwd = &app.state.workspaces[1].identity_cwd;
+        let created_cwd = &app.state.workspaces[1].test_cwd;
         assert_eq!(
             crate::worktree::canonical_or_original(created_cwd),
             crate::worktree::canonical_or_original(&focused_cwd)
@@ -519,7 +519,7 @@ mod tests {
             ResponseResult::WorkspaceCreated { .. }
         ));
         assert_eq!(
-            crate::worktree::canonical_or_original(&app.state.workspaces[2].identity_cwd),
+            crate::worktree::canonical_or_original(&app.state.workspaces[2].test_cwd),
             crate::worktree::canonical_or_original(&source_cwd)
         );
 
@@ -552,7 +552,7 @@ mod tests {
             ResponseResult::WorkspaceCreated { .. }
         ));
         assert_eq!(
-            crate::worktree::canonical_or_original(&app.state.workspaces[3].identity_cwd),
+            crate::worktree::canonical_or_original(&app.state.workspaces[3].test_cwd),
             crate::worktree::canonical_or_original(&source_cwd)
         );
         shutdown_test_runtimes(&mut app);

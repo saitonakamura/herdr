@@ -180,6 +180,12 @@ pub struct TerminalState {
     pub last_agent_completion_seq: Option<u64>,
     pub revision: u64,
     pub launch_argv: Option<Vec<String>>,
+    /// The `--env` the pane was created with; a restored shell gets it back.
+    pub launch_env: Vec<(String, String)>,
+    /// What `agent start` ran the agent with, reused when it is resumed.
+    pub agent_launch: Option<crate::agent_resume::AgentLaunch>,
+    /// The profile directory the agent's session was reported in.
+    pub agent_home: Option<crate::agent_resume::AgentHome>,
     pub respawn_shell_on_exit: bool,
     recent_agent_process_exit: Option<RecentAgentProcessExit>,
     agent_process_acquisition_pending: bool,
@@ -228,6 +234,9 @@ impl TerminalState {
             last_agent_completion_seq: None,
             revision: 0,
             launch_argv: None,
+            launch_env: Vec::new(),
+            agent_launch: None,
+            agent_home: None,
             respawn_shell_on_exit: false,
             recent_agent_process_exit: None,
             agent_process_acquisition_pending: false,
@@ -330,6 +339,11 @@ impl TerminalState {
 
     pub fn with_launch_argv(mut self, argv: Vec<String>) -> Self {
         self.launch_argv = Some(argv);
+        self
+    }
+
+    pub fn with_launch_env(mut self, env: Vec<(String, String)>) -> Self {
+        self.launch_env = env;
         self
     }
 

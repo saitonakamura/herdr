@@ -1569,6 +1569,11 @@ impl App {
         let report_is_newer = self
             .pane_terminal(ws_idx, pane_id)
             .is_some_and(|terminal| terminal.hook_report_is_newer(&params.source, params.seq));
+        let agent_home = params.agent_session_path.as_deref().and_then(|path| {
+            crate::agent_resume::is_official_agent_source(&params.source, &agent_label)
+                .then(|| crate::agent_resume::agent_home_from_session_path(&agent_label, path))
+                .flatten()
+        });
         let session_ref = crate::agent_resume::session_ref_from_report(
             &params.source,
             &agent_label,
@@ -1590,6 +1595,9 @@ impl App {
         });
         let applied =
             report_is_newer && self.session_report_applied(ws_idx, pane_id, session_ref.as_ref());
+        if applied {
+            self.record_agent_home(ws_idx, pane_id, agent_home);
+        }
         self.report_agent_resume(
             id,
             ws_idx,
@@ -1618,6 +1626,11 @@ impl App {
         let report_is_newer = self
             .pane_terminal(ws_idx, pane_id)
             .is_some_and(|terminal| terminal.hook_report_is_newer(&params.source, params.seq));
+        let agent_home = params.agent_session_path.as_deref().and_then(|path| {
+            crate::agent_resume::is_official_agent_source(&params.source, &agent_label)
+                .then(|| crate::agent_resume::agent_home_from_session_path(&agent_label, path))
+                .flatten()
+        });
         let session_ref = crate::agent_resume::session_ref_from_report(
             &params.source,
             &agent_label,
@@ -1636,6 +1649,9 @@ impl App {
         });
         let applied =
             report_is_newer && self.session_report_applied(ws_idx, pane_id, session_ref.as_ref());
+        if applied {
+            self.record_agent_home(ws_idx, pane_id, agent_home);
+        }
         self.report_agent_resume(
             id,
             ws_idx,
@@ -1659,6 +1675,35 @@ impl App {
             self.pane_terminal(ws_idx, pane_id)
                 .is_some_and(|terminal| terminal.session_ref_is_current(session_ref))
         })
+    }
+
+    /// The session's profile directory follows each accepted session report.
+    fn record_agent_home(
+        &mut self,
+        ws_idx: usize,
+        pane_id: crate::layout::PaneId,
+        home: Option<crate::agent_resume::AgentHome>,
+    ) {
+        let Some(home) = home else {
+            return;
+        };
+        let Some(terminal_id) = self
+            .state
+            .workspaces
+            .get(ws_idx)
+            .and_then(|workspace| workspace.pane_state(pane_id))
+            .map(|pane| pane.attached_terminal_id.clone())
+        else {
+            return;
+        };
+        let Some(terminal) = self.state.terminals.get_mut(&terminal_id) else {
+            return;
+        };
+        if terminal.agent_home.as_ref() != Some(&home) {
+            terminal.agent_home = Some(home);
+            self.state.mark_session_dirty();
+            self.schedule_session_save();
+        }
     }
 
     fn pane_terminal(

@@ -544,6 +544,13 @@ pub struct PaneInfo {
     /// The agent that started this one; absent for a top-level agent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_agent_id: Option<String>,
+    /// Args the agent was started with through Herdr; a resume reuses them,
+    /// minus those that select a session or run headless.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch_args: Option<Vec<String>>,
+    /// Profile directory the agent's session is written to; a resume selects it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_home: Option<String>,
     /// What the agent last said about its brief.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_status: Option<super::agents::TaskStatus>,

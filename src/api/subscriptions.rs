@@ -730,6 +730,8 @@ mod tests {
             agent_session: None,
             agent_id: None,
             parent_agent_id: None,
+            launch_args: None,
+            agent_home: None,
             task_status: None,
             scroll,
             revision: 0,

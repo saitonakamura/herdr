@@ -911,6 +911,13 @@
                 "null"
               ]
             },
+            "agent_home": {
+              "description": "Profile directory the agent's session is written to; a resume selects it.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "agent_id": {
               "description": "Stable agent identity; survives session changes, pane moves and server restarts.",
               "type": [
@@ -965,6 +972,16 @@
             "label": {
               "type": [
                 "string",
+                "null"
+              ]
+            },
+            "launch_args": {
+              "description": "Args the agent was started with through Herdr; a resume reuses them,\nminus those that select a session or run headless.",
+              "items": {
+                "type": "string"
+              },
+              "type": [
+                "array",
                 "null"
               ]
             },
@@ -1654,6 +1671,31 @@
           "required": [
             "target",
             "keys"
+          ],
+          "type": "object"
+        },
+        "AgentSetArgsParams": {
+          "properties": {
+            "args": {
+              "default": [],
+              "description": "Replaces the args a resume starts the agent with.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "description": "Agent kind the args are for, such as claude, codex or pi.",
+              "type": "string"
+            },
+            "target": {
+              "description": "Agent id, agent name, or pane id.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "target",
+            "kind"
           ],
           "type": "object"
         },
@@ -5859,6 +5901,22 @@
         {
           "properties": {
             "method": {
+              "const": "agent.set_args",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/AgentSetArgsParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "agent.view.set",
               "type": "string"
             },
@@ -7201,6 +7259,13 @@
                 "null"
               ]
             },
+            "agent_home": {
+              "description": "Profile directory the agent's session is written to; a resume selects it.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "agent_id": {
               "description": "Stable agent identity; survives session changes, pane moves and server restarts.",
               "type": [
@@ -7263,6 +7328,16 @@
             },
             "interactive_ready": {
               "type": "boolean"
+            },
+            "launch_args": {
+              "description": "Args the agent was started with through Herdr; a resume reuses them,\nminus those that select a session or run headless.",
+              "items": {
+                "type": "string"
+              },
+              "type": [
+                "array",
+                "null"
+              ]
             },
             "launch_pending": {
               "type": "boolean"
@@ -8744,6 +8819,13 @@
                 "null"
               ]
             },
+            "agent_home": {
+              "description": "Profile directory the agent's session is written to; a resume selects it.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "agent_id": {
               "description": "Stable agent identity; survives session changes, pane moves and server restarts.",
               "type": [
@@ -8798,6 +8880,16 @@
             "label": {
               "type": [
                 "string",
+                "null"
+              ]
+            },
+            "launch_args": {
+              "description": "Args the agent was started with through Herdr; a resume reuses them,\nminus those that select a session or run headless.",
+              "items": {
+                "type": "string"
+              },
+              "type": [
+                "array",
                 "null"
               ]
             },
@@ -11451,6 +11543,11 @@
         },
         "ServerCapabilities": {
           "properties": {
+            "agent_launch_resume": {
+              "default": false,
+              "description": "Resumes a restored agent with its `agent start` args, its pane's `--env`\nand its session's profile directory.",
+              "type": "boolean"
+            },
             "agent_task_status": {
               "default": false,
               "description": "Keeps a task status per agent (`agent.set_task_status`) and closes subtrees (`agent.close`).",

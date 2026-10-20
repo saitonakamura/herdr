@@ -112,6 +112,14 @@ Run `herdr integration status` to check installed integration versions. Reinstal
 
 Unsupported, missing, invalid, duplicated, or stale session references restore as normal shells in the saved pane directory.
 
+A resumed agent starts the way it was first started:
+
+- **Args.** The args after `--` in `herdr agent start` are added after the resume command, minus those that select a session, fork one, run headless or name a prompt ahead of the first flag. This applies to Claude Code, Codex and Pi, whose flags Herdr knows; other agents resume without them. Replace the stored args with `herdr agent set-args`, for example after changing the model in the agent itself.
+- **Environment.** The `--env` given to `workspace create`, `tab create` or `pane split` is set again in the restored pane's shell.
+- **Profile directory.** Claude Code and Codex sessions live in one profile directory (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`), which the pane's own directory environment may not select. Herdr records the directory each session is reported in and resumes it there. Codex needs integration version `11` for this.
+
+A resume command reported by the agent itself is run as reported, without these.
+
 If native agent session restore applies to a pane, Herdr resumes the agent session instead of replaying saved pane history for that pane.
 
 ## Live handoff

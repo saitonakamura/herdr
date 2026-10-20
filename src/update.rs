@@ -3094,6 +3094,7 @@ mod tests {
                 health_check: true,
                 ssh_agent_registration: false,
                 worktree_post_create: false,
+                agent_launch_resume: false,
                 agent_task_status: false,
             }),
         };
@@ -3171,6 +3172,7 @@ mod tests {
                     health_check: true,
                     ssh_agent_registration: false,
                     worktree_post_create: false,
+                    agent_launch_resume: false,
                     agent_task_status: false,
                 }),
             },
@@ -3432,6 +3434,7 @@ mod tests {
                     health_check: true,
                     ssh_agent_registration: false,
                     worktree_post_create: false,
+                    agent_launch_resume: false,
                     agent_task_status: false,
                 }),
             },

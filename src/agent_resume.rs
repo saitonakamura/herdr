@@ -25,6 +25,25 @@ pub struct AgentResumePlan {
     pub agent: String,
     pub argv: Vec<String>,
     pub dedupe_key: String,
+    /// Set (`Some`) or removed (`None`) for the resumed command only, after the
+    /// shell's own startup, so a directory's environment cannot override it.
+    pub env: Vec<(String, Option<String>)>,
+}
+
+/// The arguments an agent was started with, kept so a resume starts it the same way.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentLaunch {
+    pub agent: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<String>,
+}
+
+/// The profile directory an agent's session is written to, which the
+/// directory's own environment may not select on a resume.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentHome {
+    pub agent: String,
+    pub path: String,
 }
 
 /// A resume command reported by the agent itself, run in the restored pane.
@@ -49,6 +68,7 @@ impl ReportedAgentResume {
                 cwd.display(),
                 self.argv.join("\u{0}")
             ),
+            env: Vec::new(),
         }
     }
 }
@@ -314,7 +334,150 @@ pub fn plan(source: &str, agent: &str, session_ref: &AgentSessionRef) -> Option<
         agent: agent.to_string(),
         argv,
         dedupe_key: dedupe_key(source, agent, session_ref),
+        env: Vec::new(),
     })
+}
+
+impl AgentResumePlan {
+    /// Resumes with the agent's own start arguments and profile directory.
+    /// Only agents whose session-selecting flags are known get their arguments
+    /// back, so a resume never also asks for another session.
+    pub fn with_launch(
+        mut self,
+        launch: Option<&AgentLaunch>,
+        home: Option<&AgentHome>,
+        user_home: Option<&Path>,
+    ) -> Self {
+        if let Some(args) = launch
+            .filter(|launch| launch.agent == self.agent)
+            .and_then(|launch| resume_args(&launch.agent, &launch.args))
+        {
+            self.argv.extend(args);
+        }
+        if let Some(entry) = home
+            .filter(|home| home.agent == self.agent)
+            .and_then(|home| home_env(home, user_home))
+        {
+            self.env.push(entry);
+        }
+        self
+    }
+}
+
+/// The start arguments a resume keeps: everything except what selects or forks
+/// a session, runs headless, or names a prompt or subcommand ahead of the first
+/// flag. `None` when the agent's flags are not known.
+pub fn resume_args(agent: &str, args: &[String]) -> Option<Vec<String>> {
+    // Per agent, because a flag means different things: `-c` is claude's
+    // continue and codex's config, `-p` claude's print and codex's profile.
+    let (valued, bare): (&[&str], &[&str]) = match agent {
+        "claude" => (
+            &["--session-id", "--resume", "-r"],
+            &["--continue", "-c", "--fork-session", "-p", "--print"],
+        ),
+        "codex" => (&["--image", "-i"], &["--worktree"]),
+        "pi" => (
+            &[
+                "--session",
+                "--session-id",
+                "--fork",
+                "--export",
+                "--mode",
+                "--name",
+                "-n",
+            ],
+            &[
+                "--continue",
+                "-c",
+                "--resume",
+                "-r",
+                "--no-session",
+                "--print",
+                "-p",
+            ],
+        ),
+        _ => return None,
+    };
+    let mut kept = Vec::new();
+    let mut args = args
+        .iter()
+        .skip_while(|arg| !arg.starts_with('-'))
+        .peekable();
+    while let Some(arg) = args.next() {
+        if !arg.starts_with('-') {
+            kept.push(arg.clone());
+            continue;
+        }
+        let (flag, inline_value) = match arg.split_once('=') {
+            Some((flag, _)) => (flag, true),
+            None => (arg.as_str(), false),
+        };
+        if valued.contains(&flag) {
+            if !inline_value && args.peek().is_some_and(|next| !next.starts_with('-')) {
+                args.next();
+            }
+        } else if !bare.contains(&flag) {
+            kept.push(arg.clone());
+        }
+    }
+    Some(kept)
+}
+
+pub fn home_env_var(agent: &str) -> Option<&'static str> {
+    match agent {
+        "claude" => Some("CLAUDE_CONFIG_DIR"),
+        "codex" => Some("CODEX_HOME"),
+        _ => None,
+    }
+}
+
+fn default_home_dir(agent: &str) -> Option<&'static str> {
+    match agent {
+        "claude" => Some(".claude"),
+        "codex" => Some(".codex"),
+        _ => None,
+    }
+}
+
+/// The profile directory a session file lives in: claude writes
+/// `<home>/projects/<project>/<id>.jsonl`, codex
+/// `<home>/sessions/<year>/<month>/<day>/rollout-<...>.jsonl`.
+pub fn agent_home_from_session_path(agent: &str, session_path: &str) -> Option<AgentHome> {
+    let path = Path::new(session_path);
+    if !valid_session_path(session_path) {
+        return None;
+    }
+    let (marker, depth) = match agent {
+        "claude" => ("projects", 2),
+        "codex" => ("sessions", 4),
+        _ => return None,
+    };
+    let marker_dir = path.ancestors().nth(depth)?;
+    if marker_dir.file_name()? != marker {
+        return None;
+    }
+    Some(AgentHome {
+        agent: agent.to_string(),
+        path: marker_dir.parent()?.to_str()?.to_string(),
+    })
+}
+
+/// The variable that selects the session's profile: the recorded directory,
+/// or removed when that is the agent's default, which reads differently from
+/// naming the default explicitly (claude then keeps its config inside it).
+fn home_env(home: &AgentHome, user_home: Option<&Path>) -> Option<(String, Option<String>)> {
+    let var = home_env_var(&home.agent)?;
+    let is_default = user_home
+        .zip(default_home_dir(&home.agent))
+        .is_some_and(|(user_home, dir)| same_dir(Path::new(&home.path), &user_home.join(dir)));
+    Some((var.to_string(), (!is_default).then(|| home.path.clone())))
+}
+
+fn same_dir(a: &Path, b: &Path) -> bool {
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    }
 }
 
 pub fn dedupe_key(source: &str, agent: &str, session_ref: &AgentSessionRef) -> String {
@@ -401,6 +564,128 @@ mod tests {
         ] {
             assert!(validate_resume_argv(&invalid).is_err(), "{invalid:?}");
         }
+    }
+
+    #[test]
+    fn resume_args_drop_what_selects_a_session_per_agent() {
+        assert_eq!(
+            resume_args(
+                "claude",
+                &argv(&[
+                    "--model",
+                    "opus",
+                    "--resume",
+                    "old",
+                    "-c",
+                    "--session-id=x",
+                    "--effort",
+                    "high",
+                    "-p",
+                ])
+            ),
+            Some(argv(&["--model", "opus", "--effort", "high"]))
+        );
+        // codex's -c is its config and -p its profile, so both stay
+        assert_eq!(
+            resume_args(
+                "codex",
+                &argv(&[
+                    "resume",
+                    "old-id",
+                    "-c",
+                    "check_for_update_on_startup=false",
+                    "-p",
+                    "work",
+                    "-i",
+                    "shot.png",
+                    "--worktree",
+                ])
+            ),
+            Some(argv(&[
+                "-c",
+                "check_for_update_on_startup=false",
+                "-p",
+                "work"
+            ]))
+        );
+        assert_eq!(
+            resume_args(
+                "pi",
+                &argv(&["--model", "x", "--no-session", "--session", "/s.jsonl"])
+            ),
+            Some(argv(&["--model", "x"]))
+        );
+        assert_eq!(resume_args("opencode", &argv(&["--model", "x"])), None);
+    }
+
+    #[test]
+    fn agent_home_comes_from_the_session_file_layout() {
+        let home = absolute_test_path("profile");
+        let claude = format!("{home}/projects/-repo/abc.jsonl");
+        assert_eq!(
+            agent_home_from_session_path("claude", &claude).map(|home| home.path),
+            Some(home.clone())
+        );
+        let codex = format!("{home}/sessions/2026/10/16/rollout-x-abc.jsonl");
+        assert_eq!(
+            agent_home_from_session_path("codex", &codex).map(|home| home.path),
+            Some(home.clone())
+        );
+        assert!(agent_home_from_session_path("claude", &codex).is_none());
+        assert!(agent_home_from_session_path("pi", &claude).is_none());
+        assert!(agent_home_from_session_path("claude", "projects/-repo/abc.jsonl").is_none());
+    }
+
+    #[test]
+    fn resume_plan_takes_the_agents_args_and_profile() {
+        let session = AgentSessionRef::id("abc").unwrap();
+        let base = || plan("herdr:claude", "claude", &session).unwrap();
+        let launch = AgentLaunch {
+            agent: "claude".into(),
+            args: argv(&["--model", "opus", "--resume", "old"]),
+        };
+        let user_home = std::env::temp_dir().join("herdr-resume-home");
+        let other = AgentHome {
+            agent: "claude".into(),
+            path: absolute_test_path("profile-personal"),
+        };
+
+        let resumed = base().with_launch(Some(&launch), Some(&other), Some(&user_home));
+        assert_eq!(
+            resumed.argv,
+            argv(&["claude", "--resume", "abc", "--model", "opus"])
+        );
+        assert_eq!(
+            resumed.env,
+            vec![("CLAUDE_CONFIG_DIR".to_string(), Some(other.path.clone()))]
+        );
+        assert_eq!(resumed.dedupe_key, base().dedupe_key);
+
+        // the default profile is selected by leaving the variable unset
+        let default = AgentHome {
+            agent: "claude".into(),
+            path: user_home.join(".claude").display().to_string(),
+        };
+        assert_eq!(
+            base()
+                .with_launch(None, Some(&default), Some(&user_home))
+                .env,
+            vec![("CLAUDE_CONFIG_DIR".to_string(), None)]
+        );
+
+        // args and home recorded for another agent are not this session's
+        let codex_launch = AgentLaunch {
+            agent: "codex".into(),
+            args: argv(&["-c", "x=y"]),
+        };
+        let codex_home = AgentHome {
+            agent: "codex".into(),
+            path: other.path.clone(),
+        };
+        assert_eq!(
+            base().with_launch(Some(&codex_launch), Some(&codex_home), Some(&user_home)),
+            base()
+        );
     }
 
     #[test]

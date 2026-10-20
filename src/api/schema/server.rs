@@ -58,6 +58,10 @@ pub struct ServerCapabilities {
     /// Runs `[worktrees] post_create` in each new checkout before opening it.
     #[serde(default)]
     pub worktree_post_create: bool,
+    /// Resumes a restored agent with its `agent start` args, its pane's `--env`
+    /// and its session's profile directory.
+    #[serde(default)]
+    pub agent_launch_resume: bool,
     /// Keeps a task status per agent (`agent.set_task_status`) and closes subtrees (`agent.close`).
     #[serde(default)]
     pub agent_task_status: bool,

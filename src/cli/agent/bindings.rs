@@ -2,13 +2,15 @@ use clap::{ArgGroup, ArgMatches, Command};
 
 use crate::api::schema::agents::{
     AgentCloseProjection, AgentPromptProjection, AgentPromptWaitProjection, AgentReadProjection,
-    AgentRenameProjection, AgentSendKeysProjection, AgentSetParentProjection,
-    AgentSetTaskStatusProjection, AgentStartProjection, AgentWaitProjection,
+    AgentRenameProjection, AgentSendKeysProjection, AgentSetArgsProjection,
+    AgentSetParentProjection, AgentSetTaskStatusProjection, AgentStartProjection,
+    AgentWaitProjection,
 };
 use crate::api::schema::{
     AgentCloseParams, AgentPromptParams, AgentReadParams, AgentRenameParams, AgentSendKeysParams,
-    AgentSetParentParams, AgentSetTaskStatusParams, AgentStartParams, AgentStatus, AgentTarget,
-    AgentWaitParams, ReadFormat, ReadSource, TaskStatus, READ_FORMATS, READ_SOURCES,
+    AgentSetArgsParams, AgentSetParentParams, AgentSetTaskStatusParams, AgentStartParams,
+    AgentStatus, AgentTarget, AgentWaitParams, ReadFormat, ReadSource, TaskStatus, READ_FORMATS,
+    READ_SOURCES,
 };
 pub(crate) use crate::cli::projection::optional_text;
 use crate::cli::projection::{
@@ -282,6 +284,7 @@ pub(crate) enum Operation {
     Read(AgentReadParams),
     SendKeys(AgentSendKeysParams),
     Rename(AgentRenameParams),
+    SetArgs(AgentSetArgsParams),
     SetParent(AgentSetParentParams),
     SetTaskStatus(AgentSetTaskStatusParams),
     Close(AgentCloseParams),
@@ -310,6 +313,9 @@ pub(crate) fn command() -> Command {
         .subcommand(leaf("rename", AgentRenameProjection::arguments(), "Rename an agent")
             .override_usage("herdr agent rename <TARGET> <NAME>|--clear")
             .group(ArgGroup::new("rename").args(["name", "clear"]).required(true)))
+        .subcommand(leaf("set-args", AgentSetArgsProjection::arguments(), "Replace the args a resume starts an agent with")
+            .override_usage("herdr agent set-args <TARGET> --kind <KIND> [-- <AGENT_ARG>...]")
+            .after_help("TARGET is an agent id, agent name or pane id. A resume adds the args after the session it resumes, minus those that select a session or run headless. With no AGENT_ARG, the agent resumes with none."))
         .subcommand(leaf("set-parent", AgentSetParentProjection::arguments(), "Set or clear an agent's parent")
             .override_usage("herdr agent set-parent <TARGET> <PARENT>|--clear")
             .group(ArgGroup::new("set_parent").args(["parent", "clear"]).required(true))
@@ -351,6 +357,7 @@ pub(crate) fn from_matches(matches: &ArgMatches) -> Result<Operation, ParseError
         }
         "send-keys" => Operation::SendKeys(AgentSendKeysProjection::from_matches(matches)?),
         "rename" => Operation::Rename(AgentRenameProjection::from_matches(matches)?),
+        "set-args" => Operation::SetArgs(AgentSetArgsProjection::from_matches(matches)?),
         "set-parent" => Operation::SetParent(AgentSetParentProjection::from_matches(matches)?),
         "set-task-status" => {
             Operation::SetTaskStatus(AgentSetTaskStatusProjection::from_matches(matches)?)

@@ -1,7 +1,7 @@
 ---
 id: herdr-fork-worktree-as-tab
 title: A worktree opens as a tab
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
@@ -9,7 +9,7 @@ blocked_by:
   - herdr-fork-workspace-is-effort
   - herdr-fork-worktree-post-create
 assignee:
-claimed_by:
+claimed_by: macos/w1:p6/613e7272-4a71-452d-8e2e-56e0acb9081b
 ---
 
 ## Question

@@ -350,6 +350,7 @@ herdr agent send-keys <target> <key> [key ...]
 herdr agent prompt <target> <text> [--wait] [--until STATUS]... [--timeout MS]
 herdr agent rename <target> <name>|--clear
 herdr agent set-parent <target> <parent>|--clear
+herdr agent set-args <target> --kind KIND [-- <agent-args...>]
 herdr agent set-task-status <target> starting|running|needs_parent|needs_user|complete|failed|closed
 herdr agent close <target>... [--force] [--dry-run]
 herdr agent focus <target>
@@ -374,6 +375,7 @@ Every agent has a stable agent ID, shown as `agent_id` by `agent list`, `agent g
 
 An agent's parent is the agent that started it, shown as `parent_agent_id`. Set it with `agent start --parent AGENT_ID` or later with `agent set-parent`; `--clear` makes the agent top-level. `agent set-parent` accepts a pane without an agent too, giving it an agent ID. Herdr refuses a parent that is unknown, the target itself or one of its descendants. When the parent's pane closes, its children become top-level. Changes are published as `pane.updated` events.
 
+`agent start` records its args, shown as `launch_args` by `agent get` and `pane get`; a resume after a server restart reuses them (see [Session state](/docs/session-state/#native-agent-session-restore)). `agent set-args` replaces them, and works on an agent Herdr did not start too. `agent_home` shows the profile directory the agent's session was reported in.
 An agent's task status is what it says about its brief, shown as `task_status` next to the `agent_status` Herdr detects: `starting`, `running`, `needs_parent`, `needs_user`, `complete`, `failed` or `closed`. `agent start` sets `starting`; after that only `agent set-task-status` changes it, and it never changes the detected status. Like the agent ID, it survives server restarts and is published as `pane.updated`. `agent set-task-status` accepts a pane without an agent too, giving it an agent ID.
 
 `agent close` closes each target together with every descendant, deepest first. It is refused with `agent_subtree_busy`, closing nothing, while any of them is `working` or `blocked`, unless `--force`. The pane running the command (`HERDR_PANE_ID`) is never counted as busy and closes last. Closing an agent closes its pane; when that pane is the last one left in its tab or workspace, the tab or workspace goes with it, so a container closes only when the subtree owned all of it. The result lists each agent with its `scope` (`pane`, `tab` or `workspace`), and an `error` for one whose pane could not close; the rest still close. `--dry-run` returns the same list without closing anything.

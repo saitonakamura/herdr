@@ -1,14 +1,14 @@
 ---
 id: herdr-fork-resume-args-env
 title: Resume an agent with its spawn args and env
-status: in-progress
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
   - herdr-fork-agent-identity-parent
 assignee:
-claimed_by: macos/w6:pM/7477c398-abf3-46d0-8945-55619bf26ec2
+claimed_by: macos/8f9df145-aeab-4086-be38-5cfee881565a
 ---
 
 ## Question
@@ -27,8 +27,9 @@ Same change in loom: `loom resume`, most of `lib/restore.sh` and `bin/loom-sessi
 
 ## Resolution
 
-Draft, open until merged: [PR #14](https://github.com/saitonakamura/herdr/pull/14) (branch
-`fork/011-resume-args-env`) and dotfiles branch `herdr-fork/011-resume-args-env` (0efaa66).
+Merged 2026-10-20 as `8a1cd484`: [PR #14](https://github.com/saitonakamura/herdr/pull/14) (branch
+`fork/011-resume-args-env`, master merged in at 5bb70bdb) and dotfiles branch
+`herdr-fork/011-resume-args-env` (d8c7192, master merged in).
 
 - herdr stores `agent start` args (`launch_args`, replaceable with `agent set-args`), the pane's
   `--env`, and the profile dir a claude or codex session is reported in (`agent_home`), persists

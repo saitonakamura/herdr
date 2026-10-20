@@ -5,6 +5,7 @@
 
 pub(crate) mod actions;
 mod agent_identity;
+mod agent_launch;
 mod agent_resume;
 #[cfg(test)]
 mod agent_suspend_tests;

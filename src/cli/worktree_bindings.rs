@@ -119,10 +119,6 @@ mod tests {
                 serde_json::json!({"id":"cli:worktree:open","method":"worktree.open","params":{"branch":"topic","focus":false}}),
             ),
             (
-                vec!["create", "--workspace", "2", "--cwd", "/repo", "--json"],
-                serde_json::json!({"id":"cli:worktree:create","method":"worktree.create","params":{"workspace_id":"2","cwd":"/repo","focus":false}}),
-            ),
-            (
                 vec!["remove", "--workspace=2", "--json"],
                 serde_json::json!({"id":"cli:worktree:remove","method":"worktree.remove_tab","params":{"workspace_id":"2","force":false}}),
             ),
@@ -180,6 +176,24 @@ mod tests {
                 matches!(parse(&["open", "--path", "relative"]), Err(ParseError::Io(error)) if error.kind() == std::io::ErrorKind::InvalidInput && error.to_string() == "remote worktree paths must be absolute or start with ~/")
             );
         });
+    }
+
+    #[test]
+    fn worktree_projection_takes_workspace_and_cwd_together() {
+        let cwd = std::env::current_dir()
+            .unwrap()
+            .join("repo")
+            .display()
+            .to_string();
+        assert_eq!(
+            serde_json::to_value(
+                parse(&["create", "--workspace", "2", "--cwd", "repo", "--json"]).unwrap()
+            )
+            .unwrap(),
+            serde_json::json!({
+                "id":"cli:worktree:create", "method":"worktree.create", "params":{"workspace_id":"2", "cwd":cwd, "focus":false}
+            })
+        );
     }
 
     #[test]

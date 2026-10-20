@@ -1,7 +1,7 @@
 ---
 id: herdr-fork-agent-messages
 title: Messages between agents
-status: in-progress
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
@@ -9,7 +9,7 @@ blocked_by:
   - herdr-fork-agent-identity-parent
   - herdr-fork-claude-hooks-state
 assignee:
-claimed_by: macos/w6:pK/0f6c6ace-950b-4cb4-92b1-47dbae692b2b
+claimed_by: macos/0f6c6ace-950b-4cb4-92b1-47dbae692b2b
 ---
 
 ## Question
@@ -29,7 +29,7 @@ Same change in loom: `report`, `reply`, `tell` and `inbox` keep their names and 
 
 ## Resolution
 
-Draft, open until merged: [PR #15](https://github.com/saitonakamura/herdr/pull/15) (branch
+Merged 2026-10-20 as `fc1e4c0b`: [PR #15](https://github.com/saitonakamura/herdr/pull/15) (branch
 `fork/012-agent-messages`) and dotfiles branch `herdr-fork/012-agent-messages` (fe0839d).
 
 - herdr keeps a per-agent message queue (`report`, `reply`, `tell`) in session state, persisted

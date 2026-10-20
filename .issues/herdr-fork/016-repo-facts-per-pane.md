@@ -1,14 +1,14 @@
 ---
 id: herdr-fork-repo-facts-per-pane
 title: Repo facts belong to each pane
-status: in-progress
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
   - herdr-fork-workspace-is-effort
 assignee: saitonakamura
-claimed_by: macos/w6:pN/bac80b05-6698-4a2f-9636-35a71f8ca36b
+claimed_by: macos/bac80b05-6698-4a2f-9636-35a71f8ca36b
 ---
 
 ## Question
@@ -27,7 +27,7 @@ Branch, ahead/behind, git status and is-a-worktree are computed per pane from it
 
 ## Resolution
 
-Draft, open until merged: [PR #16](https://github.com/saitonakamura/herdr/pull/16) (branch
+Merged 2026-10-20 as `78691f5b`: [PR #16](https://github.com/saitonakamura/herdr/pull/16) (branch
 `fork/016-repo-facts-per-pane`) and dotfiles branch `herdr-fork/016-repo-facts-per-pane` (1665eea).
 
 - Each pane's terminal carries `repo` (checkout root, repo name, branch, ahead/behind,

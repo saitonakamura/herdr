@@ -452,6 +452,36 @@ mod tests {
         assert_eq!(agent["parent_agent_id"], parent.as_str());
     }
 
+    #[tokio::test]
+    async fn agent_start_without_a_parent_keeps_the_one_set_on_its_pane() {
+        let mut f = fixture();
+        f.detect(f.root, Agent::Claude);
+        let parent = f.pane(f.root)["agent_id"].as_str().unwrap().to_string();
+        let terminal_id = f.app.state.terminal_id_for_pane(0, f.second).unwrap();
+        let (runtime, _receiver) =
+            crate::terminal::TerminalRuntime::test_with_channel_capacity(80, 24, 4);
+        f.app.terminal_runtimes.insert(terminal_id, runtime);
+        let shell = f.public(f.second);
+        let linked = f.set_parent(&shell, Some(&parent));
+        let child = linked["result"]["pane"]["agent_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let response = f.call(Method::AgentStart(crate::api::schema::AgentStartParams {
+            name: "worker".into(),
+            kind: "pi".into(),
+            pane_id: shell,
+            args: Vec::new(),
+            parent: None,
+            timeout_ms: Some(4_000),
+        }));
+
+        let agent = &response["result"]["agent"];
+        assert_eq!(agent["agent_id"], child.as_str());
+        assert_eq!(agent["parent_agent_id"], parent.as_str());
+    }
+
     #[test]
     fn closing_the_parent_pane_makes_its_children_top_level() {
         let mut f = fixture();

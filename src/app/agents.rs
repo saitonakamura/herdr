@@ -235,7 +235,8 @@ impl App {
         }
         terminal.agent_launch = Some(launch);
         terminal.agent_home = None;
-        let identity_changed = self.assign_agent_identity(&terminal_id, Some(parent));
+        // Without --parent, keep a Parent set on the pane before the agent started in it.
+        let identity_changed = self.assign_agent_identity(&terminal_id, parent.map(Some));
         self.state.mark_session_dirty();
         self.schedule_session_save();
         if identity_changed {

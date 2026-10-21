@@ -2547,6 +2547,7 @@ mod tests {
             agent: Some(crate::detect::Agent::Codex),
             state: crate::detect::AgentState::Blocked,
             visible_blocker: true,
+            blocked_reason: None,
             visible_working: false,
             process_exited: false,
             observed_at: std::time::Instant::now(),

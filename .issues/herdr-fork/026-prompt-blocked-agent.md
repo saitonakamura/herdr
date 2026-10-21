@@ -22,6 +22,16 @@ Decide and fix:
 - Check what loom does today when it tells or answers a blocked child: `loom tell`, report delivery and `herdr message` delivery (012). Fix loom in the same change if it hits the same refusal, keeping it safe on stock 0.9.4.
 - Keep the refusal for real interactive controls, and cover both cases with engine-level tests (synthetic manifests), not captured Claude screens.
 
+## Resolution
+
+Draft, pending [PR #21](https://github.com/saitonakamura/herdr/pull/21) and dotfiles branch `herdr-fork/026-prompt-blocked`.
+
+- **Cause.** The 006 hooks already report the sentinel as `blocked`/`question`, and `agent prompt` already answers a question block when the composer is empty. But hook authority is in memory. After a server restart the screen decides, and screen rules could not name a reason, so the block was refused as plain `agent_blocked`.
+- **Fix: a manifest flag the evidence supports, not a caller opt-in.** Manifest engine 5 adds `blocked_reason` to a blocked rule. The matched rule's reason flows into the agent's `blocked_reason` while the screen decides. Unreasoned blocks still refuse with `agent_blocked`, and permission and form blocks keep their own codes. Bundled manifests are unchanged. The user's override gains `claude.v5.toml`, whose ⏳ rule says `question`. Engine-4 builds read `claude.v4.toml` and stock 0.9.4 reads `claude.toml`; both were checked.
+- **Hazard found and guarded.** `bash_permission_prompt` (850) ranks under the ⏳ rule (1050), and the rule's `❯` census accepts `❯ 1. Yes`. So a bash dialog raised under the sentinel was read as a question block, and only the composer check stopped the typing. `claude.v5.toml` drops the rule when dialog chrome follows the sentinel. Verified live in a throwaway session.
+- **Loom.** No code change needed. Fork builds deliver through `herdr message`, now unblocked. Stock keeps `sentinel_only_blocked`. Its cleanup note and the dotfiles docs no longer call the local rules inert under 006.
+- **After merge.** Merge the dotfiles branch (it is inert until an engine-5 build runs). The bundled permission and form rules could declare their reasons too, but that would raise the bundled claude manifest to engine 5 and needs live dialog evidence.
+
 ## Parent
 
 [000-map](./000-map.md)

@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-prompt-blocked-agent
 title: "Dogfood: agent prompt refuses an agent that is blocked only on a question it asked"
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee:
-claimed_by:
+claimed_by: macos/w1:pE/3c265891-62d0-41eb-9b12-f97dc2d9ff1b
 ---
 
 ## Question

@@ -2743,12 +2743,13 @@ command = ["sh", "-c", "printf %s ${{HERDR_PANE_ID-unset}} > '{}'; sleep 1"]
         let mut app = test_app();
         crate::plugin_installations::load(&mut app.plugin_installation_leases).unwrap();
         let command = if cfg!(windows) {
-            vec![
-                "powershell.exe",
-                "-NoProfile",
-                "-Command",
-                "Set-Content ready ready; $deadline = [DateTime]::UtcNow.AddSeconds(10); while (!(Test-Path release) -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 10 }; Get-Content payload | Set-Content result",
-            ]
+            // Not PowerShell: its cold start under a loaded runner outlasted the ready deadline.
+            std::fs::write(
+                root.join("worker.cmd"),
+                "@echo off\r\necho ready> ready\r\nset n=0\r\n:wait\r\nif exist release goto done\r\nset /a n+=1\r\nif %n% geq 500 exit /b 1\r\nping -n 1 127.0.0.1 >nul\r\ngoto wait\r\n:done\r\ntype payload> result\r\n",
+            )
+            .unwrap();
+            vec!["cmd.exe", "/d", "/c", "worker.cmd"]
         } else {
             vec![
                 "sh",

@@ -2308,12 +2308,13 @@ mod tests {
         let (first_tx, _first_rx) = response_channel();
         let (second_tx, second_rx) = response_channel();
 
+        // Forced: Windows' `git status` precheck could answer it early, leaving nothing in flight.
         assert!(app.handle_deferred_worktree_api_request(
             Request {
                 id: "first".into(),
                 method: crate::api::schema::Method::WorktreeRemove(WorktreeRemoveParams {
                     workspace_id: child_id.clone(),
-                    force: false,
+                    force: true,
                     trust_repository: false,
                 }),
             },

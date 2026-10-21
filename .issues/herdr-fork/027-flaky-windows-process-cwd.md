@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-flaky-windows-process-cwd
 title: Stabilize the flaky Windows process cwd test
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee:
-claimed_by:
+claimed_by: macos/w1:pF/09a8703a-0d0e-481b-9297-6202613ab131
 ---
 
 ## Question

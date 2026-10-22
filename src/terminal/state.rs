@@ -31,6 +31,21 @@ pub struct HookAuthority {
     pub detail: HookReportDetail,
 }
 
+impl HookAuthority {
+    /// The state and reason the report stands for on its own, before the screen weighs in.
+    fn reported_state_and_blocked_reason(&self) -> (AgentState, Option<BlockedReason>) {
+        let blocked_reason = self
+            .detail
+            .blocked_reason
+            .filter(|_| self.state == AgentState::Blocked);
+        let state = match self.state {
+            AgentState::Working if self.detail.background => AgentState::Awaiting,
+            state => state,
+        };
+        (state, blocked_reason)
+    }
+}
+
 /// What a state report says beyond the state itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct HookReportDetail {
@@ -303,7 +318,7 @@ impl TerminalState {
                 .insert(snapshot.authority.source.clone(), sequence);
         }
         self.detected_agent = crate::detect::parse_agent_label(&snapshot.authority.agent_label);
-        self.state = snapshot.authority.state;
+        (self.state, self.blocked_reason) = snapshot.authority.reported_state_and_blocked_reason();
         self.hook_authority = Some(snapshot.authority);
         self.agent_process_acquisition_pending = snapshot.acquisition_pending;
     }
@@ -2254,15 +2269,7 @@ impl TerminalState {
                 return (state, None);
             }
         }
-        let blocked_reason = authority
-            .detail
-            .blocked_reason
-            .filter(|_| authority.state == AgentState::Blocked);
-        let state = match authority.state {
-            AgentState::Working if authority.detail.background => AgentState::Awaiting,
-            state => state,
-        };
-        (state, blocked_reason)
+        authority.reported_state_and_blocked_reason()
     }
 
     /// The screen's state where it shows that the reported one has ended: a live
@@ -2690,6 +2697,64 @@ mod tests {
             agent: agent_label.into(),
             session_ref,
         });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_live_handoff_restores_what_the_report_stands_for() {
+        let now = Instant::now();
+        for (state, detail, expected) in [
+            (
+                AgentState::Working,
+                HookReportDetail {
+                    blocked_reason: None,
+                    background: true,
+                },
+                (AgentState::Awaiting, None),
+            ),
+            (
+                AgentState::Blocked,
+                HookReportDetail {
+                    blocked_reason: Some(BlockedReason::Question),
+                    background: false,
+                },
+                (AgentState::Blocked, Some(BlockedReason::Question)),
+            ),
+        ] {
+            let session_ref =
+                crate::agent_resume::AgentSessionRef::path(test_session_path("root.jsonl"))
+                    .unwrap();
+            let mut terminal = test_terminal();
+            anchor_full_lifecycle_session(
+                &mut terminal,
+                Agent::Pi,
+                "herdr:pi",
+                "pi",
+                session_ref.clone(),
+            );
+            terminal.set_detailed_hook_authority_at(
+                "herdr:pi".into(),
+                "pi".into(),
+                state,
+                detail,
+                None,
+                Some(session_ref),
+                Some(1),
+                now,
+            );
+            assert_eq!((terminal.state, terminal.blocked_reason()), expected);
+            let snapshot = terminal
+                .handoff_agent_state()
+                .expect("a live pi hook report hands off");
+
+            let mut restored = test_terminal();
+            restored.restore_handoff_agent_state(snapshot);
+            assert_eq!(
+                (restored.state, restored.blocked_reason()),
+                expected,
+                "the restored pane must read the reported state before the next recompute"
+            );
+        }
     }
 
     #[test]

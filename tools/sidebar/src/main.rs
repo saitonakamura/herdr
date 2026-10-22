@@ -1,6 +1,9 @@
 //! `herdr-sidebar`: the program the fork's sidebar pane runs (ADR 0006). It
 //! reads only herdr's API on `HERDR_SOCKET_PATH`.
 
+// Off unix only the stub `run` is built, so the model and its IO helpers go unused there.
+#![cfg_attr(not(unix), allow(dead_code))]
+
 mod api;
 mod app;
 mod config;

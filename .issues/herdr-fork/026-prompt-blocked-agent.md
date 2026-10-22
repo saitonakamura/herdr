@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-prompt-blocked-agent
 title: "Dogfood: agent prompt refuses an agent that is blocked only on a question it asked"
-status: in-progress
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee:
-claimed_by: macos/w1:pE/3c265891-62d0-41eb-9b12-f97dc2d9ff1b
+claimed_by:
 ---
 
 ## Question
@@ -24,7 +24,7 @@ Decide and fix:
 
 ## Resolution
 
-Draft, pending [PR #21](https://github.com/saitonakamura/herdr/pull/21) and dotfiles branch `herdr-fork/026-prompt-blocked`.
+Merged 2026-10-22 as `cb491a16`: [PR #21](https://github.com/saitonakamura/herdr/pull/21); dotfiles branch `herdr-fork/026-prompt-blocked` merged as `6fc64cc`.
 
 - **Cause.** The 006 hooks already report the sentinel as `blocked`/`question`, and `agent prompt` already answers a question block when the composer is empty. But hook authority is in memory. After a server restart the screen decides, and screen rules could not name a reason, so the block was refused as plain `agent_blocked`.
 - **Fix: a manifest flag the evidence supports, not a caller opt-in.** Manifest engine 5 adds `blocked_reason` to a blocked rule. The matched rule's reason flows into the agent's `blocked_reason` while the screen decides. Unreasoned blocks still refuse with `agent_blocked`, and permission and form blocks keep their own codes. Bundled manifests are unchanged. The user's override gains `claude.v5.toml`, whose ⏳ rule says `question`. Engine-4 builds read `claude.v4.toml` and stock 0.9.4 reads `claude.toml`; both were checked.

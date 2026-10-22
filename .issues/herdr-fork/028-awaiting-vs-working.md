@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-awaiting-vs-working
 title: "Dogfood: tell an agent awaiting background work from one actively working, and deliver its messages"
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee:
-claimed_by:
+claimed_by: macos/w1:pH/da6b50ba-7857-41bb-9e5b-b7a4516ae495
 ---
 
 ## Question

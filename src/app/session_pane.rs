@@ -181,9 +181,13 @@ impl App {
         let cwd = session_pane_cwd();
         let session = crate::session::active_name()
             .unwrap_or_else(|| crate::session::DEFAULT_SESSION_NAME.to_string());
-        let launch_env =
-            PaneLaunchEnv::from_extra(vec![(crate::session::SESSION_ENV_VAR.to_string(), session)])
-                .without_pane_identity();
+        // The config path lets the program read its own table from the same files.
+        let config_path = crate::config::config_path().to_string_lossy().into_owned();
+        let launch_env = PaneLaunchEnv::from_extra(vec![
+            (crate::session::SESSION_ENV_VAR.to_string(), session),
+            (crate::config::CONFIG_PATH_ENV_VAR.to_string(), config_path),
+        ])
+        .without_pane_identity();
         match TerminalRuntime::spawn_argv_command(
             pane_id,
             rows.max(1),
@@ -426,6 +430,7 @@ pub(crate) fn method_moves_focus_to_a_pane(method: &crate::api::schema::Method) 
             | Method::PaneFocusDirection(_)
             | Method::AgentFocus(_)
             | Method::PluginPaneFocus(_)
+            | Method::PopupOpen(_)
     )
 }
 

@@ -1298,6 +1298,7 @@ impl App {
                 self.set_session_pane_focus(false);
                 return responses::encode_success(request.id, ResponseResult::Ok {});
             }
+            Method::PopupOpen(params) => return self.handle_popup_open(request.id, params),
             Method::PopupClose(_) => {
                 return if self.close_popup_pane() {
                     responses::encode_success(request.id, ResponseResult::Ok {})

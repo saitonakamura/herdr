@@ -9,6 +9,7 @@ pub mod messages;
 pub(crate) mod operations;
 pub mod panes;
 pub mod plugins;
+pub mod popups;
 pub mod response;
 pub mod server;
 pub mod session;
@@ -24,6 +25,7 @@ pub use integrations::*;
 pub use messages::*;
 pub use panes::*;
 pub use plugins::*;
+pub use popups::*;
 pub use response::*;
 pub use server::*;
 pub use session::*;
@@ -161,6 +163,7 @@ operations::define_operations! {
     SessionPaneGet(EmptyParams) => "session_pane.get", false, false;
     SessionPaneFocus(EmptyParams) => "session_pane.focus", true, true;
     SessionPaneUnfocus(EmptyParams) => "session_pane.unfocus", true, true;
+    PopupOpen(PopupOpenParams) => "popup.open", true, false;
 }
 
 #[cfg(test)]

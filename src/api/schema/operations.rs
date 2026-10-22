@@ -209,6 +209,7 @@ mod tests {
             "agent.close",
             "session_pane.focus",
             "session_pane.unfocus",
+            "popup.open",
         ]
         .into_iter()
         .collect::<BTreeSet<_>>();

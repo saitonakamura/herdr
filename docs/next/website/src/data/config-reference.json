@@ -9,6 +9,12 @@
           "type": "boolean",
           "default": "unset",
           "description": "Show first-run setup on startup. Missing or true shows onboarding; continuing from onboarding writes onboarding = false."
+        },
+        {
+          "key": "sidebar",
+          "type": "table",
+          "default": "unset",
+          "description": "Fork-only: settings of herdr-sidebar, the program the sidebar pane runs (glyphs, colors, line1, line2, glyph, actions). herdr accepts the table and never reads it. Belongs in config.fork.toml."
         }
       ]
     },

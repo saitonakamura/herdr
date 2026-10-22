@@ -12,6 +12,8 @@ const KNOWN_TOP_LEVEL_CONFIG_KEYS: &[&str] = &[
     "remote",
     "server",
     "session",
+    // Fork-only: herdr-sidebar's settings, which herdr never reads.
+    "sidebar",
     "terminal",
     "theme",
     "ui",
@@ -930,6 +932,30 @@ row_gap = 1
 
         assert!(loaded.diagnostics.is_empty(), "{:?}", loaded.diagnostics);
         assert_eq!(loaded.config.ui.accent, "blue");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn the_sidebar_program_table_is_accepted_and_a_non_table_only_warns() {
+        let dir = overlay_test_dir("sidebar-table");
+        let path = dir.join("config.toml");
+        std::fs::write(&path, "[ui]\naccent = \"cyan\"\n").unwrap();
+        std::fs::write(
+            fork_overlay_path(&path),
+            "[sidebar]\nglyphs = \"unicode\"\n[sidebar.actions]\nclose = { command = [\"x\"] }\n",
+        )
+        .unwrap();
+
+        let loaded = Config::load_from_path(&path);
+        assert!(loaded.diagnostics.is_empty(), "{:?}", loaded.diagnostics);
+
+        std::fs::write(&path, "sidebar = \"x\"\n[ui]\naccent = \"cyan\"\n").unwrap();
+        std::fs::remove_file(fork_overlay_path(&path)).unwrap();
+        let loaded = Config::load_from_path(&path);
+
+        assert_eq!(loaded.config.ui.accent, "cyan");
+        assert_eq!(loaded.diagnostics.len(), 1, "{:?}", loaded.diagnostics);
+        assert!(loaded.diagnostics[0].starts_with("sidebar must be a table"));
         std::fs::remove_dir_all(dir).unwrap();
     }
 

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Install a fork build for the dogfood side session, at its own prefix. Never
-# touches the Homebrew herdr or any running server: the binary is copied in and
-# renamed over the old one, so a running side server keeps its old inode.
+# Install a fork build (herdr and herdr-sidebar) for the dogfood side session, at
+# its own prefix. Never touches the Homebrew herdr or any running server: each
+# binary is copied in and renamed over the old one, so a running side server
+# keeps its old inode.
 #
 #   scripts/dogfood.sh release [<tag>]        a fork release asset, checked against SHA256SUMS
 #   scripts/dogfood.sh build [<pr|branch>...] a release build of origin/master plus unmerged PRs
@@ -28,25 +29,47 @@ asset_name() {
   esac
 }
 
-install_binary() { # path source-description
+stage() { # path name: copy in beside the old one and check it runs
+  cp "$1" "$prefix/bin/$2.new"
+  chmod 755 "$prefix/bin/$2.new"
+  "$prefix/bin/$2.new" --version >/dev/null || {
+    rm -f "$prefix/bin/herdr.new" "$prefix/bin/herdr-sidebar.new"
+    die "the new $2 does not run"
+  }
+}
+
+install_binary() { # herdr-path herdr-sidebar-path-or-empty source-description
   mkdir -p "$prefix/bin"
-  cp "$1" "$prefix/bin/herdr.new"
-  chmod 755 "$prefix/bin/herdr.new"
-  "$prefix/bin/herdr.new" --version >/dev/null || die "the new binary does not run"
+  # both are checked before either is renamed in, so a bad one leaves no half install
+  stage "$1" herdr
+  # the sidebar program (ADR 0006); releases before it have none
+  [ -z "$2" ] || stage "$2" herdr-sidebar
+  # renamed over the old ones, so a running server and sidebar pane keep their inodes
   mv -f "$prefix/bin/herdr.new" "$prefix/bin/herdr"
-  printf '%s\ninstalled %s\n' "$2" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$prefix/SOURCE"
+  [ -z "$2" ] || mv -f "$prefix/bin/herdr-sidebar.new" "$prefix/bin/herdr-sidebar"
+  printf '%s\ninstalled %s\n' "$3" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$prefix/SOURCE"
   status
 }
 
 cmd_release() {
-  local tag="${1:-}" asset
+  local tag="${1:-}" asset sidebar patterns names
   [ -n "$tag" ] || tag=$(gh release list -R "$repo_slug" --limit 1 --json tagName -q '.[0].tagName')
   asset=$(asset_name)
+  sidebar=${asset/herdr-/herdr-sidebar-}
+  patterns=(-p "$asset" -p SHA256SUMS)
+  # releases before herdr-fork 030 ship no sidebar; rolling back to one keeps the installed sidebar
+  names=$(gh release view "$tag" -R "$repo_slug" --json assets -q '.assets[].name') || die "no release $tag"
+  if grep -qx "$sidebar" <<<"$names"; then
+    patterns+=(-p "$sidebar")
+  else
+    echo "dogfood: release $tag has no $sidebar; leaving herdr-sidebar as it is" >&2
+    sidebar=
+  fi
   tmp=$(mktemp -d)
   trap 'rm -rf "$tmp"' EXIT
-  gh release download "$tag" -R "$repo_slug" -D "$tmp" -p "$asset" -p SHA256SUMS
-  (cd "$tmp" && sha256sum --check --ignore-missing --strict SHA256SUMS) || die "checksum mismatch for $asset"
-  install_binary "$tmp/$asset" "release $tag ($asset)"
+  gh release download "$tag" -R "$repo_slug" -D "$tmp" "${patterns[@]}"
+  (cd "$tmp" && sha256sum --check --ignore-missing --strict SHA256SUMS) || die "checksum mismatch for $asset${sidebar:+ or $sidebar}"
+  install_binary "$tmp/$asset" "${sidebar:+$tmp/$sidebar}" "release $tag ($asset)"
 }
 
 # a PR number resolves to its head branch; anything else is taken as a branch name
@@ -75,12 +98,15 @@ cmd_build() {
     git -C "$build_wt" merge -q --no-ff --no-commit "${refs[@]}" || die "the branches do not merge cleanly onto master"
   fi
   (cd "$build_wt" && cargo build --release --locked)
-  install_binary "$build_wt/target/release/herdr" "$desc"
+  install_binary "$build_wt/target/release/herdr" "$build_wt/target/release/herdr-sidebar" "$desc"
 }
 
 status() {
   [ -x "$prefix/bin/herdr" ] || { echo "nothing installed at $prefix"; return; }
   echo "$prefix/bin/herdr: $("$prefix/bin/herdr" --version)"
+  if [ -x "$prefix/bin/herdr-sidebar" ]; then
+    echo "$prefix/bin/herdr-sidebar: $("$prefix/bin/herdr-sidebar" --version)"
+  fi
   cat "$prefix/SOURCE" 2>/dev/null || true
 }
 
@@ -88,5 +114,5 @@ case "${1:-}" in
   release) shift; cmd_release "$@" ;;
   build) shift; cmd_build "$@" ;;
   status) status ;;
-  *) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2 ;;
+  *) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2 ;;
 esac

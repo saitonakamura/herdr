@@ -31,7 +31,7 @@ Grilled with the user on 2026-10-22 over five rounds. Vocabulary: GLOSSARY.md ad
 **Where facts come from.**
 
 - herdr's API is the spine, through `session.snapshot` plus the event stream. herdr owns everything runtime, so the sidebar shows the same Parent, state and names that delivery and `agent close` act on.
-- loom-only facts reach the sidebar as agent annotations (029): effort id, role, kind, why and ticket.
+- loom-only facts reach the sidebar as agent annotations (035): effort id, role, kind, why and ticket.
 - The binary never reads loom's files.
 - Tokens remain display hints.
 
@@ -144,7 +144,7 @@ Additional rules:
 **Follow-ups filed.**
 
 - [019](./019-sidebar-pane.md): the pane host, rewritten as its spec.
-- [029](./029-agent-annotations.md): agent annotations.
+- [035](./035-agent-annotations.md): agent annotations.
 - [030](./030-sidebar-program.md): the `herdr-sidebar` program v1.
 - [031](./031-sidebar-dotfiles.md): the dotfiles wiring.
 - [032](./032-loom-stops-mirroring.md): loom stops mirroring runtime facts.

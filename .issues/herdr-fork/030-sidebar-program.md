@@ -17,7 +17,7 @@ Build `herdr-sidebar`, the program the sidebar pane runs. It is a Rust crate usi
 
 - **Data.**
   - Read only herdr's API on `HERDR_SOCKET_PATH`, using herdr's own API schema types: a snapshot, then `events.subscribe`, and re-snapshot on `events_lost`.
-  - loom facts come from annotations (029). Never read loom's files.
+  - loom facts come from annotations (035). Never read loom's files.
   - Coalesce redraws to at most about 20 a second, and never animate.
 - **Content.**
   - Sections per workspace, each collapsing independently.

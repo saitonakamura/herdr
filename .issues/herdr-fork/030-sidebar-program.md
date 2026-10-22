@@ -1,13 +1,14 @@
 ---
 id: herdr-fork-sidebar-program
 title: The herdr-sidebar program, v1
-status: blocked
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
-assignee:
-claimed_by:
+  - herdr-fork-agent-annotations
+assignee: saitonakamura
+claimed_by: macos/w1:pX/bf6db786-1101-4360-9494-f497e0df3517
 ---
 
 ## Question

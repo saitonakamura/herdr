@@ -487,6 +487,7 @@ fn restore_agent_identity(
         terminal.agent_launch = pane.agent_launch.clone();
         terminal.agent_home = pane.agent_home.clone();
         terminal.task_status = pane.task_status;
+        terminal.annotations = pane.annotations.clone();
     }
 }
 
@@ -1605,6 +1606,10 @@ mod tests {
                             agent_launch: None,
                             agent_home: None,
                             task_status: Some(crate::api::schema::TaskStatus::Complete),
+                            annotations: std::collections::BTreeMap::from([(
+                                "effort".into(),
+                                "pt:herdr-fork".into(),
+                            )]),
                         },
                     )]),
                     zoomed: false,
@@ -1666,6 +1671,10 @@ mod tests {
             terminal.task_status,
             Some(crate::api::schema::TaskStatus::Complete)
         );
+        assert_eq!(
+            terminal.annotations.get("effort").map(String::as_str),
+            Some("pt:herdr-fork")
+        );
     }
 
     #[tokio::test]
@@ -1709,6 +1718,7 @@ mod tests {
                                 agent_launch: None,
                                 agent_home: None,
                                 task_status: None,
+                                annotations: Default::default(),
                             },
                         ),
                         (
@@ -1727,6 +1737,7 @@ mod tests {
                                 agent_launch: None,
                                 agent_home: None,
                                 task_status: None,
+                                annotations: Default::default(),
                             },
                         ),
                     ]),
@@ -1788,6 +1799,7 @@ mod tests {
                     agent_launch: None,
                     agent_home: None,
                     task_status: None,
+                    annotations: Default::default(),
                 },
             )
         };
@@ -1810,6 +1822,7 @@ mod tests {
             agent_launch: None,
             agent_home: None,
             task_status: None,
+            annotations: Default::default(),
         };
         let snapshot = SessionSnapshot {
             version: super::super::snapshot::SNAPSHOT_VERSION,
@@ -1981,6 +1994,7 @@ mod tests {
                             agent_launch: None,
                             agent_home: None,
                             task_status: None,
+                            annotations: Default::default(),
                         },
                     )]),
                     zoomed: false,
@@ -2074,6 +2088,7 @@ mod tests {
             agent_id: None,
             parent_agent_id: None,
             task_status: None,
+            annotations: Default::default(),
             launch_env: vec![("LOOM_PARENT".into(), "1234abcd".into())],
             agent_launch: Some(crate::agent_resume::AgentLaunch {
                 agent: "codex".into(),
@@ -2385,6 +2400,7 @@ mod tests {
                 agent_launch: None,
                 agent_home: None,
                 task_status: None,
+                annotations: Default::default(),
             },
         );
         let mut history = SessionHistorySnapshot {

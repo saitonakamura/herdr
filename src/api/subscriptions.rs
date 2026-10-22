@@ -733,6 +733,7 @@ mod tests {
             launch_args: None,
             agent_home: None,
             task_status: None,
+            annotations: Default::default(),
             scroll,
             revision: 0,
         }

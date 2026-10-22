@@ -3,9 +3,9 @@ use std::time::Duration;
 use bytes::Bytes;
 
 use crate::api::schema::{
-    AgentCloseParams, AgentPromptParams, AgentRenameParams, AgentSendKeysParams,
-    AgentSetArgsParams, AgentSetParentParams, AgentSetTaskStatusParams, AgentStartParams,
-    AgentTarget, PaneReadResult, ResponseResult,
+    AgentAnnotateParams, AgentCloseParams, AgentPromptParams, AgentRenameParams,
+    AgentSendKeysParams, AgentSetArgsParams, AgentSetParentParams, AgentSetTaskStatusParams,
+    AgentStartParams, AgentTarget, PaneReadResult, ResponseResult,
 };
 use crate::app::App;
 
@@ -101,6 +101,17 @@ impl App {
         match self.set_agent_task_status(&params.target, params.status) {
             Ok(pane) => encode_success(id, ResponseResult::PaneInfo { pane }),
             Err(err) => encode_error_body(id, self.agent_parent_error_body(err)),
+        }
+    }
+
+    pub(super) fn handle_agent_annotate(
+        &mut self,
+        id: String,
+        params: AgentAnnotateParams,
+    ) -> String {
+        match self.annotate_agent(&params.target, params.annotations) {
+            Ok(pane) => encode_success(id, ResponseResult::PaneInfo { pane }),
+            Err(body) => encode_error_body(id, body),
         }
     }
 

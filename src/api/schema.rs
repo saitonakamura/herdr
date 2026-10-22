@@ -156,6 +156,7 @@ operations::define_operations! {
     MessageWithdraw(MessageTarget) => "message.withdraw", false, false;
     AgentSetTaskStatus(AgentSetTaskStatusParams) => "agent.set_task_status", false, false;
     AgentClose(AgentCloseParams) => "agent.close", true, false;
+    AgentAnnotate(AgentAnnotateParams) => "agent.annotate", false, false;
 }
 
 #[cfg(test)]

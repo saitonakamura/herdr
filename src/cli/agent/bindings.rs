@@ -1,16 +1,18 @@
+use std::collections::BTreeMap;
+
 use clap::{ArgGroup, ArgMatches, Command};
 
 use crate::api::schema::agents::{
-    AgentCloseProjection, AgentPromptProjection, AgentPromptWaitProjection, AgentReadProjection,
-    AgentRenameProjection, AgentSendKeysProjection, AgentSetArgsProjection,
-    AgentSetParentProjection, AgentSetTaskStatusProjection, AgentStartProjection,
-    AgentWaitProjection,
+    AgentAnnotateProjection, AgentCloseProjection, AgentPromptProjection,
+    AgentPromptWaitProjection, AgentReadProjection, AgentRenameProjection, AgentSendKeysProjection,
+    AgentSetArgsProjection, AgentSetParentProjection, AgentSetTaskStatusProjection,
+    AgentStartProjection, AgentWaitProjection,
 };
 use crate::api::schema::{
-    AgentCloseParams, AgentPromptParams, AgentReadParams, AgentRenameParams, AgentSendKeysParams,
-    AgentSetArgsParams, AgentSetParentParams, AgentSetTaskStatusParams, AgentStartParams,
-    AgentStatus, AgentTarget, AgentWaitParams, ReadFormat, ReadSource, TaskStatus, READ_FORMATS,
-    READ_SOURCES,
+    AgentAnnotateParams, AgentCloseParams, AgentPromptParams, AgentReadParams, AgentRenameParams,
+    AgentSendKeysParams, AgentSetArgsParams, AgentSetParentParams, AgentSetTaskStatusParams,
+    AgentStartParams, AgentStatus, AgentTarget, AgentWaitParams, ReadFormat, ReadSource,
+    TaskStatus, READ_FORMATS, READ_SOURCES,
 };
 pub(crate) use crate::cli::projection::optional_text;
 use crate::cli::projection::{
@@ -225,6 +227,25 @@ pub(crate) fn close_targets() -> Input<Vec<String>> {
     .configure(|arg| arg.num_args(1..).allow_hyphen_values(false))
 }
 
+pub(crate) fn annotation_assignments() -> Input<BTreeMap<String, Option<String>>> {
+    Input::<BTreeMap<String, Option<String>>>::positional("annotation", 1, |slot, value| {
+        let (key, value) = crate::cli::parse_token_assignment(value)
+            .map_err(|_| ParseError::Usage(format!("annotation must use KEY=VALUE: {value}")))?;
+        slot.insert(key, value);
+        Ok(())
+    })
+    .value_name("KEY=VALUE")
+    .configure(|arg| arg.num_args(1..).required(false).allow_hyphen_values(false))
+}
+
+pub(crate) fn clear_annotation() -> Input<BTreeMap<String, Option<String>>> {
+    Input::<BTreeMap<String, Option<String>>>::value("clear", "KEY", |slot, value| {
+        slot.insert(value.to_owned(), None);
+        Ok(())
+    })
+    .help("Remove this annotation; repeatable")
+}
+
 pub(crate) fn wait_presence() -> Input<Option<crate::api::schema::AgentPromptWaitOptions>> {
     Input::flag("wait", |slot, _| {
         *slot = Some(crate::api::schema::AgentPromptWaitOptions {
@@ -289,6 +310,7 @@ pub(crate) enum Operation {
     SetParent(AgentSetParentParams),
     SetTaskStatus(AgentSetTaskStatusParams),
     Close(AgentCloseParams),
+    Annotate(AgentAnnotateParams),
     Wait(AgentWaitParams),
     Prompt(AgentPromptParams),
     Start(AgentStartParams),
@@ -327,6 +349,10 @@ pub(crate) fn command() -> Command {
         .subcommand(leaf("close", AgentCloseProjection::arguments(), "Close agents with their whole subtree, deepest first")
             .override_usage("herdr agent close <TARGET>... [--force] [--dry-run]")
             .after_help("Each TARGET closes with every descendant (by parent). Refused with agent_subtree_busy while any of them is working or blocked, unless --force; the pane running this command is never counted and closes last. Closing an agent closes its pane, and the tab or workspace too when that pane is the last one left in it."))
+        .subcommand(leaf("annotate", AgentAnnotateProjection::arguments(), "Set or clear annotations a program keeps on an agent")
+            .override_usage("herdr agent annotate <TARGET> [KEY=VALUE]... [--clear <KEY>]...")
+            .group(ArgGroup::new("annotate").args(["annotation", "clear"]).multiple(true).required(true))
+            .after_help("TARGET is an agent id, agent name or pane id; a pane without an agent gets an agent id too. Herdr stores annotations with the agent and never interprets them. An empty VALUE clears the key, as --clear does; keys not named stay as they are. KEY is 1-32 of [A-Za-z0-9_-], VALUE at most 512 characters with no control characters, and an agent keeps at most 32 annotations."))
         .subcommand(leaf("wait", AgentWaitProjection::arguments(), "Wait until an agent reaches one of the requested states")
             .override_usage("herdr agent wait <TARGET> [OPTIONS]")
             .after_help("Without --until, matches idle, done, awaiting, or blocked. Use --until unknown explicitly when needed. Without --timeout, waits indefinitely."))
@@ -364,6 +390,7 @@ pub(crate) fn from_matches(matches: &ArgMatches) -> Result<Operation, ParseError
             Operation::SetTaskStatus(AgentSetTaskStatusProjection::from_matches(matches)?)
         }
         "close" => Operation::Close(AgentCloseProjection::from_matches(matches)?),
+        "annotate" => Operation::Annotate(AgentAnnotateProjection::from_matches(matches)?),
         "wait" => Operation::Wait(AgentWaitProjection::from_matches(matches)?),
         "prompt" => {
             let mut params = AgentPromptProjection::from_matches(matches)?;

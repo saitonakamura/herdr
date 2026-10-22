@@ -503,11 +503,65 @@ impl Default for SpacesSidebarConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize, Serialize)]
+pub const DEFAULT_SIDEBAR_PANE_COLLAPSED_WIDTH: u16 = 8;
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct SidebarConfig {
     pub agents: AgentsSidebarConfig,
     pub spaces: SpacesSidebarConfig,
+    /// Fork-only: argv of a program that runs in the sidebar slot instead of the
+    /// native sidebar. Unset keeps the native sidebar.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pane: Option<Vec<String>>,
+    /// Fork-only: width of the sidebar pane while the sidebar is collapsed. Default: 8.
+    pub pane_collapsed_width: u16,
+}
+
+impl Default for SidebarConfig {
+    fn default() -> Self {
+        Self {
+            agents: AgentsSidebarConfig::default(),
+            spaces: SpacesSidebarConfig::default(),
+            pane: None,
+            pane_collapsed_width: DEFAULT_SIDEBAR_PANE_COLLAPSED_WIDTH,
+        }
+    }
+}
+
+impl SidebarConfig {
+    /// The sidebar pane's argv, when one is configured and usable.
+    pub(crate) fn pane_argv(&self) -> Option<&[String]> {
+        self.pane.as_deref().filter(|argv| {
+            argv.first()
+                .is_some_and(|program| !program.trim().is_empty())
+        })
+    }
+
+    pub(crate) fn pane_collapsed_width(&self) -> u16 {
+        if self.pane_collapsed_width == 0 {
+            DEFAULT_SIDEBAR_PANE_COLLAPSED_WIDTH
+        } else {
+            self.pane_collapsed_width
+        }
+    }
+
+    pub(crate) fn pane_diagnostics(&self) -> Vec<String> {
+        let mut diagnostics = Vec::new();
+        if self.pane.is_some() && self.pane_argv().is_none() {
+            diagnostics.push(
+                "ui.sidebar.pane must name a program as its first element; using the native sidebar"
+                    .to_string(),
+            );
+        }
+        if self.pane_collapsed_width == 0 {
+            diagnostics.push(format!(
+                "ui.sidebar.pane_collapsed_width must be greater than zero; using \
+                 {DEFAULT_SIDEBAR_PANE_COLLAPSED_WIDTH} (sidebar_collapsed_mode = \"hidden\" hides it)"
+            ));
+        }
+        diagnostics
+    }
 }
 
 impl SpacesSidebarConfig {

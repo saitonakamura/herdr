@@ -21,3 +21,22 @@ pub struct SessionSnapshot {
     pub layouts: Vec<PaneLayoutSnapshot>,
     pub agents: Vec<AgentInfo>,
 }
+
+/// The server's one session pane: a terminal that belongs to no workspace or tab,
+/// running the program configured as `ui.sidebar.pane`. Clients that support it
+/// draw it in place of their native sidebar.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct SessionPaneInfo {
+    /// `off`, `running`, `restarting` or `failed`. Readers should treat unknown values as `off`.
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub argv: Option<Vec<String>>,
+    /// Whether the program holds keyboard focus. Focus is shared by every client.
+    pub focused: bool,
+    pub cols: u16,
+    pub rows: u16,
+    /// Expanded width, from `ui.sidebar_width` clamped by the sidebar bounds.
+    pub width: u16,
+    pub collapsed_width: u16,
+    pub restarts: u64,
+}

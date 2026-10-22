@@ -103,6 +103,36 @@ herdr runs every agent pane, including the one building it.
 - Detection manifest work: the hot-reload loop in `AGENTS.md` still applies, but
   only against a throwaway session, never the live one.
 
+## Sidebar pane
+
+`[ui.sidebar] pane = [argv]` in `config.fork.toml` makes the server run that
+program once in a terminal that belongs to no workspace or tab, and clients draw
+it in place of the native sidebar ([ADR 0002](./docs/adr/0002-sidebar-pane.md),
+[0005](./docs/adr/0005-collapsed-sidebar-is-the-pane.md)). The API, which may not
+say "sidebar", calls it the **session pane** (`session_pane.get`, `.focus`,
+`.unfocus`; `docs/next` socket API page).
+
+- Expanded, it is `ui.sidebar_width` clamped by the sidebar bounds, the same for
+  every client, and its divider does not drag. Collapsed, it is
+  `ui.sidebar.pane_collapsed_width` (default 8); `sidebar_collapsed_mode =
+  "hidden"` still gives it no width. Mobile layouts and shells showing several
+  machines keep the native sidebar.
+- Its process gets `HERDR_SOCKET_PATH` and `HERDR_SESSION` but no
+  `HERDR_PANE_ID`. It is not listed, snapshotted, saved or carried through a
+  live handoff; every server start runs it afresh.
+- An exit shows the native sidebar and restarts it after 0.5s, doubling to 30s.
+  Five quick exits in a row (each under 30s) leave it down with one `warn!` and
+  one notification, until a config reload. A reload that changes `pane` restarts
+  it; removing `pane` stops it.
+- Keyboard focus is a server fact shared by all clients, like pane focus.
+  `keys.focus_sidebar` (unbound by default) toggles it. herdr never takes Esc:
+  the program calls `session_pane.unfocus`, or any pane, tab or workspace focus
+  method, to give it back. Clicking a pane does too.
+- Wire: clients opt in through the hello (`session_pane`), the server advertises
+  the `session_pane` capability, and both sides talk through the named controls
+  in `src/protocol/session_pane.rs`. Generation-1 codecs are untouched, so a
+  client or server without the feature keeps the native sidebar.
+
 ## Dogfooding
 
 On the primary mac, real work in the fork runs in a side session named `fork`.

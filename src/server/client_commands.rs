@@ -258,6 +258,14 @@ mod tests {
             actual.remove("worktree.remove_tab").as_deref(),
             Some("4a4b5e1ea171aeea70e31d83dbd9bdb7a139f0ff7ae829ecc58f85042d7cdd05")
         );
+        assert_eq!(
+            actual.remove("session_pane.focus").as_deref(),
+            Some("0e0ec6abf0a6ebed2c189c092c7bb4b122b45e25e04065c875d3bc51dfff14c9")
+        );
+        assert_eq!(
+            actual.remove("session_pane.unfocus").as_deref(),
+            Some("ca81b98048a384cccc88e08b74ae7b4ad720e6909cf59887904ba74bedb00ff0")
+        );
 
         assert_eq!(
             actual, expected,

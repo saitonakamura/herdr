@@ -681,7 +681,7 @@ impl ClientShellState {
                     outcome.repaint = true;
                     return None;
                 }
-                self.focused_pane_id().map(ClientInputTarget::Pane)
+                self.focused_input_target()
             }
             ClientShellMode::Prefix => {
                 let return_mode = if self.copy_mode.as_ref().is_some_and(|copy_mode| {
@@ -694,7 +694,7 @@ impl ClientShellState {
                 if self.config.keybinds.matches_prefix(key) {
                     self.mode = return_mode;
                     outcome.repaint = true;
-                    return self.focused_pane_id().map(ClientInputTarget::Pane);
+                    return self.focused_input_target();
                 }
                 if key.code == KeyCode::Esc {
                     self.mode = return_mode;
@@ -1075,7 +1075,7 @@ impl ClientShellState {
             overlay: self.overlay.as_ref().map(ClientShellOverlay::kind),
             popup_terminal_id: self.popup_input_target().and_then(|target| match target {
                 ClientInputTarget::Popup(terminal_id) => Some(terminal_id),
-                ClientInputTarget::Pane(_) => None,
+                ClientInputTarget::Pane(_) | ClientInputTarget::SessionPane(_) => None,
             }),
             popup_pending: self.popup_pending,
             retained_selection: self
@@ -1110,7 +1110,7 @@ impl ClientShellState {
         }
         if let Some(terminal_id) = self.popup_input_target().and_then(|target| match target {
             ClientInputTarget::Popup(terminal_id) => Some(terminal_id),
-            ClientInputTarget::Pane(_) => None,
+            ClientInputTarget::Pane(_) | ClientInputTarget::SessionPane(_) => None,
         }) {
             return Some(crate::protocol::ClientClipboardImageTarget::Popup(
                 terminal_id,
@@ -1183,8 +1183,15 @@ impl ClientShellState {
     }
 
     fn push_focused_pane_event(&self, event: ClientPaneInputEvent, outcome: &mut ClientShellInput) {
-        if let Some(pane_id) = self.focused_pane_id() {
-            super::push_target_event(ClientInputTarget::Pane(pane_id), event, outcome);
+        if let Some(target) = self.focused_input_target() {
+            super::push_target_event(target, event, outcome);
         }
+    }
+
+    /// Where typed input goes outside popups: the session pane while it holds
+    /// focus, else the focused pane.
+    fn focused_input_target(&self) -> Option<ClientInputTarget> {
+        self.session_pane_input_target()
+            .or_else(|| self.focused_pane_id().map(ClientInputTarget::Pane))
     }
 }

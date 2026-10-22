@@ -158,6 +158,9 @@ operations::define_operations! {
     AgentSetTaskStatus(AgentSetTaskStatusParams) => "agent.set_task_status", false, false;
     AgentClose(AgentCloseParams) => "agent.close", true, false;
     AgentAnnotate(AgentAnnotateParams) => "agent.annotate", false, false;
+    SessionPaneGet(EmptyParams) => "session_pane.get", false, false;
+    SessionPaneFocus(EmptyParams) => "session_pane.focus", true, true;
+    SessionPaneUnfocus(EmptyParams) => "session_pane.unfocus", true, true;
 }
 
 #[cfg(test)]

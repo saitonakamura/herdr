@@ -22,6 +22,10 @@ pub(crate) struct ClientShellEndpoint {
     pending_agent_view_projection: Option<ClientEndpointAgentViewProjection>,
     pub(crate) agent_view_projection_supported: bool,
     pub(crate) methods: Option<HashSet<String>>,
+    /// The endpoint's session pane, drawn in place of the native sidebar.
+    pub(crate) session_pane: Option<crate::protocol::session_pane::SessionPaneView>,
+    /// Connection generation and server boot that sent `session_pane`.
+    pub(crate) session_pane_origin: Option<(Option<u64>, String)>,
 }
 
 pub(super) struct MachineHit {
@@ -88,6 +92,9 @@ impl ClientShellState {
                 agent_view_projection_supported: previous
                     .is_some_and(|endpoint| endpoint.agent_view_projection_supported),
                 methods: previous.and_then(|endpoint| endpoint.methods.clone()),
+                session_pane: previous.and_then(|endpoint| endpoint.session_pane.clone()),
+                session_pane_origin: previous
+                    .and_then(|endpoint| endpoint.session_pane_origin.clone()),
             });
         }
 
@@ -567,6 +574,7 @@ impl ClientShellState {
         {
             return;
         }
+        self.forget_stale_session_pane(index, generation, &snapshot.boot_id);
         let boot_changed = self.endpoints[index]
             .snapshot
             .as_deref()
@@ -742,5 +750,7 @@ pub(super) fn local_endpoint() -> ClientShellEndpoint {
         pending_agent_view_projection: None,
         agent_view_projection_supported: false,
         methods: None,
+        session_pane: None,
+        session_pane_origin: None,
     }
 }

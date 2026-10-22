@@ -881,6 +881,8 @@ pub struct AppState {
     pub(crate) plugin_panes: std::collections::HashMap<PaneId, PluginPaneRecord>,
     /// Session-modal terminal popup. This is intentionally outside workspace layouts.
     pub(crate) popup_pane: Option<PopupPaneState>,
+    /// The server's one session pane. Like the popup, it is outside workspace layouts.
+    pub(crate) session_pane: crate::app::session_pane::SessionPaneState,
     /// Recent plugin action/event command executions.
     pub(crate) plugin_command_logs: Vec<crate::api::schema::PluginCommandLogInfo>,
     pub(crate) next_plugin_command_log_id: u64,
@@ -1131,6 +1133,7 @@ impl AppState {
             installed_plugins: std::collections::HashMap::new(),
             plugin_panes: std::collections::HashMap::new(),
             popup_pane: None,
+            session_pane: crate::app::session_pane::SessionPaneState::default(),
             plugin_command_logs: Vec::new(),
             next_plugin_command_log_id: 1,
             plugin_commands_in_flight: 0,
@@ -1320,6 +1323,18 @@ impl AppState {
                 !attached_terminal_ids.contains(&popup.terminal_id),
                 "popup terminal {} must not be attached to a tiled pane",
                 popup.terminal_id
+            );
+        }
+        if let Some(process) = &self.session_pane.process {
+            assert!(
+                self.terminals.contains_key(&process.terminal_id),
+                "session pane references missing terminal {}",
+                process.terminal_id
+            );
+            assert!(
+                !attached_terminal_ids.contains(&process.terminal_id),
+                "session pane terminal {} must not be attached to a tiled pane",
+                process.terminal_id
             );
         }
         for &pane_id in self.plugin_panes.keys() {

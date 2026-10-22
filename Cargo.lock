@@ -816,6 +816,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "herdr-sidebar"
+version = "0.1.0"
+dependencies = [
+ "crossterm",
+ "ratatui",
+ "schemars",
+ "serde",
+ "serde_json",
+ "signal-hook",
+ "toml",
+ "unicode-width",
+]
+
+[[package]]
 name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

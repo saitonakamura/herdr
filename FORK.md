@@ -117,8 +117,8 @@ say "sidebar", calls it the **session pane** (`session_pane.get`, `.focus`,
   `ui.sidebar.pane_collapsed_width` (default 8); `sidebar_collapsed_mode =
   "hidden"` still gives it no width. Mobile layouts and shells showing several
   machines keep the native sidebar.
-- Its process gets `HERDR_SOCKET_PATH` and `HERDR_SESSION` but no
-  `HERDR_PANE_ID`. It is not listed, snapshotted, saved or carried through a
+- Its process gets `HERDR_SOCKET_PATH`, `HERDR_SESSION` and `HERDR_CONFIG_PATH`
+  but no `HERDR_PANE_ID`. It is not listed, snapshotted, saved or carried through a
   live handoff; every server start runs it afresh.
 - An exit shows the native sidebar and restarts it after 0.5s, doubling to 30s.
   Five quick exits in a row (each under 30s) leave it down with one `warn!` and
@@ -132,6 +132,53 @@ say "sidebar", calls it the **session pane** (`session_pane.get`, `.focus`,
   the `session_pane` capability, and both sides talk through the named controls
   in `src/protocol/session_pane.rs`. Generation-1 codecs are untouched, so a
   client or server without the feature keeps the native sidebar.
+
+## Sidebar program
+
+`herdr-sidebar` ([ADR 0006](./docs/adr/0006-sidebar-program-ships-with-the-fork.md))
+is the program the sidebar pane runs: `[ui.sidebar] pane = ["herdr-sidebar"]`. It
+is the workspace member `tools/sidebar/`, so upstream merges never touch it. What
+it draws and does is 018's resolution (`.issues/herdr-fork/018-sidebar-content.md`).
+
+- **Data.** Only herdr's API on `HERDR_SOCKET_PATH`: `session.snapshot` and
+  `message.list`, re-read (at most 20 times a second) whenever `events.subscribe`
+  reports a change, and from scratch after `events_lost` or a reconnect. herdr has
+  no session-wide state event, so a second subscription holds one
+  `pane.agent_status_changed` entry per agent pane. loom's facts are agent
+  annotations (`effort`, `ticket`, `source`); it never reads loom's files. Its
+  types are a subset of herdr's schema types, and its tests check them, and every
+  request it sends, against `docs/next/api/herdr-api.schema.json`.
+- **What herdr doesn't know.** Age is the time in the current state as the
+  program saw it, since herdr records no creation time; it updates only on
+  redraws. The dirty count is herdr's, which runs `git status` only while a
+  native agent row shows `git_dirty`, so keep that token in `[ui.sidebar.agents]`.
+- **Config.** `[sidebar]` in `config.toml` and `config.fork.toml`, merged like the
+  overlay, read at start and on SIGHUP. herdr accepts the table and never reads it.
+
+  ```toml
+  [sidebar]
+  glyphs = "nerd"   # or "unicode"
+  line1 = ["name", "effort", "task", "ticket", "messages", "source", "age"]
+  line2 = ["branch", "ahead_behind", "dirty", "worktree"]
+  colors = { muted = "#757ead", selection = "8", working = "yellow" }
+  glyph = { awaiting = "…" }   # per meaning; `herdr-sidebar glyphs` lists them
+  [sidebar.actions]
+  close = { command = ["loom", "close", "{agent_id}"], popup = true }
+  ```
+
+  Actions are `reply`, `tell`, `close`, `ui`, `rename`, `close_workspace`,
+  `new_worktree` and `new_workspace`; `{agent_id}`, `{pane_id}`, `{workspace_id}`
+  and `{name}` are filled in. `popup = true` runs the command through the
+  fork-only `popup.open`, otherwise detached. Without an override `ui` opens loom's
+  `ui` plugin popup.
+- **State.** Collapsed sections, folds and the scope live in
+  `$XDG_STATE_HOME/herdr/sidebar/<session>.json`. `herdr-sidebar ctl fold|scope
+  [<pane>]` talks to the running program over `<HERDR_SOCKET_PATH>.sidebar`, so
+  a keybind in any pane of the session reaches it; without a pane it acts on the
+  focused one.
+- **Shipping.** `fork-release.yml` builds `herdr-sidebar-<os>-<arch>` for the four
+  unix targets beside `herdr`, in `SHA256SUMS`; `scripts/dogfood.sh` installs it
+  beside `herdr`. Windows builds only a stub and keeps the native sidebar.
 
 ## Dogfooding
 

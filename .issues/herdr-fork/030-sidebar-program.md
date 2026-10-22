@@ -59,3 +59,31 @@ Build `herdr-sidebar`, the program the sidebar pane runs. It is a Rust crate usi
 ## Blocked by
 
 - herdr-fork-agent-annotations
+
+## Resolution
+
+Draft, in review as [PR #29](https://github.com/saitonakamura/herdr/pull/29) (branch `fork/030-sidebar-program`); the ticket stays in-progress until it merges.
+
+- **Program.**
+  - `tools/sidebar/` (`herdr-sidebar`) reads only herdr's API: `session.snapshot` and `message.list`, re-read at most 20 times a second on any event, and from scratch after `events_lost` or a reconnect.
+  - Its types are a subset of herdr's schema types. Its tests check them, its subscriptions and every request it sends against `docs/next/api/herdr-api.schema.json`.
+- **Finding: no session-wide state event.** `pane.agent_status_changed` takes one `pane_id` per entry, so the program keeps a second subscription over its agent panes and resubscribes when that set changes. 019's "events.subscribe already covers everything" held only per pane.
+- **herdr side.**
+  - The fork-only `popup.open` exists because no API could open an arbitrary popup.
+  - `[sidebar]` is a known top-level table that herdr never reads.
+  - The session pane also gets `HERDR_CONFIG_PATH`.
+- **Decisions.**
+  - The ctl socket is `<HERDR_SOCKET_PATH>.sidebar`, since panes and keybind commands carry `HERDR_SOCKET_PATH` but not `HERDR_SESSION`.
+  - Creation order is herdr's monotonic per-workspace pane number.
+  - Age is the time in the current state as the program saw it, because herdr has no creation time.
+  - Without an override, `p` opens loom's `ui` plugin popup, though not at the row.
+- **For 031.**
+  - Keep `git_dirty` in `[ui.sidebar.agents]`, since herdr counts dirty paths only while a native row shows it.
+  - The `close` override is `{ command = ["loom", "close", "{agent_id}"], popup = true }`.
+  - ctl is `herdr-sidebar ctl fold|scope`. With no pane it acts on the focused one.
+- **Gaps.**
+  - Non-agent rows don't show the command.
+  - `loom ui` can't open at a row.
+- **Verified.**
+  - Live in a throwaway session: the tree, keys, SGR clicks, menus, reply and close (busy, then force), ctl, the narrow mode, SIGHUP and the popup override.
+  - `just check`: only the known machine-specific failures.

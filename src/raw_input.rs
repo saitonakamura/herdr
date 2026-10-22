@@ -15,7 +15,6 @@ pub fn parse_raw_input_bytes_sync(data: &[u8]) -> Vec<RawInputEvent> {
 
 /// Decode bytes the byte framer already split into complete input. This applies
 /// no timing policy of its own: the reader decided where each event ends.
-#[cfg(any(unix, test))]
 pub(crate) fn parse_framed_input(data: &[u8]) -> Vec<RawInputEvent> {
     let mut events = Vec::new();
     let mut rest = data;

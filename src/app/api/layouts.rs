@@ -972,6 +972,8 @@ mod tests {
             1,
             "only the command pane re-runs on restore"
         );
+        // Windows wraps the argv in a PowerShell script, so only unix shows it verbatim.
+        #[cfg(unix)]
         assert!(restore_commands[0].contains(exiting_test_command()));
         shutdown_test_runtimes(&mut app);
     }

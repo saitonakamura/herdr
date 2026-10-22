@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-agent-annotations
 title: Agent annotations
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee:
-claimed_by:
+claimed_by: macos/w1:pR/05095289-5004-4c7e-a277-3b6e1345c252
 ---
 
 ## Question

@@ -2146,6 +2146,7 @@ async fn run_client_loop(
                                     &mut state,
                                     &mut write_stream,
                                     &endpoint_id,
+                                    generation,
                                     endpoint_active,
                                     *update,
                                 );

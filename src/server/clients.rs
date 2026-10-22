@@ -203,8 +203,9 @@ pub(crate) struct ClientConnection {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct SessionPaneDelivery {
     pub(crate) revision: u64,
-    /// `None` until a running pane is sent, since a client starts out native.
-    pub(crate) last_sent: Option<SessionPaneSentState>,
+    /// `None` until the first update, which is sent even while no pane runs so a
+    /// reconnecting client drops a pane it kept from another server.
+    pub(crate) last_sent: Option<Option<SessionPaneSentState>>,
     /// The client's slot for the pane, as (cols, rows).
     pub(crate) slot: Option<(u16, u16)>,
 }

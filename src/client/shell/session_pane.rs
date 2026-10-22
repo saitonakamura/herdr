@@ -51,15 +51,45 @@ impl ClientShellState {
             .is_some_and(|(cols, rows)| self.layout(cols, rows).sidebar.width > 0)
     }
 
+    /// Drops a pane that came from another connection or server boot. A server
+    /// without the feature never says the pane is gone, and focus on a pane nobody
+    /// runs would swallow every key.
+    pub(super) fn forget_stale_session_pane(
+        &mut self,
+        index: usize,
+        generation: Option<u64>,
+        boot_id: &str,
+    ) {
+        let Some(endpoint) = self.endpoints.get_mut(index) else {
+            return;
+        };
+        if endpoint
+            .session_pane_origin
+            .as_ref()
+            .is_none_or(|(origin_generation, origin_boot)| {
+                *origin_generation == generation && origin_boot == boot_id
+            })
+        {
+            return;
+        }
+        endpoint.session_pane = None;
+        endpoint.session_pane_origin = None;
+        if endpoint.endpoint_id == self.active_endpoint_id {
+            self.session_pane_slot_sent = None;
+        }
+    }
+
     /// Stores an endpoint's session pane update for a `cols` x `rows` terminal.
     /// Returns whether anything changed and whether the pane surface changed size.
     pub(crate) fn set_endpoint_session_pane(
         &mut self,
         endpoint_id: &ClientEndpointId,
+        generation: Option<u64>,
         update: SessionPaneUpdate,
         (cols, rows): (u16, u16),
     ) -> (bool, bool) {
         let previous_size = self.surface_size(cols, rows);
+        let active = endpoint_id == &self.active_endpoint_id;
         let Some(endpoint) = self
             .endpoints
             .iter_mut()
@@ -67,6 +97,14 @@ impl ClientShellState {
         else {
             return (false, false);
         };
+        let origin = (generation, update.boot_id);
+        if endpoint.session_pane_origin.as_ref() != Some(&origin) {
+            // A new connection or server has not heard this client's slot yet.
+            endpoint.session_pane_origin = Some(origin);
+            if active {
+                self.session_pane_slot_sent = None;
+            }
+        }
         if endpoint.session_pane == update.pane {
             return (false, false);
         }

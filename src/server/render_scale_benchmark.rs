@@ -135,6 +135,7 @@ impl RenderPipeline {
             .expect("benchmark session pane update");
         self.client.set_endpoint_session_pane(
             &crate::client::endpoint::ClientEndpointId::Local,
+            None,
             update,
             (COLS, ROWS),
         );

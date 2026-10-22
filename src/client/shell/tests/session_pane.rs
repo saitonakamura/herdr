@@ -30,6 +30,7 @@ fn shell_with_session_pane(focused: bool) -> ClientShellState {
     state.set_pane_surface(surface());
     let (changed, _) = state.set_endpoint_session_pane(
         &ClientEndpointId::Local,
+        None,
         SessionPaneUpdate {
             boot_id: "boot-1".into(),
             revision: 1,
@@ -117,6 +118,7 @@ fn session_pane_replaces_the_native_sidebar_and_disables_its_divider() {
     // Without a pane the native sidebar comes back.
     let (changed, _) = state.set_endpoint_session_pane(
         &ClientEndpointId::Local,
+        None,
         SessionPaneUpdate {
             boot_id: "boot-1".into(),
             revision: 2,
@@ -288,6 +290,7 @@ fn a_pane_that_keeps_the_surface_size_does_not_strand_the_surface() {
     pane.width = native;
     let (changed, resized) = state.set_endpoint_session_pane(
         &ClientEndpointId::Local,
+        None,
         SessionPaneUpdate {
             boot_id: "boot-1".into(),
             revision: 1,
@@ -299,4 +302,58 @@ fn a_pane_that_keeps_the_surface_size_does_not_strand_the_surface() {
     assert!(!resized);
     let text = frame_text(&state.compose(106, 20).expect("surface kept"));
     assert!(text.contains("SIDE-LIVE"));
+}
+
+#[test]
+fn a_pane_from_another_connection_or_server_is_dropped_with_its_focus() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_endpoint_snapshot_for_generation(&ClientEndpointId::Local, 1, Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    let update = |boot: &str| SessionPaneUpdate {
+        boot_id: boot.into(),
+        revision: 1,
+        pane: Some(view(true)),
+    };
+    state.set_endpoint_session_pane(
+        &ClientEndpointId::Local,
+        Some(1),
+        update("boot-1"),
+        (106, 20),
+    );
+    state.set_pane_surface(surface());
+    state.compose(106, 20).expect("frame");
+    assert!(state.take_session_pane_slot_message(106, 20).is_some());
+    assert_eq!(
+        session_pane_events(&state.handle_input_bytes(b"j").requests).len(),
+        1
+    );
+
+    // A reconnect may land on a server that never sends `pane: null`, such as stock herdr.
+    state.set_endpoint_snapshot_for_generation(&ClientEndpointId::Local, 2, Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    let frame = state.compose(106, 20).expect("frame");
+    assert!(state.session_pane_view().is_none());
+    assert!(!frame_text(&frame).contains("SIDE-LIVE"));
+    let input = state.handle_input_bytes(b"j");
+    assert!(session_pane_events(&input.requests).is_empty());
+    assert!(matches!(
+        &input.requests[..],
+        [ClientMessage::ClientShellPaneInput { pane_id, .. }] if pane_id == "pane_1"
+    ));
+    assert!(state.take_session_pane_slot_message(106, 20).is_none());
+
+    // The new connection's pane hears the slot again.
+    state.set_endpoint_session_pane(
+        &ClientEndpointId::Local,
+        Some(2),
+        update("boot-1"),
+        (106, 20),
+    );
+    assert!(state.take_session_pane_slot_message(106, 20).is_some());
+
+    // A new server boot on the same connection drops it too.
+    let mut rebooted = snapshot();
+    rebooted.boot_id = "boot-2".into();
+    state.set_endpoint_snapshot_for_generation(&ClientEndpointId::Local, 2, Box::new(rebooted));
+    assert!(state.session_pane_view().is_none());
 }

@@ -33,15 +33,19 @@ impl HeadlessServer {
         *used += 1;
     }
 
-    fn shell_focused_runtime(
+    pub(super) fn shell_focused_runtime(
         &self,
         client_id: u64,
     ) -> Option<(&crate::terminal::TerminalRuntime, crate::layout::PaneId)> {
+        // Only a client that shows the pane sends its keys there.
         if self.app.state.session_pane.focused
-            && self
-                .clients
-                .get(&client_id)
-                .is_some_and(|client| client.session_pane.is_some())
+            && self.clients.get(&client_id).is_some_and(|client| {
+                client
+                    .session_pane
+                    .as_ref()
+                    .and_then(|delivery| delivery.slot)
+                    .is_some_and(|(cols, _)| cols > 0)
+            })
         {
             if let (Some(runtime), Some(pane_id)) = (
                 self.app.session_pane_runtime(),

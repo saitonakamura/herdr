@@ -213,6 +213,8 @@ pub struct HeadlessServer {
     tab_geometry_controllers: HashMap<String, u64>,
     /// Stable tab id whose viewers may see and interact with the one terminal popup.
     popup_owner_tab_id: Option<String>,
+    /// When the session pane entered synchronized output that has not ended yet.
+    session_pane_sync_since: Option<Instant>,
     /// Process-local identity used to reject shell replacements from an earlier server boot.
     client_shell_boot_id: String,
     /// Outer window title last pushed, paired with the client that received it.
@@ -367,6 +369,7 @@ impl HeadlessServer {
             foreground_client_id: None,
             tab_geometry_controllers: HashMap::new(),
             popup_owner_tab_id: None,
+            session_pane_sync_since: None,
             client_shell_boot_id: format!(
                 "{}-{}",
                 std::process::id(),

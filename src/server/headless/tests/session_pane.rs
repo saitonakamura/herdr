@@ -194,3 +194,65 @@ async fn focusing_a_pane_takes_focus_from_the_session_pane() {
     assert!(!server.app.state.session_pane.focused);
     shutdown_test_runtimes(&mut server);
 }
+
+#[tokio::test]
+async fn an_opted_in_client_hears_once_that_no_pane_runs() {
+    let mut server = test_headless_server();
+    server.app.state.workspaces = vec![crate::workspace::Workspace::test_new("session-pane")];
+    server.app.state.ensure_test_terminals();
+    server.app.state.active = Some(0);
+    let opted_in = connect(&mut server, 1, true);
+    let legacy = connect(&mut server, 2, false);
+    server.stream_session_pane();
+    let updates = session_pane_updates(&opted_in);
+    assert!(matches!(&updates[..], [update] if update.pane.is_none()));
+    assert!(session_pane_updates(&legacy).is_empty());
+    server.stream_session_pane();
+    assert!(session_pane_updates(&opted_in).is_empty());
+    shutdown_test_runtimes(&mut server);
+}
+
+#[tokio::test]
+async fn only_a_client_showing_the_pane_routes_its_keyboard_mode_there() {
+    let (mut server, _) = server_with_session_pane(b"SIDE");
+    let _shown = connect(&mut server, 1, true);
+    let _hidden = connect(&mut server, 2, true);
+    let _unreported = connect(&mut server, 3, true);
+    server.handle_server_event(ServerEvent::ClientSessionPaneSlot {
+        client_id: 1,
+        slot: SessionPaneSlot { cols: 26, rows: 24 },
+    });
+    server.handle_server_event(ServerEvent::ClientSessionPaneSlot {
+        client_id: 2,
+        slot: SessionPaneSlot { cols: 0, rows: 24 },
+    });
+    assert!(server.app.set_session_pane_focus(true));
+    let session_pane = server.app.state.session_pane.pane_id();
+    let focused = |server: &HeadlessServer, client_id| {
+        server
+            .shell_focused_runtime(client_id)
+            .map(|(_, pane_id)| pane_id)
+    };
+    assert_eq!(focused(&server, 1), session_pane);
+    assert_ne!(focused(&server, 2), session_pane);
+    assert_ne!(focused(&server, 3), session_pane);
+    shutdown_test_runtimes(&mut server);
+}
+
+#[tokio::test]
+async fn synchronized_output_holds_the_pane_back_only_for_a_while() {
+    let (mut server, _) = server_with_session_pane(b"\x1b[?2026hHALF");
+    let control = connect(&mut server, 1, true);
+    server.stream_session_pane();
+    assert!(session_pane_updates(&control).is_empty());
+    server.session_pane_sync_since = Some(Instant::now() - std::time::Duration::from_secs(2));
+    server.run_session_pane_tasks(Instant::now());
+    let updates = session_pane_updates(&control);
+    let texts = updates
+        .iter()
+        .map(|update| update.pane.as_ref().map(|view| frame_text(&view.frame)))
+        .collect::<Vec<_>>();
+    // Like any pane mid-frame, it shows the last finished frame rather than nothing.
+    assert!(matches!(&texts[..], [Some(_)]), "{texts:?}");
+    shutdown_test_runtimes(&mut server);
+}

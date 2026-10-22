@@ -868,6 +868,7 @@ pub(super) fn apply_endpoint_session_pane(
     state: &mut ClientState,
     endpoints: &mut endpoint::EndpointRegistry,
     endpoint_id: &endpoint::ClientEndpointId,
+    generation: u64,
     endpoint_active: bool,
     update: crate::protocol::session_pane::SessionPaneUpdate,
 ) {
@@ -876,7 +877,8 @@ pub(super) fn apply_endpoint_session_pane(
         return;
     };
     let (cols, rows) = state.reported_size;
-    let (changed, resized) = shell.set_endpoint_session_pane(endpoint_id, update, (cols, rows));
+    let (changed, resized) =
+        shell.set_endpoint_session_pane(endpoint_id, Some(generation), update, (cols, rows));
     if !changed || !endpoint_active {
         return;
     }

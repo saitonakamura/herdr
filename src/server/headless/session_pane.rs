@@ -16,6 +16,9 @@ use crate::protocol::session_pane::{
 use crate::protocol::{self, ServerMessage};
 use crate::server::clients::SessionPaneSentState;
 
+/// Longest a synchronized-output frame may hold back the session pane's slot.
+const SYNC_OUTPUT_LIMIT: std::time::Duration = std::time::Duration::from_secs(1);
+
 impl HeadlessServer {
     pub(super) fn any_client_receives_session_pane(&self) -> bool {
         self.clients
@@ -25,6 +28,13 @@ impl HeadlessServer {
 
     pub(super) fn run_session_pane_tasks(&mut self, now: Instant) {
         self.app.run_session_pane_restart_if_due(now);
+        // A program that never ends synchronized output still gets drawn.
+        if self
+            .session_pane_sync_since
+            .is_some_and(|since| now.saturating_duration_since(since) >= SYNC_OUTPUT_LIMIT)
+        {
+            self.stream_session_pane();
+        }
         if let Some(message) = self.app.take_session_pane_notice() {
             self.send_to_client_shells(ServerMessage::SemanticNotification(
                 protocol::SemanticNotification {
@@ -180,8 +190,14 @@ impl HeadlessServer {
             .session_pane_runtime()
             .is_some_and(|runtime| runtime.synchronized_output_state().0)
         {
-            // The program is mid-frame; its end of synchronized output wakes us again.
-            return;
+            // Mid-frame: its end of synchronized output wakes us, or the limit runs out.
+            let now = Instant::now();
+            let since = *self.session_pane_sync_since.get_or_insert(now);
+            if now.saturating_duration_since(since) < SYNC_OUTPUT_LIMIT {
+                return;
+            }
+        } else {
+            self.session_pane_sync_since = None;
         }
         let state = self.session_pane_sent_state();
         let stale: Vec<u64> = self
@@ -190,7 +206,7 @@ impl HeadlessServer {
             .filter(|(_, client)| client.writer.is_some())
             .filter_map(|(&id, client)| {
                 let delivery = client.session_pane.as_ref()?;
-                (delivery.last_sent != state).then_some(id)
+                (delivery.last_sent.as_ref() != Some(&state)).then_some(id)
             })
             .collect();
         if stale.is_empty() {
@@ -235,7 +251,7 @@ impl HeadlessServer {
                 broken.push(client_id);
                 continue;
             }
-            delivery.last_sent = state.clone();
+            delivery.last_sent = Some(state.clone());
         }
         for client_id in broken {
             self.remove_client_and_resize_if_needed(client_id);

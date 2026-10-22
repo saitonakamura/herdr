@@ -152,6 +152,7 @@ pub struct TerminalState {
     pub detected_agent: Option<Agent>,
     pub fallback_state: AgentState,
     fallback_visible_blocker: bool,
+    fallback_blocked_reason: Option<BlockedReason>,
     fallback_observed_at: Option<Instant>,
     fallback_idle_since: Option<Instant>,
     hook_dialog_seen: bool,
@@ -206,6 +207,7 @@ impl TerminalState {
             detected_agent: None,
             fallback_state: AgentState::Unknown,
             fallback_visible_blocker: false,
+            fallback_blocked_reason: None,
             fallback_observed_at: None,
             fallback_idle_since: None,
             hook_dialog_seen: false,
@@ -419,6 +421,28 @@ impl TerminalState {
         fallback_state: AgentState,
         visible_blocker: bool,
         _visible_idle: bool,
+        visible_working: bool,
+        process_exited: bool,
+        now: Instant,
+    ) -> TerminalStateMutation {
+        self.set_detected_state_with_blocked_reason_at(
+            agent,
+            fallback_state,
+            visible_blocker,
+            None,
+            visible_working,
+            process_exited,
+            now,
+        )
+    }
+
+    /// Screen detection, with what its matched rule says a blocked agent waits on.
+    pub fn set_detected_state_with_blocked_reason_at(
+        &mut self,
+        agent: Option<Agent>,
+        fallback_state: AgentState,
+        visible_blocker: bool,
+        blocked_reason: Option<BlockedReason>,
         _visible_working: bool,
         process_exited: bool,
         now: Instant,
@@ -502,6 +526,8 @@ impl TerminalState {
         }
         self.fallback_state = fallback_state;
         self.fallback_visible_blocker = visible_blocker && fallback_state == AgentState::Blocked;
+        self.fallback_blocked_reason =
+            blocked_reason.filter(|_| fallback_state == AgentState::Blocked);
         self.fallback_observed_at = Some(now);
         self.fallback_idle_since =
             (fallback_state == AgentState::Idle).then(|| self.fallback_idle_since.unwrap_or(now));
@@ -1961,6 +1987,7 @@ impl TerminalState {
             self.detected_agent = None;
             self.fallback_state = AgentState::Unknown;
             self.fallback_visible_blocker = false;
+            self.fallback_blocked_reason = None;
             self.fallback_observed_at = None;
             self.clear_agent_name();
         }
@@ -2011,6 +2038,7 @@ impl TerminalState {
         self.detected_agent = None;
         self.fallback_state = AgentState::Unknown;
         self.fallback_visible_blocker = false;
+        self.fallback_blocked_reason = None;
         self.fallback_observed_at = None;
         self.clear_agent_name();
         let current_session = self.current_session_identity_for_persistence();
@@ -2211,14 +2239,14 @@ impl TerminalState {
         now: Instant,
     ) -> (AgentState, Option<BlockedReason>) {
         if self.visible_blocker_overrides_hook() {
-            return (AgentState::Blocked, None);
+            return (AgentState::Blocked, self.fallback_blocked_reason);
         }
         let Some(authority) = self
             .hook_authority
             .as_ref()
             .filter(|authority| self.hook_authority_is_effective(authority))
         else {
-            return (self.fallback_state, None);
+            return (self.fallback_state, self.fallback_blocked_reason);
         };
         if crate::detect::screen_assisted_hook_authority(&authority.source, &authority.agent_label)
         {
@@ -2517,6 +2545,7 @@ impl TerminalState {
         self.detected_agent = None;
         self.fallback_state = AgentState::Unknown;
         self.fallback_visible_blocker = false;
+        self.fallback_blocked_reason = None;
         self.fallback_observed_at = None;
         self.hook_authority = None;
         self.persisted_agent_session = None;
@@ -2794,6 +2823,7 @@ mod tests {
             skip_state_update: false,
             visible_idle: false,
             visible_blocker: false,
+            blocked_reason: None,
             visible_working: false,
         };
 
@@ -4005,6 +4035,72 @@ mod tests {
         assert_eq!(terminal.fallback_state, AgentState::Blocked);
         assert_eq!(terminal.state, AgentState::Blocked);
         assert_eq!(change.unwrap().previous_state, AgentState::Working);
+    }
+
+    #[test]
+    fn screen_blocked_reason_holds_only_while_the_screen_decides_blocked() {
+        let now = Instant::now();
+        let mut terminal = test_terminal();
+        terminal.set_detected_state_with_blocked_reason_at(
+            Some(Agent::Codex),
+            AgentState::Blocked,
+            true,
+            Some(BlockedReason::Question),
+            false,
+            false,
+            now,
+        );
+        assert_eq!(terminal.state, AgentState::Blocked);
+        assert_eq!(terminal.blocked_reason(), Some(BlockedReason::Question));
+
+        terminal.set_detected_state_with_blocked_reason_at(
+            Some(Agent::Codex),
+            AgentState::Blocked,
+            true,
+            None,
+            false,
+            false,
+            now,
+        );
+        assert_eq!(
+            terminal.blocked_reason(),
+            None,
+            "a reasonless block clears it"
+        );
+
+        terminal.set_detected_state_with_blocked_reason_at(
+            Some(Agent::Codex),
+            AgentState::Idle,
+            false,
+            Some(BlockedReason::Question),
+            false,
+            false,
+            now,
+        );
+        assert_eq!(terminal.blocked_reason(), None, "only a block has a reason");
+
+        terminal.set_hook_authority(
+            "herdr:codex".into(),
+            "codex".into(),
+            AgentState::Working,
+            None,
+            None,
+        );
+        terminal.set_detected_state_with_blocked_reason_at(
+            Some(Agent::Codex),
+            AgentState::Blocked,
+            true,
+            Some(BlockedReason::Question),
+            false,
+            false,
+            Instant::now(),
+        );
+        assert_eq!(terminal.state, AgentState::Blocked);
+        assert_eq!(
+            terminal.blocked_reason(),
+            Some(BlockedReason::Question),
+            "a visible blocker overriding the hook keeps its reason"
+        );
     }
 
     #[test]

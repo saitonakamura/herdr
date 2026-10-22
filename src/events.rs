@@ -5,7 +5,7 @@
 
 use std::time::Instant;
 
-use crate::detect::{Agent, AgentState};
+use crate::detect::{Agent, AgentState, BlockedReason};
 use crate::layout::PaneId;
 use crate::workspace::{GitStatusCacheEntry, PaneGitStatus};
 
@@ -99,6 +99,8 @@ pub enum AppEvent {
         agent: Option<Agent>,
         state: AgentState,
         visible_blocker: bool,
+        /// What the screen says a blocked agent waits on, when its rule says.
+        blocked_reason: Option<BlockedReason>,
         visible_working: bool,
         process_exited: bool,
         observed_at: Instant,

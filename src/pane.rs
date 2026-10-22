@@ -18,7 +18,7 @@ use tokio::sync::{mpsc, Notify};
 use tracing::debug;
 use tracing::{error, info, warn};
 
-use crate::detect::{Agent, AgentState};
+use crate::detect::{Agent, AgentState, BlockedReason};
 use crate::events::AppEvent;
 use crate::layout::PaneId;
 use crate::pty::actor::{PtyIoActor, PtyIoActorConfig, PtyIoActorHandle, PtyReadResult};
@@ -266,6 +266,7 @@ async fn publish_state_changed_event(
     agent: Option<Agent>,
     state: AgentState,
     visible_blocker: bool,
+    blocked_reason: Option<BlockedReason>,
     visible_working: bool,
     process_exited: bool,
     observed_at: std::time::Instant,
@@ -279,6 +280,7 @@ async fn publish_state_changed_event(
             agent,
             state,
             visible_blocker,
+            blocked_reason,
             visible_working,
             process_exited,
             observed_at,
@@ -345,10 +347,12 @@ struct AgentDetectionPublishUpdate {
     state: AgentState,
     visible_idle: bool,
     visible_blocker: bool,
+    blocked_reason: Option<BlockedReason>,
     visible_working: bool,
     process_exited: bool,
 }
 
+#[allow(clippy::too_many_arguments)] // one per piece of detector loop state it updates
 async fn apply_agent_detection_publish_update(
     state_events: mpsc::Sender<AppEvent>,
     pane_id: PaneId,
@@ -358,6 +362,7 @@ async fn apply_agent_detection_publish_update(
     state: &mut AgentState,
     last_visible_idle: &mut bool,
     last_visible_blocker: &mut bool,
+    last_blocked_reason: &mut Option<BlockedReason>,
     last_visible_working: &mut bool,
     last_visible_signal_refresh: &mut Option<std::time::Instant>,
     foreground_shell_exit_reported: &mut bool,
@@ -365,6 +370,7 @@ async fn apply_agent_detection_publish_update(
     *state = update.state;
     *last_visible_idle = update.visible_idle;
     *last_visible_blocker = update.visible_blocker;
+    *last_blocked_reason = update.blocked_reason;
     *last_visible_working = update.visible_working;
     *last_visible_signal_refresh = if update.visible_blocker || update.visible_working {
         Some(observed_at)
@@ -380,6 +386,7 @@ async fn apply_agent_detection_publish_update(
         agent,
         update.state,
         update.visible_blocker,
+        update.blocked_reason,
         update.visible_working,
         update.process_exited,
         observed_at,
@@ -957,6 +964,7 @@ fn spawn_basic_detection_task(
         let mut state = AgentState::Unknown;
         let mut last_visible_idle = false;
         let mut last_visible_blocker = false;
+        let mut last_blocked_reason = None;
         let mut last_visible_working = false;
         let mut last_visible_signal_refresh = None;
         let mut last_process_check = std::time::Instant::now();
@@ -993,6 +1001,7 @@ fn spawn_basic_detection_task(
                     state = AgentState::Unknown;
                     last_visible_idle = false;
                     last_visible_blocker = false;
+                    last_blocked_reason = None;
                     last_visible_working = false;
                     last_visible_signal_refresh = None;
                     last_process_check = std::time::Instant::now();
@@ -1121,6 +1130,7 @@ fn spawn_basic_detection_task(
                             state = AgentState::Unknown;
                             last_visible_idle = false;
                             last_visible_blocker = false;
+                            last_blocked_reason = None;
                             last_visible_working = false;
                             last_visible_signal_refresh = None;
                             publish_agent_process_detected_event(
@@ -1159,6 +1169,7 @@ fn spawn_basic_detection_task(
                             state: AgentState::Unknown,
                             visible_idle: false,
                             visible_blocker: false,
+                            blocked_reason: None,
                             visible_working: false,
                             process_exited: false,
                         },
@@ -1166,6 +1177,7 @@ fn spawn_basic_detection_task(
                         &mut state,
                         &mut last_visible_idle,
                         &mut last_visible_blocker,
+                        &mut last_blocked_reason,
                         &mut last_visible_working,
                         &mut last_visible_signal_refresh,
                         &mut foreground_shell_exit_reported,
@@ -1204,6 +1216,7 @@ fn spawn_basic_detection_task(
                     agent,
                     published.state,
                     published.visible_blocker,
+                    published.blocked_reason,
                     published.visible_working,
                     false,
                     now,
@@ -1265,6 +1278,7 @@ fn spawn_basic_detection_task(
                     current_state: state,
                     last_visible_idle,
                     last_visible_blocker,
+                    last_blocked_reason,
                     last_visible_working,
                     last_visible_signal_refresh,
                     process_exited,
@@ -1278,6 +1292,7 @@ fn spawn_basic_detection_task(
                     state: new_state,
                     visible_idle,
                     visible_blocker,
+                    blocked_reason,
                     visible_working,
                     process_exited: publish_process_exited,
                 } => {
@@ -1289,6 +1304,7 @@ fn spawn_basic_detection_task(
                             state: new_state,
                             visible_idle,
                             visible_blocker,
+                            blocked_reason,
                             visible_working,
                             process_exited: publish_process_exited,
                         },
@@ -1296,6 +1312,7 @@ fn spawn_basic_detection_task(
                         &mut state,
                         &mut last_visible_idle,
                         &mut last_visible_blocker,
+                        &mut last_blocked_reason,
                         &mut last_visible_working,
                         &mut last_visible_signal_refresh,
                         &mut foreground_shell_exit_reported,
@@ -1309,6 +1326,7 @@ fn spawn_basic_detection_task(
                                 state: new_state,
                                 visible_idle,
                                 visible_blocker,
+                                blocked_reason,
                                 visible_working,
                             },
                             now,
@@ -2947,6 +2965,7 @@ impl PaneRuntime {
                 let mut release_was_active = false;
                 let mut pending_restore_probe = initial_state.detected_agent.is_some();
                 let mut last_visible_blocker = false;
+                let mut last_blocked_reason = None;
                 let mut last_visible_working = false;
                 let mut last_visible_signal_refresh = None;
                 let mut last_detection_text = DetectionTextCache::default();
@@ -2993,6 +3012,7 @@ impl PaneRuntime {
                             release_was_active = false;
                             pending_restore_probe = false;
                             last_visible_blocker = false;
+                            last_blocked_reason = None;
                             last_visible_working = false;
                             last_visible_signal_refresh = None;
                             last_detection_text.clear();
@@ -3154,6 +3174,7 @@ impl PaneRuntime {
                                         state = AgentState::Unknown;
                                         last_visible_idle = false;
                                         last_visible_blocker = false;
+                                        last_blocked_reason = None;
                                         last_visible_working = false;
                                         last_visible_signal_refresh = None;
                                         publish_agent_process_detected_event(
@@ -3222,6 +3243,7 @@ impl PaneRuntime {
                                     state: AgentState::Unknown,
                                     visible_idle: false,
                                     visible_blocker: false,
+                                    blocked_reason: None,
                                     visible_working: false,
                                     process_exited: false,
                                 },
@@ -3229,6 +3251,7 @@ impl PaneRuntime {
                                 &mut state,
                                 &mut last_visible_idle,
                                 &mut last_visible_blocker,
+                                &mut last_blocked_reason,
                                 &mut last_visible_working,
                                 &mut last_visible_signal_refresh,
                                 &mut foreground_shell_exit_reported,
@@ -3267,6 +3290,7 @@ impl PaneRuntime {
                             agent,
                             published.state,
                             published.visible_blocker,
+                            published.blocked_reason,
                             published.visible_working,
                             false,
                             now,
@@ -3330,6 +3354,7 @@ impl PaneRuntime {
                             current_state: state,
                             last_visible_idle,
                             last_visible_blocker,
+                            last_blocked_reason,
                             last_visible_working,
                             last_visible_signal_refresh,
                             process_exited,
@@ -3343,6 +3368,7 @@ impl PaneRuntime {
                             state: new_state,
                             visible_idle,
                             visible_blocker,
+                            blocked_reason,
                             visible_working,
                             process_exited: publish_process_exited,
                         } => {
@@ -3354,6 +3380,7 @@ impl PaneRuntime {
                                     state: new_state,
                                     visible_idle,
                                     visible_blocker,
+                                    blocked_reason,
                                     visible_working,
                                     process_exited: publish_process_exited,
                                 },
@@ -3361,6 +3388,7 @@ impl PaneRuntime {
                                 &mut state,
                                 &mut last_visible_idle,
                                 &mut last_visible_blocker,
+                                &mut last_blocked_reason,
                                 &mut last_visible_working,
                                 &mut last_visible_signal_refresh,
                                 &mut foreground_shell_exit_reported,
@@ -3374,6 +3402,7 @@ impl PaneRuntime {
                                         state: new_state,
                                         visible_idle,
                                         visible_blocker,
+                                        blocked_reason,
                                         visible_working,
                                     },
                                     now,
@@ -6837,6 +6866,7 @@ mod tests {
             Some(Agent::Pi),
             AgentState::Idle,
             false,
+            None,
             false,
             false,
             std::time::Instant::now(),
@@ -6875,6 +6905,7 @@ mod tests {
                 agent: Some(Agent::Pi),
                 state: AgentState::Idle,
                 visible_blocker: false,
+                blocked_reason: None,
                 visible_working: false,
                 process_exited: false,
                 observed_at: _,
@@ -6891,6 +6922,7 @@ mod tests {
             skip_state_update: false,
             visible_idle: false,
             visible_blocker: false,
+            blocked_reason: None,
             visible_working: false,
         };
         let mut last_ready = false;

@@ -695,6 +695,7 @@ mod tests {
             agent: Some(Agent::Pi),
             state: AgentState::Idle,
             visible_blocker: false,
+            blocked_reason: None,
             visible_working: false,
             process_exited: true,
             observed_at,
@@ -1161,6 +1162,72 @@ mod tests {
                 None => {
                     let success: SuccessResponse = serde_json::from_str(&response)
                         .unwrap_or_else(|_| panic!("{reason:?} {screen:?}: {response}"));
+                    assert!(matches!(
+                        success.result,
+                        crate::api::schema::ResponseResult::AgentPrompted { .. }
+                    ));
+                    let written = rx.recv().await.unwrap();
+                    assert!(String::from_utf8_lossy(&written).contains("the answer"));
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn agent_prompt_takes_the_blocked_reason_from_screen_detection() {
+        use crate::detect::BlockedReason;
+
+        let rule = "\u{2500}".repeat(40);
+        let screen = format!("\u{25cf} Which one?\r\n\r\n{rule}\r\n\u{276f} \r\n{rule}\r\n");
+        let cases = [
+            (Some(BlockedReason::Question), None),
+            (
+                Some(BlockedReason::Permission),
+                Some("agent_blocked_permission"),
+            ),
+            (None, Some("agent_blocked")),
+        ];
+        for (reason, refusal) in cases {
+            let mut app = app_with_agent();
+            let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+            let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+                .attached_terminal_id
+                .clone();
+            let terminal = app.state.terminals.get_mut(&terminal_id).unwrap();
+            terminal.set_agent_name("reviewer".into());
+            terminal.set_detected_state_with_blocked_reason_at(
+                Some(Agent::Claude),
+                AgentState::Blocked,
+                true,
+                reason,
+                false,
+                false,
+                std::time::Instant::now(),
+            );
+            let (runtime, mut rx) = crate::terminal::TerminalRuntime::test_with_channel(80, 24);
+            runtime.test_process_pty_bytes(screen.as_bytes());
+            app.state.insert_test_runtime(pane_id, runtime);
+
+            let response = run_deferred_agent_prompt(
+                &mut app,
+                "req",
+                AgentPromptParams {
+                    target: "reviewer".into(),
+                    text: "the answer".into(),
+                    wait: None,
+                },
+            );
+
+            match refusal {
+                Some(code) => {
+                    let error: crate::api::schema::ErrorResponse =
+                        serde_json::from_str(&response).unwrap();
+                    assert_eq!(error.error.code, code, "{reason:?}");
+                    assert!(rx.try_recv().is_err(), "a refused prompt wrote input");
+                }
+                None => {
+                    let success: SuccessResponse = serde_json::from_str(&response)
+                        .unwrap_or_else(|_| panic!("{reason:?}: {response}"));
                     assert!(matches!(
                         success.result,
                         crate::api::schema::ResponseResult::AgentPrompted { .. }

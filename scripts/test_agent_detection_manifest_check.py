@@ -249,6 +249,34 @@ class AgentDetectionManifestCheckTests(unittest.TestCase):
             )
             check.load_manifest_dir(bundled, engine_version=4)
 
+    def test_blocked_reason_requires_engine_five_and_a_blocked_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bundled = Path(tmp) / "bundled"
+            bundled.mkdir()
+            blocked = manifest("codex", "2026.06.10.1").replace(
+                'state = "idle"\ncontains = ["ready"]',
+                'state = "blocked"\nblocked_reason = "question"\ncontains = ["ready"]',
+            )
+            self.assertIn("blocked_reason", blocked)
+            (bundled / "codex.toml").write_text(blocked)
+
+            with self.assertRaisesRegex(check.CheckError, "requires min_engine_version 5"):
+                check.load_manifest_dir(bundled, engine_version=5)
+
+            engine_five = blocked.replace("min_engine_version = 1", "min_engine_version = 5")
+            (bundled / "codex.toml").write_text(engine_five)
+            check.load_manifest_dir(bundled, engine_version=5)
+
+            (bundled / "codex.toml").write_text(
+                engine_five.replace('state = "blocked"', 'state = "idle"')
+            )
+            with self.assertRaisesRegex(check.CheckError, "requires state blocked"):
+                check.load_manifest_dir(bundled, engine_version=5)
+
+            (bundled / "codex.toml").write_text(engine_five.replace('"question"', '"guess"'))
+            with self.assertRaisesRegex(check.CheckError, "invalid blocked_reason"):
+                check.load_manifest_dir(bundled, engine_version=5)
+
     def test_awaiting_state_requires_engine_six(self):
         with tempfile.TemporaryDirectory() as tmp:
             bundled = Path(tmp) / "bundled"

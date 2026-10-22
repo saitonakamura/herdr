@@ -1073,3 +1073,76 @@ fn engine_versioned_override_shadows_the_plain_override() {
         assert_eq!(explain(Agent::Codex, "marker").state, AgentState::Working);
     });
 }
+
+#[test]
+fn blocked_reason_follows_the_matched_blocked_rule() {
+    with_manifest_dirs("blocked-reason", || {
+        write_local_codex(&rules_manifest(
+            r#"
+[[rules]]
+id = "asked"
+state = "blocked"
+priority = 20
+visible_blocker = true
+blocked_reason = "question"
+contains = ["asked"]
+
+[[rules]]
+id = "dialog"
+state = "blocked"
+priority = 10
+contains = ["dialog"]
+
+[[rules]]
+id = "prompt"
+state = "idle"
+priority = 5
+contains = ["> "]
+"#,
+        ));
+
+        let asked = explain(Agent::Codex, "asked\n> ");
+        assert_eq!(asked.state, AgentState::Blocked);
+        assert_eq!(asked.blocked_reason, Some(BlockedReason::Question));
+        assert_eq!(
+            explain_to_json_value(&asked)["blocked_reason"],
+            serde_json::json!("question")
+        );
+        assert_eq!(
+            detect(Agent::Codex, "asked\n> ").blocked_reason,
+            Some(BlockedReason::Question)
+        );
+
+        let unexplained = explain(Agent::Codex, "dialog\n> ");
+        assert_eq!(unexplained.state, AgentState::Blocked);
+        assert_eq!(unexplained.blocked_reason, None);
+
+        let idle = explain(Agent::Codex, "> ");
+        assert_eq!(idle.blocked_reason, None);
+    });
+}
+
+#[test]
+fn manifest_validation_gates_blocked_reason_on_state_and_engine_version() {
+    let manifest = |min_engine_version: u32, state: &str, reason: &str| {
+        format!(
+            r#"
+id = "codex"
+version = "2026.10.21.1"
+min_engine_version = {min_engine_version}
+
+[[rules]]
+id = "asked"
+state = "{state}"
+blocked_reason = "{reason}"
+contains = ["asked"]
+"#
+        )
+    };
+
+    assert!(parse_manifest(&manifest(5, "blocked", "question")).is_ok());
+    assert!(parse_manifest(&manifest(5, "blocked", "permission")).is_ok());
+    assert!(parse_manifest(&manifest(4, "blocked", "question")).is_err());
+    assert!(parse_manifest(&manifest(5, "idle", "question")).is_err());
+    assert!(parse_manifest(&manifest(5, "blocked", "guess")).is_err());
+}

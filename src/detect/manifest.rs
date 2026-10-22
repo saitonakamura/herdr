@@ -8,7 +8,7 @@ use serde::Deserialize;
 
 use super::{
     agent_label, manifest_update::ManifestVersion, parse_agent_label, Agent, AgentDetection,
-    AgentState,
+    AgentState, BlockedReason,
 };
 
 pub const DEFAULT_KNOWN_AGENT_IDLE_FALLBACK: &str = "default_known_agent_idle_fallback";
@@ -33,6 +33,7 @@ pub struct DetectionExplain {
     pub screen_detection_skipped: bool,
     pub visible_idle: bool,
     pub visible_blocker: bool,
+    pub blocked_reason: Option<BlockedReason>,
     pub visible_working: bool,
     pub skip_state_update: bool,
     pub skipped_update_reason: Option<String>,
@@ -163,6 +164,10 @@ struct ManifestRule {
     visible_idle: bool,
     #[serde(default)]
     visible_blocker: bool,
+    /// What a blocked agent waits on. Callers take only a question as safe to
+    /// answer with typed text, so name one only where the screen proves it.
+    #[serde(default)]
+    blocked_reason: Option<BlockedReason>,
     #[serde(default)]
     visible_working: bool,
     #[serde(default)]
@@ -409,6 +414,7 @@ pub fn explain_for_label(agent_label: &str, screen_content: &str) -> DetectionEx
             screen_detection_skipped: false,
             visible_idle: false,
             visible_blocker: false,
+            blocked_reason: None,
             visible_working: false,
             skip_state_update: false,
             skipped_update_reason: None,
@@ -432,6 +438,7 @@ impl DetectionExplain {
             skip_state_update: self.skip_state_update,
             visible_idle: self.visible_idle,
             visible_blocker: self.visible_blocker,
+            blocked_reason: self.blocked_reason,
             visible_working: self.visible_working,
         }
     }
@@ -510,6 +517,7 @@ fn evaluate_loaded_manifest(
         screen_detection_skipped: false,
         visible_idle: rule.visible_idle && state == AgentState::Idle,
         visible_blocker: rule.visible_blocker && state == AgentState::Blocked,
+        blocked_reason: rule.blocked_reason.filter(|_| state == AgentState::Blocked),
         visible_working: rule.visible_working && state == AgentState::Working,
         skip_state_update: rule.skip_state_update,
         skipped_update_reason,
@@ -567,6 +575,7 @@ fn fallback_explain(
         screen_detection_skipped: false,
         visible_idle: false,
         visible_blocker: false,
+        blocked_reason: None,
         visible_working: false,
         skip_state_update: false,
         skipped_update_reason: None,
@@ -874,6 +883,7 @@ pub fn explain_to_json_value(explain: &DetectionExplain) -> serde_json::Value {
         "matched_rule": matched_rule,
         "visible_idle": explain.visible_idle,
         "visible_blocker": explain.visible_blocker,
+        "blocked_reason": explain.blocked_reason,
         "visible_working": explain.visible_working,
         "screen_detection_skipped": explain.screen_detection_skipped,
         "skip_state_update": explain.skip_state_update,
@@ -968,9 +978,34 @@ fn validate_manifest(manifest: &AgentManifest) -> Result<(), String> {
         validate_rule_gate(rule, &mut complexity)
             .map_err(|err| format!("rule {} has invalid matcher gates: {err}", rule.id))?;
         validate_after_last_line(rule, manifest.min_engine_version)?;
+        validate_blocked_reason(rule, manifest.min_engine_version)?;
         validate_awaiting_state(rule, manifest.min_engine_version)?;
     }
 
+    Ok(())
+}
+
+const BLOCKED_REASON_ENGINE_VERSION: u32 = 5;
+
+fn validate_blocked_reason(
+    rule: &ManifestRule,
+    min_engine_version: Option<u32>,
+) -> Result<(), String> {
+    if rule.blocked_reason.is_none() {
+        return Ok(());
+    }
+    if rule.state != Some(ManifestState::Blocked) {
+        return Err(format!(
+            "rule {} uses blocked_reason without state = \"blocked\"",
+            rule.id
+        ));
+    }
+    if min_engine_version.is_some_and(|version| version < BLOCKED_REASON_ENGINE_VERSION) {
+        return Err(format!(
+            "rule {} uses blocked_reason but min_engine_version is below {}",
+            rule.id, BLOCKED_REASON_ENGINE_VERSION
+        ));
+    }
     Ok(())
 }
 

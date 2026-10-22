@@ -25,6 +25,19 @@ Also:
 - Dotfiles: the manifest override, the sentinel section of `.config/agents/AGENTS.md`, and loom (anything that reads `working`, such as `loom close` refusing "an agent that ends on a background-work sentinel reads as working for good"). All of it must stay safe on stock 0.9.4: fork-only manifests and config in their versioned or fork files, and real-call capability probes.
 - The sidebar: how the new state shows. Follow the existing UI language.
 
+## Resolution
+
+Draft, pending [PR #23](https://github.com/saitonakamura/herdr/pull/23) and dotfiles branch `herdr-fork/028-awaiting`.
+
+- **Name and look (the user, 2026-10-22).** `awaiting`, shown as a blue ● (dots) or ◷ (symbols). It is in GLOSSARY.md beside idle, working, blocked and done.
+- **Source.** The Claude `Stop` hook already reported 🔄, and a running sub-agent, as `working` with `background: true`. The effective state now maps that report to `awaiting`. The hook asset and the report API are unchanged, and hook authority keeps the report as sent, so a handoff from an older build still works. Manifest engine 6 adds `state = "awaiting"` for when the screen decides.
+- **Delivery.** Message delivery treats `awaiting` like `idle`. A message held while the agent works goes out on `working → awaiting`. `agent wait` with no `--until` settles on it too. `awaiting → idle` is a completion, and `working → awaiting` is quiet. `agent close` does not count it as busy.
+- **Endpoint contract.** The gen-1 snapshot is JSON, and its `agent_status` deserializer already maps unknown strings to `Unknown`. Stock clients therefore see `unknown`, and fork clients decode `awaiting`. Fixtures are untouched and `PROTOCOL_VERSION` is unchanged, because the state never goes over bincode.
+- **With 026.** Engine 5 (`blocked_reason`) and engine 6 (`awaiting`) are both kept, and `awaiting` never carries a reason.
+- **Dotfiles.** `claude.v6.toml` makes both background rules say `awaiting`. Loom shows it as live and blue, and its close note is scoped to builds without 028. `AGENTS.md`, `herdr.md` and pi's dots are updated too. It is inert until an engine-6 build runs.
+- **Verified live.** In a throwaway session with v6, 🔄 reads `awaiting` and a message is typed at once. With v5 the same screen reads `working` and the message is held, which reproduces the bug. Swapping back to v6 delivers it. Over the hook path, `awaiting` held against an idle screen and messages were delivered.
+- **After merge.** Merge the dotfiles branch. Once every box runs a release with 028, fold `claude.v6.toml` into `claude.toml`.
+
 ## Parent
 
 [000-map](./000-map.md)

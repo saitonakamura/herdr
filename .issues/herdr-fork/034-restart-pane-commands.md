@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-restart-pane-commands
 title: Non-agent panes re-run their command on restore
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee:
-claimed_by:
+claimed_by: macos/w1:pV/a6559c7f-193e-49c5-95af-0196445aa5ae
 ---
 
 ## Question

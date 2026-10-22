@@ -1,7 +1,7 @@
 ---
 id: herdr-fork-sidebar-pane
 title: Sidebar pane
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
@@ -10,7 +10,7 @@ blocked_by:
   - herdr-fork-agent-identity-parent
   - herdr-fork-workspace-is-effort
 assignee:
-claimed_by:
+claimed_by: macos/w1:pS/f0047384-d08b-43e1-97f2-df45f517964a
 ---
 
 ## Question

@@ -295,6 +295,31 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_agent_status_decodes_awaiting_and_falls_back_to_unknown() {
+        let fixture = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/endpoint-snapshot-v1.json"
+        ));
+        let status_of = |status: &str| {
+            let mut value: serde_json::Value = serde_json::from_str(fixture).unwrap();
+            value["workspaces"][0]["agent_status"] = status.into();
+            serde_json::from_value::<ClientShellSnapshot>(value)
+                .unwrap()
+                .workspaces[0]
+                .agent_status
+        };
+
+        assert_eq!(
+            status_of("awaiting"),
+            crate::api::schema::AgentStatus::Awaiting
+        );
+        assert_eq!(
+            status_of("a_later_state"),
+            crate::api::schema::AgentStatus::Unknown
+        );
+    }
+
+    #[test]
     fn snapshot_message_uses_named_json_control() {
         let snapshot = snapshot();
         let ServerMessage::EndpointControl { kind, data } = snapshot_message(&snapshot).unwrap()

@@ -20,6 +20,7 @@ use crate::cli::projection::{
 const STATUSES: &[Choice<AgentStatus>] = &[
     Choice::new("idle", AgentStatus::Idle),
     Choice::new("working", AgentStatus::Working),
+    Choice::new("awaiting", AgentStatus::Awaiting),
     Choice::new("blocked", AgentStatus::Blocked),
     Choice::new("done", AgentStatus::Done),
     Choice::new("unknown", AgentStatus::Unknown),
@@ -328,7 +329,7 @@ pub(crate) fn command() -> Command {
             .after_help("Each TARGET closes with every descendant (by parent). Refused with agent_subtree_busy while any of them is working or blocked, unless --force; the pane running this command is never counted and closes last. Closing an agent closes its pane, and the tab or workspace too when that pane is the last one left in it."))
         .subcommand(leaf("wait", AgentWaitProjection::arguments(), "Wait until an agent reaches one of the requested states")
             .override_usage("herdr agent wait <TARGET> [OPTIONS]")
-            .after_help("Without --until, matches idle, done, or blocked. Use --until unknown explicitly when needed. Without --timeout, waits indefinitely."))
+            .after_help("Without --until, matches idle, done, awaiting, or blocked. Use --until unknown explicitly when needed. Without --timeout, waits indefinitely."))
         .subcommand(leaf("prompt", AgentPromptProjection::arguments(), "Submit a prompt to an agent")
             .args(AgentPromptWaitProjection::arguments().into_iter().map(|arg| arg.requires("wait")))
             .override_usage("herdr agent prompt <TARGET> <TEXT> [OPTIONS]")

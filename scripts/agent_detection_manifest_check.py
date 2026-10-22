@@ -35,7 +35,7 @@ RULE_KEYS = {
     "after_last_line_regex",
 }
 GATE_KEYS = {"all", "any", "not", "contains", "regex", "line_regex"}
-STATES = {"idle", "working", "blocked", "unknown"}
+STATES = {"idle", "working", "blocked", "unknown", "awaiting"}
 REGION_RE = re.compile(
     r"^(whole_recent|whole_recent_without_current_prompt_marker|after_last_prompt_marker|"
     r"before_current_prompt_marker|current_prompt_block_marker|after_current_prompt_block_marker|"
@@ -54,6 +54,7 @@ MAX_MATCHERS_PER_GATE = 32
 MAX_TOTAL_MATCHERS = 1024
 MAX_MATCHER_CHARS = 512
 AFTER_LAST_LINE_REGEX_ENGINE_VERSION = 4
+AWAITING_STATE_ENGINE_VERSION = 6
 
 # Keep older-engine clients on a published manifest until a release with the
 # bundled manifest's engine ships. Maps agent id to (bundled version, published
@@ -163,6 +164,11 @@ def validate_manifest(path: Path, engine_version: int) -> dict:
             raise CheckError(
                 f"{path}: rule {rule['id']} after_last_line_regex requires min_engine_version "
                 f"{AFTER_LAST_LINE_REGEX_ENGINE_VERSION}"
+            )
+        if rule.get("state") == "awaiting" and min_engine < AWAITING_STATE_ENGINE_VERSION:
+            raise CheckError(
+                f"{path}: rule {rule['id']} state awaiting requires min_engine_version "
+                f"{AWAITING_STATE_ENGINE_VERSION}"
             )
 
     return manifest

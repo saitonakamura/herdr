@@ -234,7 +234,8 @@ impl App {
             return None;
         }
         let needs_empty_composer = match terminal.state {
-            AgentState::Idle => false,
+            // An awaiting agent waits for exactly this, so it takes messages like an idle one.
+            AgentState::Idle | AgentState::Awaiting => false,
             AgentState::Blocked if terminal.blocked_reason() == Some(BlockedReason::Question) => {
                 true
             }
@@ -514,6 +515,29 @@ mod tests {
 
         f.change_state(f.lead, AgentState::Working);
         f.change_state(f.lead, AgentState::Idle);
+        assert!(typed_line(&mut typed).await.contains("second"));
+        assert_eq!(f.state_of(second), "delivered");
+    }
+
+    #[tokio::test]
+    async fn an_agent_awaiting_background_work_takes_messages_like_an_idle_one() {
+        let mut f = fixture();
+        f.agent(f.worker, Agent::Claude, AgentState::Working, "worker");
+        f.change_state(f.lead, AgentState::Awaiting);
+        let mut typed = f.runtime(f.lead, EMPTY);
+
+        let first = f.send(f.lead, "first")["result"]["message"]["message_id"]
+            .as_u64()
+            .unwrap();
+        assert!(typed_line(&mut typed).await.contains("first"));
+        assert_eq!(f.state_of(first), "delivered");
+
+        f.change_state(f.lead, AgentState::Working);
+        let second = f.send(f.lead, "second")["result"]["message"]["message_id"]
+            .as_u64()
+            .unwrap();
+        assert_eq!(f.state_of(second), "pending", "held while it works");
+        f.change_state(f.lead, AgentState::Awaiting);
         assert!(typed_line(&mut typed).await.contains("second"));
         assert_eq!(f.state_of(second), "delivered");
     }

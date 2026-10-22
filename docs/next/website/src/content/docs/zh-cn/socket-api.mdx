@@ -337,7 +337,7 @@ UI 上下文变化时,该投影会重新求值。它控制展开和折叠的侧�
 和 `state_change_seq`。要过滤插件上报的窗格元数据,使用 `{"token":"name"}`
 作为字段。值可以是字符串、布尔值、无符号整数或上下文对象。上下文值包括
 `current_workspace_id` 和 `current_tab_id`，并且只能与对应的 ID 字段比较。在保存机器客户端中，所选服务器的视图应用于合并后的智能体列表。当前工作区和标签页上下文也包含所选机器，因此其他机器上的相同 ID 不会匹配；而 `status` 为 `blocked` 等独立条件仍可匹配任意已连接机器上的智能体。
-有效 status 值为 `idle`、`working`、`blocked`、`done` 和 `unknown`;`done`
+有效 status 值为 `idle`、`working`、`awaiting`、`blocked`、`done` 和 `unknown`;`done`
 表示 idle 且尚未查看。
 
 排序字段包括 `workspace_order`、`tab_order`、`pane_order`、`attention`、

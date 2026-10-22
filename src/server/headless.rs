@@ -2706,9 +2706,7 @@ impl HeadlessServer {
             .terminals
             .values()
             .find(|terminal| terminal.id.as_str() == target.terminal_id)?;
-        if terminal.effective_known_agent().is_none()
-            || terminal.state == crate::detect::AgentState::Idle
-        {
+        if terminal.effective_known_agent().is_none() || terminal.state.at_prompt() {
             return None;
         }
         let runtime = self.app.terminal_runtimes.get(&terminal.id)?;
@@ -2769,9 +2767,7 @@ impl HeadlessServer {
             .terminals
             .values()
             .find(|terminal| terminal.id.as_str() == target.terminal_id)?;
-        if terminal.effective_known_agent().is_none()
-            || terminal.state != crate::detect::AgentState::Idle
-        {
+        if terminal.effective_known_agent().is_none() || !terminal.state.at_prompt() {
             return None;
         }
         let runtime = self.app.terminal_runtimes.get(&terminal.id)?;
@@ -2800,7 +2796,7 @@ impl HeadlessServer {
                 .state
                 .terminals
                 .get(&read.terminal_id)
-                .is_some_and(|terminal| terminal.state == crate::detect::AgentState::Idle);
+                .is_some_and(|terminal| terminal.state.at_prompt());
             let attached = self
                 .terminal_attach_owners
                 .contains_key(read.terminal_id.as_str());

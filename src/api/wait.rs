@@ -529,6 +529,7 @@ fn agent_wait_statuses(
         vec![
             crate::api::schema::AgentStatus::Idle,
             crate::api::schema::AgentStatus::Done,
+            crate::api::schema::AgentStatus::Awaiting,
             crate::api::schema::AgentStatus::Blocked,
         ]
     } else {

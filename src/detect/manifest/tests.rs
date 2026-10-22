@@ -999,6 +999,39 @@ contains = ["spinning"]
 }
 
 #[test]
+fn awaiting_rule_reports_awaiting() {
+    with_manifest_dirs("awaiting-rule", || {
+        write_local_codex(&local_manifest("awaiting", "waiting on children"));
+
+        assert_eq!(
+            explain(Agent::Codex, "waiting on children").state,
+            AgentState::Awaiting
+        );
+    });
+}
+
+#[test]
+fn manifest_validation_gates_awaiting_state_on_engine_version() {
+    let manifest = |min_engine_version: u32| {
+        format!(
+            r#"
+id = "codex"
+version = "2026.10.22.1"
+min_engine_version = {min_engine_version}
+
+[[rules]]
+id = "background"
+state = "awaiting"
+contains = ["waiting"]
+"#
+        )
+    };
+
+    assert!(parse_manifest(&manifest(5)).is_err());
+    assert!(parse_manifest(&manifest(6)).is_ok());
+}
+
+#[test]
 fn engine_versioned_override_is_preferred_up_to_the_running_engine() {
     let dir = Path::new("/overrides");
     let engine = crate::detect::manifest_update::MANIFEST_ENGINE_VERSION;

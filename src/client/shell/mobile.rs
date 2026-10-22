@@ -244,6 +244,7 @@ fn render_agent_summary(
         (AgentStatus::Blocked, "blocked"),
         (AgentStatus::Done, "done"),
         (AgentStatus::Working, "working"),
+        (AgentStatus::Awaiting, "awaiting"),
         (AgentStatus::Idle, "idle"),
     ]
     .map(|(status, label)| {

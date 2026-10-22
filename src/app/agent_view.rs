@@ -327,6 +327,7 @@ fn status_name(state: crate::detect::AgentState, seen: bool) -> &'static str {
         (crate::detect::AgentState::Idle, false) => "done",
         (crate::detect::AgentState::Idle, true) => "idle",
         (crate::detect::AgentState::Working, _) => "working",
+        (crate::detect::AgentState::Awaiting, _) => "awaiting",
         (crate::detect::AgentState::Blocked, _) => "blocked",
         (crate::detect::AgentState::Unknown, _) => "unknown",
     }

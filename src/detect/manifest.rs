@@ -227,6 +227,7 @@ enum ManifestState {
     Working,
     Blocked,
     Unknown,
+    Awaiting,
 }
 
 impl From<ManifestState> for AgentState {
@@ -236,6 +237,7 @@ impl From<ManifestState> for AgentState {
             ManifestState::Working => AgentState::Working,
             ManifestState::Blocked => AgentState::Blocked,
             ManifestState::Unknown => AgentState::Unknown,
+            ManifestState::Awaiting => AgentState::Awaiting,
         }
     }
 }
@@ -821,6 +823,7 @@ pub fn agent_state_label(state: AgentState) -> &'static str {
     match state {
         AgentState::Idle => "idle",
         AgentState::Working => "working",
+        AgentState::Awaiting => "awaiting",
         AgentState::Blocked => "blocked",
         AgentState::Unknown => "unknown",
     }
@@ -965,8 +968,26 @@ fn validate_manifest(manifest: &AgentManifest) -> Result<(), String> {
         validate_rule_gate(rule, &mut complexity)
             .map_err(|err| format!("rule {} has invalid matcher gates: {err}", rule.id))?;
         validate_after_last_line(rule, manifest.min_engine_version)?;
+        validate_awaiting_state(rule, manifest.min_engine_version)?;
     }
 
+    Ok(())
+}
+
+const AWAITING_STATE_ENGINE_VERSION: u32 = 6;
+
+fn validate_awaiting_state(
+    rule: &ManifestRule,
+    min_engine_version: Option<u32>,
+) -> Result<(), String> {
+    if rule.state == Some(ManifestState::Awaiting)
+        && min_engine_version.is_some_and(|version| version < AWAITING_STATE_ENGINE_VERSION)
+    {
+        return Err(format!(
+            "rule {} uses state = \"awaiting\" but min_engine_version is below {}",
+            rule.id, AWAITING_STATE_ENGINE_VERSION
+        ));
+    }
     Ok(())
 }
 

@@ -903,7 +903,9 @@ impl TerminalState {
             previous_presentation,
             now,
         );
-        if state == AgentState::Working && self.state == AgentState::Working {
+        if state == AgentState::Working
+            && matches!(self.state, AgentState::Working | AgentState::Awaiting)
+        {
             self.agent_process_acquisition_pending = false;
         }
         Some(TerminalStateMutation {
@@ -2228,7 +2230,11 @@ impl TerminalState {
             .detail
             .blocked_reason
             .filter(|_| authority.state == AgentState::Blocked);
-        (authority.state, blocked_reason)
+        let state = match authority.state {
+            AgentState::Working if authority.detail.background => AgentState::Awaiting,
+            state => state,
+        };
+        (state, blocked_reason)
     }
 
     /// The screen's state where it shows that the reported one has ended: a live
@@ -6715,7 +6721,7 @@ mod screen_assisted_tests {
             after(now, 10),
         );
         screen(&mut terminal, AgentState::Idle, false, after(now, 60_000));
-        assert_eq!(terminal.state, AgentState::Working);
+        assert_eq!(terminal.state, AgentState::Awaiting);
         assert_eq!(terminal.blocked_reason(), None);
 
         report(

@@ -68,4 +68,7 @@ pub struct ServerCapabilities {
     /// Keeps a task status per agent (`agent.set_task_status`) and closes subtrees (`agent.close`).
     #[serde(default)]
     pub agent_task_status: bool,
+    /// Keeps annotations per agent (`agent.annotate`).
+    #[serde(default)]
+    pub agent_annotations: bool,
 }

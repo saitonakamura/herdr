@@ -20,6 +20,7 @@ fn params(args: &[&str]) -> serde_json::Value {
         Operation::Wait(params) => Method::AgentWait(params),
         Operation::Prompt(params) => Method::AgentPrompt(params),
         Operation::Start(params) => Method::AgentStart(params),
+        Operation::Annotate(params) => Method::AgentAnnotate(params),
         _ => panic!("expected API params"),
     };
     serde_json::to_value(Request {
@@ -211,4 +212,29 @@ fn agent_projection_clap_relations_and_help_before_transport() {
             leaf.get_name()
         );
     }
+}
+
+#[test]
+fn agent_projection_annotate_merges_sets_and_clears() {
+    assert_eq!(
+        params(&[
+            "annotate",
+            "w1:p2",
+            "role=worker",
+            "why=a=b c",
+            "ticket=",
+            "--clear",
+            "kind"
+        ]),
+        serde_json::json!({
+            "target": "w1:p2",
+            "annotations": {"role": "worker", "why": "a=b c", "ticket": "", "kind": null}
+        })
+    );
+    assert_eq!(
+        params(&["annotate", "w1:p2", "--clear", "role", "--clear", "kind"]),
+        serde_json::json!({"target": "w1:p2", "annotations": {"role": null, "kind": null}})
+    );
+    assert!(parse(&["annotate", "w1:p2"]).is_err());
+    assert!(parse(&["annotate", "w1:p2", "role"]).is_err());
 }

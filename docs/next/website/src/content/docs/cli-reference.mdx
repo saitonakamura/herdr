@@ -353,6 +353,7 @@ herdr agent set-parent <target> <parent>|--clear
 herdr agent set-args <target> --kind KIND [-- <agent-args...>]
 herdr agent set-task-status <target> starting|running|needs_parent|needs_user|complete|failed|closed
 herdr agent close <target>... [--force] [--dry-run]
+herdr agent annotate <target> [KEY=VALUE]... [--clear KEY]...
 herdr agent focus <target>
 herdr agent wait <target> [--until STATUS]... [--timeout MS]
 herdr agent attach <target> [--takeover]
@@ -377,6 +378,8 @@ An agent's parent is the agent that started it, shown as `parent_agent_id`. Set 
 
 `agent start` records its args, shown as `launch_args` by `agent get` and `pane get`; a resume after a server restart reuses them (see [Session state](/docs/session-state/#native-agent-session-restore)). `agent set-args` replaces them, and works on an agent Herdr did not start too. `agent_home` shows the profile directory the agent's session was reported in.
 An agent's task status is what it says about its brief, shown as `task_status` next to the `agent_status` Herdr detects: `starting`, `running`, `needs_parent`, `needs_user`, `complete`, `failed` or `closed`. `agent start` sets `starting`; after that only `agent set-task-status` changes it, and it never changes the detected status. Like the agent ID, it survives server restarts and is published as `pane.updated`. `agent set-task-status` accepts a pane without an agent too, giving it an agent ID.
+
+An agent's annotations are keys and values a program keeps on it, shown as `annotations` by `agent list`, `agent get` and `pane get`. Herdr stores them exactly as given and never interprets them. `agent annotate` sets each `KEY=VALUE` and removes each `--clear KEY`; an empty value removes the key too, and keys not named stay as they are. Keys are 1–32 of `A-Z a-z 0-9 _ -`, values at most 512 characters with no control characters, and an agent keeps at most 32 annotations; a patch past any limit is refused whole with `invalid_annotation` or `annotation_limit`. Like the agent ID, annotations survive `/clear`, pane moves, server restarts and live handoff, are gone when the pane closes, and changes are published as `pane.updated`. `agent annotate` accepts a pane without an agent too, giving it an agent ID.
 
 `agent close` closes each target together with every descendant, deepest first. It is refused with `agent_subtree_busy`, closing nothing, while any of them is `working` or `blocked`, unless `--force`. The pane running the command (`HERDR_PANE_ID`) is never counted as busy and closes last. Closing an agent closes its pane; when that pane is the last one left in its tab or workspace, the tab or workspace goes with it, so a container closes only when the subtree owned all of it. The result lists each agent with its `scope` (`pane`, `tab` or `workspace`), and an `error` for one whose pane could not close; the rest still close. `--dry-run` returns the same list without closing anything.
 

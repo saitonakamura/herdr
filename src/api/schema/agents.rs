@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use serde::{Deserialize, Serialize};
 
@@ -277,6 +277,10 @@ pub struct AgentInfo {
     /// What the agent last said about its brief.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_status: Option<TaskStatus>,
+    /// Keys and values a program keeps on the agent; Herdr never interprets them.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[schemars(schema_with = "super::common::annotation_values_schema")]
+    pub annotations: BTreeMap<String, String>,
     /// The Git checkout containing `cwd`; absent outside one or before its first refresh.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repo: Option<super::panes::PaneRepoInfo>,
@@ -327,6 +331,18 @@ cli_params! {
         /// Agent id, agent name, or pane id. A pane without an agent gets an agent id too.
         pub target: String => Field::new(String::new()).input(bindings::target()),
         pub status: TaskStatus => Field::new(TaskStatus::Running).input(bindings::task_status()),
+    }
+}
+
+cli_params! {
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+    pub struct AgentAnnotateParams => AgentAnnotateProjection {
+        /// Agent id, agent name, or pane id. A pane without an agent gets an agent id too.
+        pub target: String => Field::new(String::new()).input(bindings::target()),
+        /// Annotations to set; a null or empty value clears that key. Keys not named stay as they are.
+        #[schemars(schema_with = "super::common::annotation_patch_schema")]
+        pub annotations: BTreeMap<String, Option<String>> => Field::new(BTreeMap::new())
+            .input(bindings::annotation_assignments()).input(bindings::clear_annotation()),
     }
 }
 

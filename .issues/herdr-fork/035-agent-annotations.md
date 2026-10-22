@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-agent-annotations
 title: Agent annotations
-status: in-progress
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee:
-claimed_by: macos/w1:pR/05095289-5004-4c7e-a277-3b6e1345c252
+claimed_by:
 ---
 
 ## Question
@@ -40,7 +40,7 @@ Per [ADR 0007](../../docs/adr/0007-one-owner-per-fact.md). Each agent carries **
 
 ## Resolution
 
-Draft until [PR #26](https://github.com/saitonakamura/herdr/pull/26) and dotfiles branch `herdr-fork/035-agent-annotations` (d3ab6a8) merge.
+Merged 2026-10-22 as `56e56478`: [PR #26](https://github.com/saitonakamura/herdr/pull/26), with dotfiles `9519ed3`.
 
 - **Storage.** A `BTreeMap<String, String>` on `TerminalState` next to `task_status`, persisted in `PaneSnapshot`. That covers restart and live handoff, and the map follows the terminal through `/clear` and pane moves. Closing the pane drops it.
 - **Limits.** Keys `^[A-Za-z0-9_-]{1,32}$`. Values are at most 512 characters with no control characters, and an agent keeps at most 32. A patch past any limit is refused whole (`invalid_annotation`, `annotation_limit`). Values are stored verbatim, with no trimming, unlike tokens.

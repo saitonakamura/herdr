@@ -86,5 +86,6 @@ Draft until [PR #28](https://github.com/saitonakamura/herdr/pull/28) merges.
   - Restart backoff runs from 0.5s, doubling to 30s.
   - Five exits in a row that each lasted under 30s leave the program down, with one `warn!` and one Custom notification. A config reload gives it another try.
   - A live handoff drops the program, as it drops the popup, and the new server starts it fresh.
+- **Stale panes.** The client ties a pane to the connection and server boot that sent it, and drops it on any other snapshot. A reconnect or handoff onto stock herdr, or onto a server without `pane`, therefore can't leave a frozen pane holding focus. The server sends every opted-in client a first update, `pane: null` included. Keyboard mode and mouse capture follow the pane only for clients whose slot is wider than zero. Synchronized output holds the slot back for at most 1s.
 - **Events.** `events.subscribe` already covers everything 018 draws. Annotation events belong to 035.
 - **Performance.** `just bench-render-scale` has a session pane section. A stub that redraws every row adds a constant 110–175µs for each frame it redraws, with no scaling between 1 and 15 panes. Output from the sidebar alone never renders the pane surface.

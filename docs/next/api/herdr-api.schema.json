@@ -4405,6 +4405,54 @@
           ],
           "type": "object"
         },
+        "PopupOpenParams": {
+          "description": "Fork-only: runs `argv` in the session's popup, the way a `type = \"popup\"`\ncustom command does. Fails with `popup_already_open` while one is open.",
+          "properties": {
+            "argv": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "cwd": {
+              "description": "Defaults to the focused pane's cwd.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "env": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "height": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/request/$defs/PopupSize"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "width": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/request/$defs/PopupSize"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "argv"
+          ],
+          "type": "object"
+        },
         "PopupSize": {
           "oneOf": [
             {
@@ -7198,6 +7246,22 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/EmptyParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "popup.open",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/PopupOpenParams"
             }
           },
           "required": [

@@ -32,6 +32,39 @@ impl App {
         true
     }
 
+    /// Fork-only `popup.open`: a program-chosen argv in the popup.
+    pub(crate) fn handle_popup_open(
+        &mut self,
+        id: String,
+        params: crate::api::schema::PopupOpenParams,
+    ) -> String {
+        use crate::app::api::responses::{encode_error, encode_success};
+        if params.argv.is_empty() {
+            return encode_error(id, "invalid_params", "argv must not be empty");
+        }
+        if self.state.popup_pane.is_some() {
+            return encode_error(id, "popup_already_open", "a popup is already open");
+        }
+        let mut extra_env: Vec<_> = params.env.into_iter().collect();
+        extra_env.sort();
+        match self.spawn_popup_argv_command(
+            &params.argv,
+            params.cwd.map(PathBuf::from),
+            extra_env,
+            PopupGeometry {
+                width: params.width,
+                height: params.height,
+            },
+        ) {
+            Ok(()) => {
+                self.render_dirty.request_generic();
+                self.render_notify.notify_one();
+                encode_success(id, crate::api::schema::ResponseResult::Ok {})
+            }
+            Err(err) => encode_error(id, "popup_open_failed", err.to_string()),
+        }
+    }
+
     pub(crate) fn spawn_popup_shell_command(
         &mut self,
         command: &str,
@@ -287,5 +320,40 @@ mod tests {
         let response = app.handle_api_request(close());
         let response: crate::api::schema::ErrorResponse = serde_json::from_str(&response).unwrap();
         assert_eq!(response.error.code, "popup_not_open");
+    }
+
+    fn popup_open(argv: &[&str]) -> crate::api::schema::Request {
+        crate::api::schema::Request {
+            id: "open-popup".into(),
+            method: crate::api::schema::Method::PopupOpen(crate::api::schema::PopupOpenParams {
+                argv: argv.iter().map(|arg| arg.to_string()).collect(),
+                cwd: None,
+                env: Default::default(),
+                width: None,
+                height: None,
+            }),
+        }
+    }
+
+    #[test]
+    fn popup_open_api_refuses_while_a_popup_is_open() {
+        let mut app = app_with_popup();
+
+        let response = app.handle_api_request(popup_open(&["true"]));
+        let response: crate::api::schema::ErrorResponse = serde_json::from_str(&response).unwrap();
+
+        assert_eq!(response.error.code, "popup_already_open");
+    }
+
+    #[test]
+    fn popup_open_api_refuses_an_empty_argv() {
+        let mut app = app_with_popup();
+        app.state.popup_pane = None;
+
+        let response = app.handle_api_request(popup_open(&[]));
+        let response: crate::api::schema::ErrorResponse = serde_json::from_str(&response).unwrap();
+
+        assert_eq!(response.error.code, "invalid_params");
+        assert!(app.state.popup_pane.is_none());
     }
 }

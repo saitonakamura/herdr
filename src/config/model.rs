@@ -323,6 +323,9 @@ pub struct Config {
     pub advanced: AdvancedConfig,
     pub experimental: ExperimentalConfig,
     pub remote: RemoteConfig,
+    /// Fork-only: the `herdr-sidebar` program's own settings. herdr keeps them
+    /// out of its unknown-key diagnostics and never reads them.
+    pub sidebar: toml::Table,
 }
 
 #[derive(Debug)]

@@ -12,6 +12,8 @@ const KNOWN_TOP_LEVEL_CONFIG_KEYS: &[&str] = &[
     "remote",
     "server",
     "session",
+    // Fork-only: herdr-sidebar's settings, which herdr never reads.
+    "sidebar",
     "terminal",
     "theme",
     "ui",

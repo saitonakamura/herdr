@@ -43,7 +43,7 @@ Build herdr's half of the sidebar pane: the host. This covers ADR 0002 as amende
   - If the process exits, herdr shows the native sidebar and restarts the program with backoff, and logs each exit with `tracing`.
   - A crash loop leaves the native sidebar up and says so once.
   - A config reload that changes `pane` restarts the program.
-- **Events the program needs.** Check that `events.subscribe` covers everything 018 draws: pane, tab and workspace lifecycle; `pane.updated`; `pane.agent_status_changed`; `message.queued` and `message.delivered`; and later the annotation changes from 029. Add a subscription only where one is missing.
+- **Events the program needs.** Check that `events.subscribe` covers everything 018 draws: pane, tab and workspace lifecycle; `pane.updated`; `pane.agent_status_changed`; `message.queued` and `message.delivered`; and later the annotation changes from 035. Add a subscription only where one is missing.
 - **Performance.**
   - The pane is one more PTY. Its output is parsed once, and only it redraws its own slot.
   - Profile `just bench-render-scale` with the pane on and off, at 1 and at 15 or more populated panes, using a stub program that redraws on every event, and report the delta.

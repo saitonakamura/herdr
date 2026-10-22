@@ -20,6 +20,7 @@ Requested by the dotfiles terminal-clickability effort ([its map](https://github
 - Decide what a modified click does when no plugin handler claims the link: the default open, or nothing.
 - **Compatibility.** `pane.link.activate` is a frozen generation-1 method (`tests/fixtures/endpoint-method-shapes-v1.json`). An old server would ignore a new `modifiers` field and report success, which runs the open action when a peek was meant. So use a new method or a separately advertised capability, and leave the field off when the server lacks it. Never update the frozen fixture.
 - Check how kitty delivers Ctrl+Alt+click on the mac before settling the gesture. The map defers to the plugin on which modifier means what.
+- **Consumer, ready (dotfiles terminal-clickability 004, 3d86e34).** The `links` plugin has a peek entrypoint, `links-open --popup`, ready for Ctrl+Alt+click. It gets registered with a herdr reload once this lands, so the env name chosen here is the one it reads.
 
 ## Parent
 

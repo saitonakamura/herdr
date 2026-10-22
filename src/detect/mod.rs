@@ -20,7 +20,7 @@ pub enum AgentState {
     Unknown,
 }
 
-/// What a blocked agent waits on, when its integration says.
+/// What a blocked agent waits on, when its integration or detection rule says.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BlockedReason {
@@ -45,6 +45,8 @@ pub struct AgentDetection {
     /// human input. This is stronger than arbitrary prompt-like text in the
     /// scrollback and may override a non-blocked integration state.
     pub visible_blocker: bool,
+    /// What the matched rule says a blocked agent waits on, when it says.
+    pub blocked_reason: Option<BlockedReason>,
     /// True when the current screen visibly shows live working chrome. PTY
     /// activity is the normal working authority; this remains diagnostic
     /// metadata and for non-PTY fallback paths.
@@ -327,6 +329,7 @@ pub fn detect_agent_with_osc(
             skip_state_update: false,
             visible_idle: false,
             visible_blocker: false,
+            blocked_reason: None,
             visible_working: false,
         };
     };

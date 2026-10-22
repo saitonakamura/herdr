@@ -53,6 +53,7 @@ fn detection_state(
         agent,
         state: AgentState::Idle,
         visible_blocker: false,
+        blocked_reason: None,
         visible_working: false,
         process_exited,
         observed_at: at,

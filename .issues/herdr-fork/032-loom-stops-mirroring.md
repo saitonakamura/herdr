@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-loom-stops-mirroring
 title: loom stops mirroring herdr's runtime facts
-status: blocked
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee:
-claimed_by:
+claimed_by: macos/w1:pY/c367ceff-719f-4fae-b12b-dedd58587cf2
 ---
 
 ## Question

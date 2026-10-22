@@ -419,6 +419,7 @@ pub(crate) enum ServerEvent {
         surface_reuse: bool,
         surface_delta: bool,
         surface_scroll: bool,
+        session_pane: bool,
         writer: ClientWriter,
     },
     /// A client sent an input message.
@@ -510,6 +511,16 @@ pub(crate) enum ServerEvent {
         client_id: u64,
         terminal_id: String,
         events: Vec<ClientPaneInputEvent>,
+    },
+    /// A client-owned shell delivered input to the session pane.
+    ClientSessionPaneInput {
+        client_id: u64,
+        input: crate::protocol::session_pane::SessionPaneInput,
+    },
+    /// A client-owned shell reported the size of its session pane slot.
+    ClientSessionPaneSlot {
+        client_id: u64,
+        slot: crate::protocol::session_pane::SessionPaneSlot,
     },
     /// A client-owned shell published one host terminal theme observation.
     ClientShellHostTheme {
@@ -787,6 +798,7 @@ pub(crate) fn handle_client_handshake(
                     hello.surface_reuse,
                     hello.surface_delta,
                     hello.surface_scroll,
+                    hello.session_pane,
                 )),
             )
         }
@@ -884,6 +896,7 @@ pub(crate) fn handle_client_handshake(
         surface_reuse,
         surface_delta,
         surface_scroll,
+        session_pane,
     )) = shell_options
     {
         ServerEvent::ClientShellConnected {
@@ -900,6 +913,7 @@ pub(crate) fn handle_client_handshake(
             surface_reuse,
             surface_delta,
             surface_scroll,
+            session_pane,
             writer,
         }
     } else {
@@ -1346,6 +1360,36 @@ fn client_read_loop_with_endpoint_controls(
                     token: data,
                 }
             }
+            ClientMessage::EndpointControl { kind, data }
+                if kind == crate::protocol::session_pane::INPUT_KIND =>
+            {
+                let input = match crate::protocol::session_pane::decode_input(&data) {
+                    Ok(input) => input,
+                    Err(err) => {
+                        debug!(client_id, err = %err, "ignoring malformed session pane input");
+                        continue;
+                    }
+                };
+                if !matches!(
+                    pane_input_event_limit(&input.events),
+                    InputEventLimit::WithinLimits
+                ) {
+                    warn!(client_id, "oversized session pane input, closing");
+                    let _ = server_event_tx
+                        .blocking_send(ServerEvent::ClientDisconnected { client_id });
+                    break;
+                }
+                ServerEvent::ClientSessionPaneInput { client_id, input }
+            }
+            ClientMessage::EndpointControl { kind, data }
+                if kind == crate::protocol::session_pane::SLOT_KIND =>
+            {
+                let Ok(slot) = crate::protocol::session_pane::decode_slot(&data) else {
+                    debug!(client_id, "ignoring malformed session pane slot");
+                    continue;
+                };
+                ServerEvent::ClientSessionPaneSlot { client_id, slot }
+            }
             ClientMessage::EndpointControl { kind, data } => {
                 let Some(response) = crate::server::client_endpoint_control::response(&kind, data)
                 else {
@@ -1477,6 +1521,7 @@ mod tests {
             surface_reuse: false,
             surface_delta: false,
             surface_scroll: false,
+            session_pane: false,
             snapshot_codecs: vec![crate::protocol::endpoint::SNAPSHOT_CODEC_V1.into()],
             surface_codecs: vec![crate::protocol::endpoint::SURFACE_CODEC_V1.into()],
             input_codecs: vec![crate::protocol::endpoint::INPUT_CODEC_V1.into()],
@@ -2028,8 +2073,10 @@ mod tests {
                 surface_reuse,
                 surface_delta,
                 surface_scroll,
+                session_pane,
                 writer,
             } => {
+                assert!(!session_pane);
                 assert!(!surface_reuse);
                 assert!(!surface_delta);
                 assert!(!surface_scroll);

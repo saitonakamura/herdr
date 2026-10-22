@@ -6,7 +6,6 @@ labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
-  - herdr-fork-agent-annotations
 assignee:
 claimed_by:
 ---
@@ -15,7 +14,7 @@ claimed_by:
 
 Per [ADR 0007](../../docs/adr/0007-one-owner-per-fact.md), each fact has one owner. Today loom's registry still keeps its own copies of several facts about live agents: Parent, name, `.live` state, a combined state computed in `tree.jq`, and its message inbox. 024 was those copies drifting from herdr's.
 
-On a fork herdr with 029, loom changes as follows:
+On a fork herdr with 035, loom changes as follows:
 
 - **Live nodes come from herdr.** A live node is `agent list` plus annotations. Parent, name, state and task status are read from herdr and never stored.
 - **The registry keeps only what herdr cannot know.** That is policy and history: efforts, routing, limits, closed nodes, outcomes and escalations. Decide how a node becomes history when its pane closes. The deliberate 010 divergence stays: herdr makes a child top-level, while loom's history keeps who started it.

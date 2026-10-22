@@ -4,6 +4,7 @@
 //! - `actions.rs` — state mutations (testable without PTYs/async)
 
 pub(crate) mod actions;
+mod agent_annotations;
 mod agent_identity;
 mod agent_launch;
 mod agent_resume;
@@ -23,9 +24,11 @@ mod custom_commands;
 mod git_refresh;
 mod ids;
 pub(crate) mod messages;
+mod pane_restore_command;
 mod popup;
 mod runtime;
 mod session;
+pub(crate) mod session_pane;
 pub mod state;
 mod tab_bar_status;
 mod tab_names;
@@ -580,6 +583,14 @@ impl App {
             ),
             plugin_panes: std::collections::HashMap::new(),
             popup_pane: None,
+            session_pane: session_pane::SessionPaneState {
+                size: (
+                    session_pane::SessionPaneConfig::from_config(config).width,
+                    config.headless_size().1,
+                ),
+                config: session_pane::SessionPaneConfig::from_config(config),
+                ..session_pane::SessionPaneState::default()
+            },
             plugin_command_logs: Vec::new(),
             next_plugin_command_log_id: 1,
             plugin_commands_in_flight: 0,
@@ -934,6 +945,9 @@ impl App {
                     agent_panel_sort_from_config(config.ui.agent_panel_sort);
                 self.state.sidebar_agents = config.ui.sidebar.agents.clone();
                 self.state.sidebar_spaces = config.ui.sidebar.spaces.clone();
+                self.apply_session_pane_config(session_pane::SessionPaneConfig::from_config(
+                    config,
+                ));
                 self.state.sound = config.ui.sound.clone();
                 self.state.toast_config = config.ui.toast.clone();
             }

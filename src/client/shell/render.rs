@@ -248,6 +248,8 @@ pub(super) struct ShellRenderState<'a> {
     pub(super) reveal_navigation_workspace: &'a mut bool,
     pub(super) dragged_workspace_id: Option<&'a str>,
     pub(super) workspace_drop_indicator_row: Option<u16>,
+    /// The session pane fills the sidebar slot, so the native sidebar stays undrawn.
+    pub(super) session_pane_active: bool,
 }
 
 pub(super) fn render_shell(
@@ -267,7 +269,7 @@ pub(super) fn render_shell(
             &mut hits,
         );
     }
-    if layout.sidebar.width > 0 {
+    if layout.sidebar.width > 0 && !state.session_pane_active {
         if state.endpoints.len() > 1 {
             if state.sidebar_collapsed {
                 super::endpoint_sidebar::render_collapsed(

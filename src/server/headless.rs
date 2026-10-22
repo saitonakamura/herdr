@@ -82,6 +82,7 @@ mod native_graphics;
 mod notifications;
 mod render;
 mod retained_surface;
+mod session_pane;
 mod surface_interest;
 
 // Producers can refill even a bounded channel while it is being drained.
@@ -212,6 +213,8 @@ pub struct HeadlessServer {
     tab_geometry_controllers: HashMap<String, u64>,
     /// Stable tab id whose viewers may see and interact with the one terminal popup.
     popup_owner_tab_id: Option<String>,
+    /// When the session pane entered synchronized output that has not ended yet.
+    session_pane_sync_since: Option<Instant>,
     /// Process-local identity used to reject shell replacements from an earlier server boot.
     client_shell_boot_id: String,
     /// Outer window title last pushed, paired with the client that received it.
@@ -366,6 +369,7 @@ impl HeadlessServer {
             foreground_client_id: None,
             tab_geometry_controllers: HashMap::new(),
             popup_owner_tab_id: None,
+            session_pane_sync_since: None,
             client_shell_boot_id: format!(
                 "{}-{}",
                 std::process::id(),
@@ -562,7 +566,13 @@ impl HeadlessServer {
                 && self.can_render_interactive(now);
             if needs_render && (render_cadence_due || presentation_due || interactive_due) {
                 crate::render_prof::event("render.attempt");
-                let render_request = self.app.render_dirty.take();
+                let mut render_request = self.app.render_dirty.take();
+                // The session pane redraws only its own slot, never a pane surface.
+                if let Some(pane_id) = self.app.state.session_pane.pane_id() {
+                    if render_request.pty_sources.remove(&pane_id) {
+                        self.stream_session_pane();
+                    }
+                }
                 let pty_dirty = !render_request.pty_sources.is_empty();
                 if pty_dirty {
                     crate::render_prof::event("render.attempt.pty_dirty");
@@ -606,6 +616,7 @@ impl HeadlessServer {
                     crate::render_prof::event("full_render.invoke");
                     self.render_and_stream();
                 }
+                self.stream_session_pane();
                 self.app.record_render_attempt(now, !hidden_only);
                 if interactive_due {
                     self.record_interactive_render(now);
@@ -1011,7 +1022,8 @@ impl HeadlessServer {
                     };
                     apply_client_pane_input_events(runtime, &[held.release])
                 }
-                ClientShellInputTarget::Popup(terminal_id) => {
+                ClientShellInputTarget::Popup(terminal_id)
+                | ClientShellInputTarget::SessionPane(terminal_id) => {
                     let Some(runtime) = self.runtime_for_terminal_id_string(&terminal_id) else {
                         continue;
                     };
@@ -1920,6 +1932,7 @@ impl HeadlessServer {
                 surface_reuse,
                 surface_delta,
                 surface_scroll,
+                session_pane,
                 writer,
             } => {
                 if self.handoff_in_progress {
@@ -1970,6 +1983,7 @@ impl HeadlessServer {
                 connection
                     .render_state
                     .enable_surface_scroll(surface_scroll);
+                connection.session_pane = session_pane.then(Default::default);
                 connection.shell_projection_revision = 1;
                 let config_diagnostic = if endpoint_keybindings {
                     self.server_config_diagnostic.as_deref()
@@ -2350,6 +2364,13 @@ impl HeadlessServer {
                 client.shell_mouse_capture = enabled;
                 client.host_mouse_capture_active = None;
                 true
+            }
+            ServerEvent::ClientSessionPaneInput { client_id, input } => {
+                self.handle_session_pane_input(client_id, input)
+            }
+            ServerEvent::ClientSessionPaneSlot { client_id, slot } => {
+                self.handle_session_pane_slot(client_id, slot);
+                false
             }
             ServerEvent::ClientShellPresentationSync { client_id, token } => {
                 let Some(client) = self.clients.get_mut(&client_id) else {
@@ -3297,6 +3318,7 @@ impl HeadlessServer {
             return false;
         }
         let mut changed = false;
+        self.run_session_pane_tasks(now);
 
         // No resize polling needed — server has no terminal.
         // Client resize messages drive size changes instead.

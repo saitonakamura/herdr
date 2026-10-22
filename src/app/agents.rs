@@ -419,6 +419,7 @@ impl App {
             agent_home: pane.agent_home,
             task_status: pane.task_status,
             last_user_input_at_ms: pane.last_user_input_at_ms,
+            annotations: pane.annotations,
             repo: pane.repo,
             workspace_id: pane.workspace_id,
             tab_id: pane.tab_id,

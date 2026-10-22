@@ -286,6 +286,8 @@ struct ServerCapabilitiesJson {
     agent_launch_resume: bool,
     agent_task_status: bool,
     pane_user_input: bool,
+    pane_restore_command: bool,
+    agent_annotations: bool,
 }
 
 #[derive(Serialize)]
@@ -337,6 +339,8 @@ fn server_status_json(server: &ServerRuntimeStatus) -> ServerStatusJson {
                     agent_launch_resume: capabilities.agent_launch_resume,
                     agent_task_status: capabilities.agent_task_status,
                     pane_user_input: capabilities.pane_user_input,
+                    pane_restore_command: capabilities.pane_restore_command,
+                    agent_annotations: capabilities.agent_annotations,
                 }),
             compatible: protocol.map(|value| value == crate::protocol::PROTOCOL_VERSION),
             endpoint_compatible: capabilities.as_ref().and_then(|capabilities| {
@@ -440,6 +444,8 @@ mod tests {
                 agent_launch_resume: false,
                 agent_task_status: false,
                 pane_user_input: false,
+                pane_restore_command: false,
+                agent_annotations: false,
             }),
         }
     }

@@ -939,6 +939,18 @@
             "agent_status": {
               "$ref": "#/schemas/event/$defs/AgentStatus"
             },
+            "annotations": {
+              "additionalProperties": {
+                "maxLength": 512,
+                "type": "string"
+              },
+              "description": "Keys and values a program keeps on the agent; Herdr never interprets them.",
+              "maxProperties": 32,
+              "propertyNames": {
+                "pattern": "^[A-Za-z0-9_-]{1,32}$"
+              },
+              "type": "object"
+            },
             "blocked_reason": {
               "anyOf": [
                 {
@@ -1015,6 +1027,13 @@
                 }
               ],
               "description": "The Git checkout containing `cwd`; absent outside one or before its first refresh."
+            },
+            "restore_command": {
+              "description": "Shell command a restart types into the pane's fresh shell.",
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "restore_error": {
               "type": [
@@ -1553,6 +1572,35 @@
     },
     "request": {
       "$defs": {
+        "AgentAnnotateParams": {
+          "properties": {
+            "annotations": {
+              "additionalProperties": {
+                "maxLength": 512,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "description": "Annotations to set; a null or empty value clears that key. Keys not named stay as they are.",
+              "maxProperties": 32,
+              "minProperties": 1,
+              "propertyNames": {
+                "pattern": "^[A-Za-z0-9_-]{1,32}$"
+              },
+              "type": "object"
+            },
+            "target": {
+              "description": "Agent id, agent name, or pane id. A pane without an agent gets an agent id too.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "target",
+            "annotations"
+          ],
+          "type": "object"
+        },
         "AgentBlockedReason": {
           "description": "What a blocked agent waits on.",
           "enum": [
@@ -3745,6 +3793,28 @@
           "required": [
             "pane_id",
             "text"
+          ],
+          "type": "object"
+        },
+        "PaneSetRestoreCommandParams": {
+          "properties": {
+            "command": {
+              "description": "Shell command typed into the pane's fresh shell when a restart restores it; omit to clear.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "pane_id": {
+              "type": "string"
+            },
+            "run": {
+              "description": "Also run the command in the pane now.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "pane_id"
           ],
           "type": "object"
         },
@@ -6563,6 +6633,22 @@
         {
           "properties": {
             "method": {
+              "const": "pane.set_restore_command",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/PaneSetRestoreCommandParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "pane.read",
               "type": "string"
             },
@@ -7055,6 +7141,70 @@
             "params"
           ],
           "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "agent.annotate",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/AgentAnnotateParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "session_pane.get",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/EmptyParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "session_pane.focus",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/EmptyParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "session_pane.unfocus",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/EmptyParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
         }
       ],
       "properties": {
@@ -7356,6 +7506,18 @@
             },
             "agent_status": {
               "$ref": "#/schemas/success_response/$defs/AgentStatus"
+            },
+            "annotations": {
+              "additionalProperties": {
+                "maxLength": 512,
+                "type": "string"
+              },
+              "description": "Keys and values a program keeps on the agent; Herdr never interprets them.",
+              "maxProperties": 32,
+              "propertyNames": {
+                "pattern": "^[A-Za-z0-9_-]{1,32}$"
+              },
+              "type": "object"
             },
             "blocked_reason": {
               "anyOf": [
@@ -8927,6 +9089,18 @@
             "agent_status": {
               "$ref": "#/schemas/success_response/$defs/AgentStatus"
             },
+            "annotations": {
+              "additionalProperties": {
+                "maxLength": 512,
+                "type": "string"
+              },
+              "description": "Keys and values a program keeps on the agent; Herdr never interprets them.",
+              "maxProperties": 32,
+              "propertyNames": {
+                "pattern": "^[A-Za-z0-9_-]{1,32}$"
+              },
+              "type": "object"
+            },
             "blocked_reason": {
               "anyOf": [
                 {
@@ -9003,6 +9177,13 @@
                 }
               ],
               "description": "The Git checkout containing `cwd`; absent outside one or before its first refresh."
+            },
+            "restore_command": {
+              "description": "Shell command a restart types into the pane's fresh shell.",
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "restore_error": {
               "type": [
@@ -11628,11 +11809,32 @@
                 "agents"
               ],
               "type": "object"
+            },
+            {
+              "properties": {
+                "session_pane": {
+                  "$ref": "#/schemas/success_response/$defs/SessionPaneInfo"
+                },
+                "type": {
+                  "const": "session_pane",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "session_pane"
+              ],
+              "type": "object"
             }
           ]
         },
         "ServerCapabilities": {
           "properties": {
+            "agent_annotations": {
+              "default": false,
+              "description": "Keeps annotations per agent (`agent.annotate`).",
+              "type": "boolean"
+            },
             "agent_launch_resume": {
               "default": false,
               "description": "Resumes a restored agent with its `agent start` args, its pane's `--env`\nand its session's profile directory.",
@@ -11664,6 +11866,11 @@
             "live_handoff": {
               "type": "boolean"
             },
+            "pane_restore_command": {
+              "default": false,
+              "description": "Keeps a per-pane restore command (`pane.set_restore_command`) and types it\ninto the pane's fresh shell when a restart restores the pane.",
+              "type": "boolean"
+            },
             "pane_user_input": {
               "default": false,
               "description": "Reports `last_user_input_at_ms` on pane and agent info.",
@@ -11692,6 +11899,68 @@
           },
           "required": [
             "live_handoff"
+          ],
+          "type": "object"
+        },
+        "SessionPaneInfo": {
+          "description": "The server's one session pane: a terminal that belongs to no workspace or tab,\nrunning the program configured as `ui.sidebar.pane`. Clients that support it\ndraw it in place of their native sidebar.",
+          "properties": {
+            "argv": {
+              "items": {
+                "type": "string"
+              },
+              "type": [
+                "array",
+                "null"
+              ]
+            },
+            "collapsed_width": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "cols": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "focused": {
+              "description": "Whether the program holds keyboard focus. Focus is shared by every client.",
+              "type": "boolean"
+            },
+            "restarts": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "rows": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "status": {
+              "description": "`off`, `running`, `restarting` or `failed`. Readers should treat unknown values as `off`.",
+              "type": "string"
+            },
+            "width": {
+              "description": "Expanded width, from `ui.sidebar_width` clamped by the sidebar bounds.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "status",
+            "focused",
+            "cols",
+            "rows",
+            "width",
+            "collapsed_width",
+            "restarts"
           ],
           "type": "object"
         },

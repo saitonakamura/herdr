@@ -211,6 +211,8 @@ fn pane_scroll_result(
             agent_home: None,
             task_status: None,
             last_user_input_at_ms: None,
+            restore_command: None,
+            annotations: Default::default(),
             scroll: Some(crate::api::schema::PaneScrollInfo {
                 offset_from_bottom,
                 max_offset_from_bottom,
@@ -278,4 +280,5 @@ mod link_hover;
 mod mobile;
 mod mouse_selection;
 mod popup_focus_projection;
+mod session_pane;
 mod startup_overlays;

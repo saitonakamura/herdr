@@ -1,7 +1,7 @@
 ---
 id: herdr-fork-sidebar-pane
 title: Sidebar pane
-status: open
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
@@ -43,7 +43,7 @@ Build herdr's half of the sidebar pane: the host. This covers ADR 0002 as amende
   - If the process exits, herdr shows the native sidebar and restarts the program with backoff, and logs each exit with `tracing`.
   - A crash loop leaves the native sidebar up and says so once.
   - A config reload that changes `pane` restarts the program.
-- **Events the program needs.** Check that `events.subscribe` covers everything 018 draws: pane, tab and workspace lifecycle; `pane.updated`; `pane.agent_status_changed`; `message.queued` and `message.delivered`; and later the annotation changes from 029. Add a subscription only where one is missing.
+- **Events the program needs.** Check that `events.subscribe` covers everything 018 draws: pane, tab and workspace lifecycle; `pane.updated`; `pane.agent_status_changed`; `message.queued` and `message.delivered`; and later the annotation changes from 035. Add a subscription only where one is missing.
 - **Performance.**
   - The pane is one more PTY. Its output is parsed once, and only it redraws its own slot.
   - Profile `just bench-render-scale` with the pane on and off, at 1 and at 15 or more populated panes, using a stub program that redraws on every event, and report the delta.
@@ -66,3 +66,26 @@ Build herdr's half of the sidebar pane: the host. This covers ADR 0002 as amende
 - herdr-fork-sidebar-content
 - herdr-fork-agent-identity-parent
 - herdr-fork-workspace-is-effort
+
+## Resolution
+
+Merged 2026-10-22 as `8658913f`: [PR #28](https://github.com/saitonakamura/herdr/pull/28).
+
+- **Name.** The API calls it the **session pane**, since it belongs to the server session, not a workspace: `session_pane.get`, `.focus`, `.unfocus`. The documentation is in FORK.md § Sidebar pane, GLOSSARY.md and the `docs/next` socket API page.
+- **Focus is shared, not per client.**
+  - Keyboard focus is a session fact, like pane focus, so the server owns it, and every client that shows the pane sends its keys there.
+  - herdr never takes Esc. The program gives focus back with `session_pane.unfocus` or with any pane, tab or workspace focus method. Clicking a pane does too.
+  - `keys.focus_sidebar` (unbound) toggles focus, so a stuck program cannot trap the keyboard.
+  - The program gets focus reports (`\e[I` and `\e[O`) when it enables them.
+- **Wire.**
+  - The client opts in with the hello flag `session_pane`, and the server advertises the `session_pane` capability.
+  - Frames, input and slot size travel as named controls (`endpoint.session-pane.v1`, `.input.v1`, `.slot.v1`). Generation-1 codecs are untouched.
+  - The server owns the width: `ui.sidebar_width`, clamped. Each client reports its slot, and the PTY follows the foreground client's slot.
+  - Shells showing several machines keep the native sidebar.
+- **Lifecycle.**
+  - Restart backoff runs from 0.5s, doubling to 30s.
+  - Five exits in a row that each lasted under 30s leave the program down, with one `warn!` and one Custom notification. A config reload gives it another try.
+  - A live handoff drops the program, as it drops the popup, and the new server starts it fresh.
+- **Stale panes.** The client ties a pane to the connection and server boot that sent it, and drops it on any other snapshot. A reconnect or handoff onto stock herdr, or onto a server without `pane`, therefore can't leave a frozen pane holding focus. The server sends every opted-in client a first update, `pane: null` included. Keyboard mode and mouse capture follow the pane only for clients whose slot is wider than zero. Synchronized output holds the slot back for at most 1s.
+- **Events.** `events.subscribe` already covers everything 018 draws. Annotation events belong to 035.
+- **Performance.** `just bench-render-scale` has a session pane section. A stub that redraws every row adds a constant 110–175µs for each frame it redraws, with no scaling between 1 and 15 panes. Output from the sidebar alone never renders the pane surface.

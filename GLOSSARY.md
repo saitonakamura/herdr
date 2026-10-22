@@ -12,8 +12,12 @@ A coding agent with a stable identity that outlives its pane, its sessions and s
 _Avoid_: node, pane
 
 **Parent**:
-The agent that started this agent in the same effort. When the parent is closed, the child becomes top-level.
+The agent that started this agent in the same effort. When the parent is closed, the child becomes top-level. An agent started from another effort has a Source instead.
 _Avoid_: spawner, owner
+
+**Source**:
+The agent that started this agent from another effort. It gets this agent's reports and may answer them, but closing it never closes this agent.
+_Avoid_: parent, spawner, origin
 
 **Annotation**:
 A key and value a program keeps on an agent. herdr stores it with the agent and never interprets it.
@@ -72,7 +76,7 @@ A tab label set by hand, which stops the tab following its agent's title until i
 _Avoid_: custom name, manual name
 
 **Sidebar pane**:
-A terminal pane that occupies the sidebar slot in every workspace and tab, running a program the user chooses.
+A terminal pane that occupies the sidebar slot in every workspace and tab, running a program the user chooses. herdr's API calls it the session pane, since it belongs to the server session rather than to any workspace.
 _Avoid_: custom sidebar, plugin sidebar
 
 **Scope**:

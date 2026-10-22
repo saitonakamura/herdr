@@ -30,6 +30,7 @@ mod overlay_input;
 mod preferences;
 mod render;
 mod scroll;
+mod session_pane;
 mod settings;
 mod state;
 mod surface_patch;
@@ -67,16 +68,28 @@ use crate::protocol::{
 #[cfg(test)]
 use crate::raw_input::RawInputEvent;
 
-fn target_event_message(target: ClientInputTarget, event: ClientPaneInputEvent) -> ClientMessage {
+fn target_event_message(
+    target: ClientInputTarget,
+    event: ClientPaneInputEvent,
+) -> Option<ClientMessage> {
     match target {
-        ClientInputTarget::Pane(pane_id) => ClientMessage::ClientShellPaneInput {
+        ClientInputTarget::Pane(pane_id) => Some(ClientMessage::ClientShellPaneInput {
             pane_id,
             events: vec![event],
-        },
-        ClientInputTarget::Popup(terminal_id) => ClientMessage::ClientShellPopupInput {
+        }),
+        ClientInputTarget::Popup(terminal_id) => Some(ClientMessage::ClientShellPopupInput {
             terminal_id,
             events: vec![event],
-        },
+        }),
+        ClientInputTarget::SessionPane(terminal_id) => {
+            crate::protocol::session_pane::input_message(
+                &crate::protocol::session_pane::SessionPaneInput {
+                    terminal_id,
+                    events: vec![event],
+                },
+            )
+            .ok()
+        }
     }
 }
 
@@ -97,7 +110,7 @@ fn push_target_event(
                     return;
                 }
             }
-            outcome.requests.push(target_event_message(
+            outcome.requests.extend(target_event_message(
                 ClientInputTarget::Pane(pane_id),
                 event,
             ));
@@ -113,10 +126,13 @@ fn push_target_event(
                     return;
                 }
             }
-            outcome.requests.push(target_event_message(
+            outcome.requests.extend(target_event_message(
                 ClientInputTarget::Popup(terminal_id),
                 event,
             ));
+        }
+        target @ ClientInputTarget::SessionPane(_) => {
+            outcome.requests.extend(target_event_message(target, event));
         }
     }
 }

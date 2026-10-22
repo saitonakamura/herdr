@@ -11,6 +11,7 @@ pub(crate) enum EndpointControlMessage {
     AgentViewProjection(DecodedAgentViewProjection),
     AgentCompletions(crate::protocol::endpoint::EndpointAgentCompletions),
     Snapshot(Box<crate::protocol::ClientShellSnapshot>),
+    SessionPane(Box<crate::protocol::session_pane::SessionPaneUpdate>),
     Ignored,
 }
 
@@ -20,6 +21,11 @@ pub(crate) fn decode_endpoint_control(
 ) -> Result<EndpointControlMessage, String> {
     if kind == crate::protocol::endpoint::HEALTH_PONG_KIND {
         return Ok(EndpointControlMessage::HealthPong);
+    }
+    if kind == crate::protocol::session_pane::MESSAGE_KIND {
+        return Ok(crate::protocol::session_pane::decode_update(data)
+            .map(|update| EndpointControlMessage::SessionPane(Box::new(update)))
+            .unwrap_or(EndpointControlMessage::Ignored));
     }
     if kind == crate::protocol::endpoint::AGENT_COMPLETIONS_KIND {
         return Ok(serde_json::from_str(data)

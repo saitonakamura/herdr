@@ -71,4 +71,11 @@ pub struct ServerCapabilities {
     /// Reports `last_user_input_at_ms` on pane and agent info.
     #[serde(default)]
     pub pane_user_input: bool,
+    /// Keeps a per-pane restore command (`pane.set_restore_command`) and types it
+    /// into the pane's fresh shell when a restart restores the pane.
+    #[serde(default)]
+    pub pane_restore_command: bool,
+    /// Keeps annotations per agent (`agent.annotate`).
+    #[serde(default)]
+    pub agent_annotations: bool,
 }

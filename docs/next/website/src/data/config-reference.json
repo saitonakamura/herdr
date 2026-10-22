@@ -842,6 +842,12 @@
           "description": "Toggle sidebar collapse."
         },
         {
+          "key": "keys.focus_sidebar",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Fork-only: give the sidebar pane keyboard focus, or take it back. Unset by default."
+        },
+        {
           "key": "keys.indexed.tabs",
           "type": "string",
           "default": "unset",
@@ -1095,6 +1101,18 @@
           "type": "list of token rows",
           "default": "[[\"state_icon\", \"workspace\"], [\"branch\", \"git_status\"]]",
           "description": "Expanded Space sidebar layout. Entries may be token strings or inline { token, fg, bold, dim, rules } style tables. Text-valued built-ins and $name metadata tokens accept up to 16 ordered rules using equals, contains, starts_with, gt, or lt; the first match overrides specified styles. Text conditions optionally accept ignore_case for ASCII matching; numeric conditions require full finite numbers. state_icon and git_status accept fixed styles only. At most 16 rows and 16 tokens per row."
+        },
+        {
+          "key": "ui.sidebar.pane",
+          "type": "list of strings",
+          "default": "unset",
+          "description": "Fork-only: argv of a program the server runs in a terminal pane in place of the expanded and collapsed sidebar, for every client. Unset keeps the native sidebar. Belongs in config.fork.toml."
+        },
+        {
+          "key": "ui.sidebar.pane_collapsed_width",
+          "type": "integer",
+          "default": "8",
+          "description": "Fork-only: width of the sidebar pane while the sidebar is collapsed. sidebar_collapsed_mode = \"hidden\" still hides it."
         },
         {
           "key": "ui.accent",

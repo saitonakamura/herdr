@@ -383,6 +383,13 @@ mod tests {
                 json!({"pane_id": "pane", "keys": ["Enter"]}),
             ),
             (
+                "set-restore-command",
+                vec!["--run", "pane", "npm", "run", "dev"],
+                "cli:request",
+                "pane.set_restore_command",
+                json!({"pane_id": "pane", "command": "npm run dev", "run": true}),
+            ),
+            (
                 "report-agent",
                 vec![
                     "pane", "--source", " hook ", "--agent", "", "--state", "unknown",

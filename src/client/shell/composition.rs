@@ -77,6 +77,7 @@ impl ClientShellState {
             reveal_navigation_workspace: &mut self.reveal_navigation_workspace,
             dragged_workspace_id: None,
             workspace_drop_indicator_row: None,
+            session_pane_active: false,
         };
         if let Some(snapshot) = local_snapshot {
             render::render_sidebar(
@@ -204,6 +205,7 @@ impl ClientShellState {
             ),
             _ => (None, None),
         };
+        let session_pane_active = layout.sidebar.width > 0 && self.session_pane_view().is_some();
         let mut buffer = Buffer::empty(Rect::new(0, 0, cols, rows));
         self.hits = render::render_shell(
             &mut buffer,
@@ -233,6 +235,7 @@ impl ClientShellState {
                 reveal_navigation_workspace: &mut self.reveal_navigation_workspace,
                 dragged_workspace_id,
                 workspace_drop_indicator_row,
+                session_pane_active,
             },
         );
         self.hits.panes = surface
@@ -268,6 +271,7 @@ impl ClientShellState {
                 }),
                 pane_id: pane.pane_id.clone(),
                 popup: false,
+                session_pane: false,
                 mouse_reporting: pane.mouse_reporting,
                 sgr_pixel_mouse: pane.sgr_pixel_mouse,
                 pixel_width: pane.pixel_width,
@@ -344,6 +348,15 @@ impl ClientShellState {
             frame.cells[start..start + usize::from(bar.width)].to_vec()
         });
         blit_pane_surface(&mut frame, &surface.frame, layout.pane_surface);
+        let (session_pane_hit, session_pane_cursor) = super::session_pane::compose_session_pane(
+            &mut frame,
+            super::session_pane::session_pane_view_in(&self.endpoints),
+            layout.sidebar,
+        );
+        self.hits.session_pane = session_pane_hit;
+        if let Some(cursor) = session_pane_cursor {
+            frame.cursor = cursor;
+        }
         restore_mode_bar(&mut frame, mode_bar, mode_bar_cells.as_deref());
         let mut occlusion = crate::kitty_graphics::surface::Occlusion::default();
         let has_selection = self
@@ -587,6 +600,7 @@ impl ClientShellState {
                     scroll: None,
                     pane_id: popup.terminal_id.clone(),
                     popup: true,
+                    session_pane: false,
                     mouse_reporting: popup.mouse_reporting,
                     sgr_pixel_mouse: popup.sgr_pixel_mouse,
                     pixel_width: popup.pixel_width,

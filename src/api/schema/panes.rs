@@ -387,6 +387,20 @@ crate::cli::projection::cli_params! {
 
 crate::cli::projection::cli_params! {
     #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+    pub struct PaneSetRestoreCommandParams => PaneSetRestoreCommandProjection {
+        pub pane_id: String => Field::new(String::new()).input(binding::pane_id()),
+        /// Shell command typed into the pane's fresh shell when a restart restores it; omit to clear.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub command: Option<String> => Field::new(None)
+            .input(binding::restore_command()).input(binding::clear_restore_command()),
+        /// Also run the command in the pane now.
+        #[serde(default, skip_serializing_if = "super::is_false")]
+        pub run: bool => Field::new(false).input(binding::boolean("run", true)),
+    }
+}
+
+crate::cli::projection::cli_params! {
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
     pub struct PaneReadParams => PaneReadProjection {
         pub pane_id: String => Field::new(String::new()).input(binding::pane_id()),
         pub source: ReadSource => Field::new(ReadSource::Recent).input(binding::read_source(true)),
@@ -557,6 +571,13 @@ pub struct PaneInfo {
     /// Unix epoch ms when a client last typed into this pane: keys, text or paste, never API writes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_user_input_at_ms: Option<u64>,
+    /// Shell command a restart types into the pane's fresh shell.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restore_command: Option<String>,
+    /// Keys and values a program keeps on the agent; Herdr never interprets them.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    #[schemars(schema_with = "super::common::annotation_values_schema")]
+    pub annotations: std::collections::BTreeMap<String, String>,
     /// The Git checkout containing `cwd`; absent outside one or before its first refresh.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repo: Option<PaneRepoInfo>,

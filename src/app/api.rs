@@ -196,6 +196,15 @@ impl App {
         }
 
         let mut worktree_restore_updates = Vec::new();
+        if let AppEvent::PaneDied {
+            pane_id,
+            exit_reason,
+        } = &ev
+        {
+            if self.handle_session_pane_died(*pane_id, &format!("{exit_reason:?}")) {
+                return Vec::new();
+            }
+        }
         if let AppEvent::PaneDied { pane_id, .. } = &ev {
             if self
                 .state
@@ -976,6 +985,10 @@ impl App {
             ErrorBody, ErrorResponse, Method, ResponseResult, SuccessResponse,
         };
 
+        if crate::app::session_pane::method_moves_focus_to_a_pane(&request.method) {
+            self.set_session_pane_focus(false);
+        }
+
         let response = match request.method {
             Method::ServerStop(_) => {
                 self.state.should_quit = true;
@@ -1167,6 +1180,7 @@ impl App {
                 return self.handle_agent_set_task_status(request.id, params)
             }
             Method::AgentClose(params) => return self.handle_agent_close(request.id, params),
+            Method::AgentAnnotate(params) => return self.handle_agent_annotate(request.id, params),
             Method::AgentViewSet(params) => return self.handle_agent_view_set(request.id, params),
             Method::AgentViewClear(params) => {
                 return self.handle_agent_view_clear(request.id, params);
@@ -1256,7 +1270,34 @@ impl App {
             Method::PaneSendInput(params) => {
                 return self.handle_pane_send_input(request.id, params);
             }
+            Method::PaneSetRestoreCommand(params) => {
+                return self.handle_pane_set_restore_command(request.id, params);
+            }
             Method::PaneClose(target) => return self.handle_pane_close(request.id, target),
+            Method::SessionPaneGet(_) => {
+                return responses::encode_success(
+                    request.id,
+                    ResponseResult::SessionPane {
+                        session_pane: self.session_pane_info(),
+                    },
+                );
+            }
+            Method::SessionPaneFocus(_) => {
+                self.set_session_pane_focus(true);
+                return if self.state.session_pane.focused {
+                    responses::encode_success(request.id, ResponseResult::Ok {})
+                } else {
+                    responses::encode_error(
+                        request.id,
+                        "session_pane_not_running",
+                        "no session pane program is running",
+                    )
+                };
+            }
+            Method::SessionPaneUnfocus(_) => {
+                self.set_session_pane_focus(false);
+                return responses::encode_success(request.id, ResponseResult::Ok {});
+            }
             Method::PopupClose(_) => {
                 return if self.close_popup_pane() {
                     responses::encode_success(request.id, ResponseResult::Ok {})

@@ -389,6 +389,7 @@ impl ClientShellConfig {
         sidebar_collapsed: bool,
         tab_count: usize,
         sidebar_width: u16,
+        session_pane_widths: Option<(u16, u16)>,
     ) -> ClientShellLayout {
         if cols <= self.mobile_width_threshold {
             let header_height = rows.min(2);
@@ -401,10 +402,14 @@ impl ClientShellConfig {
         }
 
         let sidebar_width = if sidebar_collapsed {
-            match self.sidebar_collapsed_mode {
-                SidebarCollapsedModeConfig::Compact => 4,
-                SidebarCollapsedModeConfig::Hidden => 0,
+            match (self.sidebar_collapsed_mode, session_pane_widths) {
+                (SidebarCollapsedModeConfig::Hidden, _) => 0,
+                (SidebarCollapsedModeConfig::Compact, Some((_, collapsed))) => collapsed,
+                (SidebarCollapsedModeConfig::Compact, None) => 4,
             }
+        } else if let Some((expanded, _)) = session_pane_widths {
+            // The server clamps it, so every client gives the pane one width.
+            expanded
         } else {
             let (min, max) = crate::config::validated_sidebar_bounds(
                 self.sidebar_min_width,
@@ -460,7 +465,7 @@ impl ClientShellConfig {
             .unwrap_or(self.sidebar_width)
             .clamp(min_width, max_width);
         let surface = self
-            .layout(cols, rows, sidebar_collapsed, 0, sidebar_width)
+            .layout(cols, rows, sidebar_collapsed, 0, sidebar_width, None)
             .pane_surface;
         ClientSurfaceSize {
             cols: surface.width.max(1),

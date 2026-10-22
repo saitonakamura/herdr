@@ -770,6 +770,11 @@ async fn run_client_loop(
                 }
             }
         }
+        if let Some(message) = state.shell.as_mut().and_then(|shell| {
+            shell.take_session_pane_slot_message(state.reported_size.0, state.reported_size.1)
+        }) {
+            let _ = write_to_server(&mut write_stream, &message);
+        }
         let now = std::time::Instant::now();
         while let Some(event) = power_monitor.try_recv() {
             if supervisors.host_power_event(event, now) {
@@ -2134,6 +2139,17 @@ async fn run_client_loop(
                                         projection,
                                     );
                                 }
+                                continue;
+                            }
+                            Ok(endpoint::EndpointControlMessage::SessionPane(update)) => {
+                                apply_endpoint_session_pane(
+                                    &mut state,
+                                    &mut write_stream,
+                                    &endpoint_id,
+                                    generation,
+                                    endpoint_active,
+                                    *update,
+                                );
                                 continue;
                             }
                             Ok(endpoint::EndpointControlMessage::Ignored) => {

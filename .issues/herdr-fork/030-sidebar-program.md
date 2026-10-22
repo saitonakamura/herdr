@@ -6,7 +6,6 @@ labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
-  - herdr-fork-agent-annotations
 assignee:
 claimed_by:
 ---
@@ -17,7 +16,7 @@ Build `herdr-sidebar`, the program the sidebar pane runs. It is a Rust crate usi
 
 - **Data.**
   - Read only herdr's API on `HERDR_SOCKET_PATH`, using herdr's own API schema types: a snapshot, then `events.subscribe`, and re-snapshot on `events_lost`.
-  - loom facts come from annotations (029). Never read loom's files.
+  - loom facts come from annotations (035). Never read loom's files.
   - Coalesce redraws to at most about 20 a second, and never animate.
 - **Content.**
   - Sections per workspace, each collapsing independently.
@@ -26,6 +25,7 @@ Build `herdr-sidebar`, the program the sidebar pane runs. It is a Rust crate usi
   - The glyph table, with the `unicode` fallback.
   - Task status words.
   - Pending-message counts.
+  - A dim, clickable `← <source name>` token on an agent with a `source` annotation, drawn only while that agent is live ([033](./033-cross-effort-spawn.md#resolution)). It focuses the source, and nothing is drawn on the source's own row.
   - A narrow mode under about 16 columns (ADR 0005).
   - Exclude the sidebar pane itself.
 - **Interaction.**

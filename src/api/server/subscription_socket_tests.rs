@@ -243,6 +243,8 @@ fn reply_to_probe(request: ApiRequestMessage) {
                 agent_home: None,
                 task_status: None,
                 last_user_input_at_ms: None,
+                restore_command: None,
+                annotations: Default::default(),
                 scroll: None,
                 revision: 0,
             },

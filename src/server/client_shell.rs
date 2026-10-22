@@ -540,6 +540,37 @@ fn render_popup_surface(
     }))
 }
 
+/// Renders the session pane at `(cols, rows)` for clients that draw it in their sidebar slot.
+pub(super) fn render_session_pane_view(
+    app: &app::App,
+    (cols, rows): (u16, u16),
+    cell_size: Option<crate::kitty_graphics::HostCellSize>,
+) -> Option<protocol::session_pane::SessionPaneView> {
+    let pane = &app.state.session_pane;
+    let terminal_id = pane.terminal_id()?;
+    let runtime = app.terminal_runtimes.get(terminal_id)?;
+    let area = Rect::new(0, 0, cols, rows);
+    let (buffer, cursor) = crate::server::render_stream::render_terminal_virtual(runtime, area);
+    let hyperlinks = runtime.visible_hyperlinks(area);
+    let (pixel_width, pixel_height) = cell_size.map_or((0, 0), |cell_size| {
+        (
+            u32::from(cols) * cell_size.width_px,
+            u32::from(rows) * cell_size.height_px,
+        )
+    });
+    Some(protocol::session_pane::SessionPaneView {
+        terminal_id: terminal_id.to_string(),
+        focused: pane.focused,
+        width: pane.config.width,
+        collapsed_width: pane.config.collapsed_width,
+        mouse_reporting: runtime.mouse_reporting_enabled(),
+        sgr_pixel_mouse: runtime.sgr_pixel_mouse_enabled(),
+        pixel_width,
+        pixel_height,
+        frame: FrameData::from_ratatui_buffer_with_hyperlinks(&buffer, cursor, &hyperlinks),
+    })
+}
+
 pub(super) fn resize_popup_runtime(
     app: &app::App,
     area: Rect,

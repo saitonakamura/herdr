@@ -125,6 +125,7 @@ operations::define_operations! {
     PaneSendText(PaneSendTextParams) => "pane.send_text", false, false;
     PaneSendKeys(PaneSendKeysParams) => "pane.send_keys", false, false;
     PaneSendInput(PaneSendInputParams) => "pane.send_input", false, false;
+    PaneSetRestoreCommand(PaneSetRestoreCommandParams) => "pane.set_restore_command", false, false;
     PaneRead(PaneReadParams) => "pane.read", false, false;
     PaneReportAgent(PaneReportAgentParams) => "pane.report_agent", true, false;
     PaneReportAgentSession(PaneReportAgentSessionParams) => "pane.report_agent_session", true, false;
@@ -156,6 +157,10 @@ operations::define_operations! {
     MessageWithdraw(MessageTarget) => "message.withdraw", false, false;
     AgentSetTaskStatus(AgentSetTaskStatusParams) => "agent.set_task_status", false, false;
     AgentClose(AgentCloseParams) => "agent.close", true, false;
+    AgentAnnotate(AgentAnnotateParams) => "agent.annotate", false, false;
+    SessionPaneGet(EmptyParams) => "session_pane.get", false, false;
+    SessionPaneFocus(EmptyParams) => "session_pane.focus", true, true;
+    SessionPaneUnfocus(EmptyParams) => "session_pane.unfocus", true, true;
 }
 
 #[cfg(test)]

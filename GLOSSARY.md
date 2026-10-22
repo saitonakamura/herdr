@@ -12,8 +12,12 @@ A coding agent with a stable identity that outlives its pane, its sessions and s
 _Avoid_: node, pane
 
 **Parent**:
-The agent that started this agent. When the parent is closed, the child becomes top-level.
+The agent that started this agent in the same effort. When the parent is closed, the child becomes top-level.
 _Avoid_: spawner, owner
+
+**Annotation**:
+A key and value a program keeps on an agent. herdr stores it with the agent and never interprets it.
+_Avoid_: label, token, tag, metadata
 
 **Message**:
 Text one agent sends another through herdr: a `report` upward, a `reply` to a report, or a `tell` downward.
@@ -51,6 +55,10 @@ _Avoid_: marker, flag
 
 ### Layout and naming
 
+**Effort**:
+One line of work, tracked in the user's trackers. herdr holds each effort as one workspace.
+_Avoid_: project, section
+
 **Workspace**:
 A named container of tabs for one line of work. It has no directory, repo or branch of its own; those belong to its panes.
 _Avoid_: space, project, repo
@@ -66,3 +74,7 @@ _Avoid_: custom name, manual name
 **Sidebar pane**:
 A terminal pane that occupies the sidebar slot in every workspace and tab, running a program the user chooses.
 _Avoid_: custom sidebar, plugin sidebar
+
+**Scope**:
+The one effort or subtree the sidebar is narrowed to, until it is cleared.
+_Avoid_: focus, filter, zoom

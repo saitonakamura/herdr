@@ -378,6 +378,7 @@ impl App {
         match node {
             LayoutNode::Pane { pane } => {
                 self.apply_layout_pane_label(ws_idx, pane_id, pane);
+                self.apply_layout_pane_restore_command(ws_idx, pane_id, pane);
                 Ok(())
             }
             LayoutNode::Split {
@@ -469,6 +470,7 @@ impl App {
         let new_pane_id = new_pane.pane_id;
         self.attach_new_layout_pane(new_pane);
         self.apply_layout_pane_label(ws_idx, new_pane_id, pane);
+        self.apply_layout_pane_restore_command(ws_idx, new_pane_id, pane);
         Ok(new_pane_id)
     }
 
@@ -480,6 +482,38 @@ impl App {
         self.state
             .terminals
             .insert(new_pane.terminal.id.clone(), new_pane.terminal);
+    }
+
+    /// A layout pane's command runs again when a restart restores the pane.
+    fn apply_layout_pane_restore_command(
+        &mut self,
+        ws_idx: usize,
+        pane_id: PaneId,
+        pane: &LayoutPane,
+    ) {
+        let Some(argv) = pane.command.as_deref() else {
+            return;
+        };
+        // The restored pane runs the default shell, so quote for that shell.
+        let shell_name = std::path::Path::new(&self.state.default_shell)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(&self.state.default_shell);
+        let Some(command) = crate::platform::interactive_shell_command(argv, shell_name) else {
+            return;
+        };
+        let Some(terminal_id) = self
+            .state
+            .workspaces
+            .get(ws_idx)
+            .and_then(|ws| ws.terminal_id(pane_id))
+            .cloned()
+        else {
+            return;
+        };
+        if let Some(terminal) = self.state.terminals.get_mut(&terminal_id) {
+            terminal.restore_command = Some(command);
+        }
     }
 
     fn apply_layout_pane_label(&mut self, ws_idx: usize, pane_id: PaneId, pane: &LayoutPane) {
@@ -927,6 +961,18 @@ mod tests {
                 if layout.tab_id == app.public_tab_id(0, 0).unwrap()
                     && layout.panes.len() == 2
         ));
+        let restore_commands: Vec<_> = app
+            .state
+            .terminals
+            .values()
+            .filter_map(|terminal| terminal.restore_command.clone())
+            .collect();
+        assert_eq!(
+            restore_commands.len(),
+            1,
+            "only the command pane re-runs on restore"
+        );
+        assert!(restore_commands[0].contains(exiting_test_command()));
         shutdown_test_runtimes(&mut app);
     }
 

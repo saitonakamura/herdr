@@ -203,6 +203,8 @@ pub struct TerminalState {
     /// The profile directory the agent's session was reported in.
     pub agent_home: Option<crate::agent_resume::AgentHome>,
     pub respawn_shell_on_exit: bool,
+    /// Shell command typed into this pane's fresh shell when a restart restores it.
+    pub restore_command: Option<String>,
     recent_agent_process_exit: Option<RecentAgentProcessExit>,
     agent_process_acquisition_pending: bool,
     pub pending_agent_resume_plan: Option<crate::agent_resume::AgentResumePlan>,
@@ -255,6 +257,7 @@ impl TerminalState {
             agent_launch: None,
             agent_home: None,
             respawn_shell_on_exit: false,
+            restore_command: None,
             recent_agent_process_exit: None,
             agent_process_acquisition_pending: false,
             pending_agent_resume_plan: None,

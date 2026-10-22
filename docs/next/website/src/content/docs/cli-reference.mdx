@@ -273,6 +273,15 @@ aliases for `ctrl+c`.
 
 `pane run` honors live bracketed-paste mode and submits text plus Enter atomically. Prefer it over `send-text` plus `send-keys Enter` for commands; the separate send operations remain low-level and non-submitting.
 
+Re-run a command after a server restart:
+
+```bash
+herdr pane set-restore-command [--run] <pane_id> <command>
+herdr pane set-restore-command --clear <pane_id>
+```
+
+A restart types the command into the pane's new shell, in the pane's saved directory with its `--env`. `--run` also runs it now, the way `pane run` does; flags go before the pane id, since everything after it is the command. The command is one line; `pane get` shows it as `restore_command`. Panes that `layout.apply` started with a `command` get one automatically.
+
 Report agent state from custom hooks:
 
 ```bash

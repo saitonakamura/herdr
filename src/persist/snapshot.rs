@@ -133,6 +133,8 @@ pub struct PaneSnapshot {
     pub agent_home: Option<crate::agent_resume::AgentHome>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_status: Option<crate::api::schema::TaskStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restore_command: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -425,6 +427,7 @@ fn capture_tab(
                 agent_launch: terminal.and_then(|terminal| terminal.agent_launch.clone()),
                 agent_home: terminal.and_then(|terminal| terminal.agent_home.clone()),
                 task_status: terminal.and_then(|terminal| terminal.task_status),
+                restore_command: terminal.and_then(|terminal| terminal.restore_command.clone()),
             },
         );
     }
@@ -785,6 +788,7 @@ mod tests {
                 agent_launch: None,
                 agent_home: None,
                 task_status: None,
+                restore_command: None,
             },
         );
         panes.insert(
@@ -803,6 +807,7 @@ mod tests {
                 agent_launch: None,
                 agent_home: None,
                 task_status: None,
+                restore_command: None,
             },
         );
 
@@ -1603,6 +1608,7 @@ mod tests {
                 agent_launch: None,
                 agent_home: None,
                 task_status: None,
+                restore_command: None,
             },
         );
         panes.insert(
@@ -1623,6 +1629,7 @@ mod tests {
                 agent_launch: None,
                 agent_home: None,
                 task_status: None,
+                restore_command: None,
             },
         );
 

@@ -32,6 +32,8 @@ If the Herdr server stops and starts again, the original pane processes are gone
 
 Snapshot restore does not preserve running shells, servers, tests, or arbitrary processes. Panes that cannot use a stronger restore path come back as new shells in their saved directories.
 
+A pane with a restore command, set with `herdr pane set-restore-command` or given by `layout.apply`, gets that command typed into its new shell, so a dev server or watcher starts again. Herdr re-runs nothing else: an agent pane resumes its agent instead, and a pane without one stays a plain shell.
+
 If a saved directory is unavailable or the shell cannot start, the pane stays in the layout with an error instead of disappearing or moving to your home directory. Its saved directory and agent session reference remain intact. Fix the directory or shell configuration and restart the server to retry, or explicitly close the pane to remove it.
 
 When saving, Herdr prefers the live shell's directory where the operating system exposes it, and retains the last confirmed directory after the shell exits. Shell-reported directories remain the fallback on other platforms.

@@ -12,9 +12,9 @@ use crate::api::schema::{
     PaneRenameParams, PaneReportAgentParams, PaneReportAgentSessionParams,
     PaneReportMetadataParams, PaneResizeParams, PaneResizeReason, PaneResizeResult,
     PaneScrollParams, PaneSelectionReadParams, PaneSendInputParams, PaneSendKeysParams,
-    PaneSendTextParams, PaneSplitParams, PaneSwapParams, PaneSwapReason, PaneSwapResult,
-    PaneTarget, PaneTextPoint, PaneTextRange, PaneZoomMode, PaneZoomParams, PaneZoomReason,
-    PaneZoomResult, ResponseResult,
+    PaneSendTextParams, PaneSetRestoreCommandParams, PaneSplitParams, PaneSwapParams,
+    PaneSwapReason, PaneSwapResult, PaneTarget, PaneTextPoint, PaneTextRange, PaneZoomMode,
+    PaneZoomParams, PaneZoomReason, PaneZoomResult, ResponseResult,
 };
 use crate::app::actions::{PaneZoomCommand, PaneZoomNoopReason};
 use crate::app::App;
@@ -2006,6 +2006,22 @@ impl App {
         }
 
         encode_success(id, ResponseResult::Ok {})
+    }
+
+    pub(super) fn handle_pane_set_restore_command(
+        &mut self,
+        id: String,
+        params: PaneSetRestoreCommandParams,
+    ) -> String {
+        use crate::app::pane_restore_command::RestoreCommandError;
+        match self.set_pane_restore_command(&params.pane_id, params.command, params.run) {
+            Ok(pane) => encode_success(id, ResponseResult::PaneInfo { pane }),
+            Err(RestoreCommandError::PaneNotFound) => pane_not_found(id, &params.pane_id),
+            Err(RestoreCommandError::Invalid(message)) => {
+                encode_error(id, "invalid_restore_command", message)
+            }
+            Err(RestoreCommandError::Send { code, message }) => encode_error(id, code, message),
+        }
     }
 
     pub(super) fn handle_pane_close(&mut self, id: String, target: PaneTarget) -> String {

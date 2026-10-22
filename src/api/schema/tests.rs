@@ -732,6 +732,7 @@ fn success_response_round_trips() {
                 worktree_tabs: false,
                 agent_launch_resume: false,
                 agent_task_status: false,
+                pane_restore_command: false,
             }),
         },
     };
@@ -851,6 +852,7 @@ fn worktree_request_and_response_round_trip() {
                 launch_args: None,
                 agent_home: None,
                 task_status: None,
+                restore_command: None,
                 scroll: None,
                 revision: 0,
             },
@@ -1292,6 +1294,7 @@ fn create_response_round_trips_with_root_pane() {
                 launch_args: None,
                 agent_home: None,
                 task_status: None,
+                restore_command: None,
                 scroll: None,
                 revision: 0,
             },

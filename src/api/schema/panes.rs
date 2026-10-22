@@ -387,6 +387,20 @@ crate::cli::projection::cli_params! {
 
 crate::cli::projection::cli_params! {
     #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+    pub struct PaneSetRestoreCommandParams => PaneSetRestoreCommandProjection {
+        pub pane_id: String => Field::new(String::new()).input(binding::pane_id()),
+        /// Shell command typed into the pane's fresh shell when a restart restores it; omit to clear.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub command: Option<String> => Field::new(None)
+            .input(binding::restore_command()).input(binding::clear_restore_command()),
+        /// Also run the command in the pane now.
+        #[serde(default, skip_serializing_if = "super::is_false")]
+        pub run: bool => Field::new(false).input(binding::boolean("run", true)),
+    }
+}
+
+crate::cli::projection::cli_params! {
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
     pub struct PaneReadParams => PaneReadProjection {
         pub pane_id: String => Field::new(String::new()).input(binding::pane_id()),
         pub source: ReadSource => Field::new(ReadSource::Recent).input(binding::read_source(true)),
@@ -554,6 +568,9 @@ pub struct PaneInfo {
     /// What the agent last said about its brief.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_status: Option<super::agents::TaskStatus>,
+    /// Shell command a restart types into the pane's fresh shell.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restore_command: Option<String>,
     /// The Git checkout containing `cwd`; absent outside one or before its first refresh.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repo: Option<PaneRepoInfo>,

@@ -3097,6 +3097,7 @@ mod tests {
                 worktree_tabs: false,
                 agent_launch_resume: false,
                 agent_task_status: false,
+                pane_restore_command: false,
             }),
         };
         let missing_baseline = crate::api::RuntimeStatus {
@@ -3176,6 +3177,7 @@ mod tests {
                     worktree_tabs: false,
                     agent_launch_resume: false,
                     agent_task_status: false,
+                    pane_restore_command: false,
                 }),
             },
         };
@@ -3439,6 +3441,7 @@ mod tests {
                     worktree_tabs: false,
                     agent_launch_resume: false,
                     agent_task_status: false,
+                    pane_restore_command: false,
                 }),
             },
         };

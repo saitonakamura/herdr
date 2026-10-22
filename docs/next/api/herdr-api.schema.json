@@ -1007,6 +1007,13 @@
               ],
               "description": "The Git checkout containing `cwd`; absent outside one or before its first refresh."
             },
+            "restore_command": {
+              "description": "Shell command a restart types into the pane's fresh shell.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "restore_error": {
               "type": [
                 "string",
@@ -3736,6 +3743,28 @@
           "required": [
             "pane_id",
             "text"
+          ],
+          "type": "object"
+        },
+        "PaneSetRestoreCommandParams": {
+          "properties": {
+            "command": {
+              "description": "Shell command typed into the pane's fresh shell when a restart restores it; omit to clear.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "pane_id": {
+              "type": "string"
+            },
+            "run": {
+              "description": "Also run the command in the pane now.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "pane_id"
           ],
           "type": "object"
         },
@@ -6554,6 +6583,22 @@
         {
           "properties": {
             "method": {
+              "const": "pane.set_restore_command",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/PaneSetRestoreCommandParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "pane.read",
               "type": "string"
             },
@@ -8976,6 +9021,13 @@
                 }
               ],
               "description": "The Git checkout containing `cwd`; absent outside one or before its first refresh."
+            },
+            "restore_command": {
+              "description": "Shell command a restart types into the pane's fresh shell.",
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "restore_error": {
               "type": [
@@ -11635,6 +11687,11 @@
               "type": "boolean"
             },
             "live_handoff": {
+              "type": "boolean"
+            },
+            "pane_restore_command": {
+              "default": false,
+              "description": "Keeps a per-pane restore command (`pane.set_restore_command`) and types it\ninto the pane's fresh shell when a restart restores the pane.",
               "type": "boolean"
             },
             "ssh_agent_registration": {

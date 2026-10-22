@@ -23,6 +23,7 @@ mod custom_commands;
 mod git_refresh;
 mod ids;
 pub(crate) mod messages;
+mod pane_restore_command;
 mod popup;
 mod runtime;
 mod session;

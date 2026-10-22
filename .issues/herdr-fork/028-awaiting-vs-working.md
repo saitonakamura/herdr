@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-awaiting-vs-working
 title: "Dogfood: tell an agent awaiting background work from one actively working, and deliver its messages"
-status: in-progress
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee:
-claimed_by: macos/w1:pH/da6b50ba-7857-41bb-9e5b-b7a4516ae495
+claimed_by:
 ---
 
 ## Question
@@ -27,7 +27,7 @@ Also:
 
 ## Resolution
 
-Draft. [PR #23](https://github.com/saitonakamura/herdr/pull/23) merged as e9e8b8fe, and dotfiles branch `herdr-fork/028-awaiting` as 5d5d4cd. Review follow-ups are pending in [PR #24](https://github.com/saitonakamura/herdr/pull/24) and dotfiles branch `herdr-fork/028-awaiting-dot`.
+Merged 2026-10-22: [PR #23](https://github.com/saitonakamura/herdr/pull/23) as `e9e8b8fe` and its review follow-ups [PR #24](https://github.com/saitonakamura/herdr/pull/24) as `ef3788d8`. Dotfiles `herdr-fork/028-awaiting` merged as `5d5d4cd` and `herdr-fork/028-awaiting-dot` as `5559e3f`.
 
 - **Name and look (the user, 2026-10-22).** `awaiting`, shown as a blue ● (dots) or ◷ (symbols). It is in GLOSSARY.md beside idle, working, blocked and done.
 - **Source.** The Claude `Stop` hook already reported 🔄, and a running sub-agent, as `working` with `background: true`. The effective state now maps that report to `awaiting`. The hook asset and the report API are unchanged, and hook authority keeps the report as sent, so a handoff from an older build still works. Manifest engine 6 adds `state = "awaiting"` for when the screen decides.
@@ -37,7 +37,7 @@ Draft. [PR #23](https://github.com/saitonakamura/herdr/pull/23) merged as e9e8b8
 - **Dotfiles.** `claude.v6.toml` makes both background rules say `awaiting`. Loom shows it as live and blue, and its close note is scoped to builds without 028. `AGENTS.md`, `herdr.md` and pi's dots are updated too. It is inert until an engine-6 build runs.
 - **Verified live.** In a throwaway session with v6, 🔄 reads `awaiting` and a message is typed at once. With v5 the same screen reads `working` and the message is held, which reproduces the bug. Swapping back to v6 delivers it. Over the hook path, `awaiting` held against an idle screen and messages were delivered.
 - **Review follow-ups (#24).** A live handoff restored the hook report's raw state, so a background `working` report read `working` for a tick, and a `blocked` one lost its reason. Restore now reads the report through the same helper as the effective state. The Claude `herdr-complete` mod's dots gain `awaiting`, matching pi's.
-- **After merge.** Merge #24 and the dotfiles branch `herdr-fork/028-awaiting-dot`. Once every box runs a release with 028, fold `claude.v6.toml` into `claude.toml`.
+- **Later.** Once every box runs a release with 028, fold `claude.v6.toml` into `claude.toml`.
 
 ## Parent
 

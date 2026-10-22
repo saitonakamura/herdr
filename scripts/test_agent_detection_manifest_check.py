@@ -277,6 +277,23 @@ class AgentDetectionManifestCheckTests(unittest.TestCase):
             with self.assertRaisesRegex(check.CheckError, "invalid blocked_reason"):
                 check.load_manifest_dir(bundled, engine_version=5)
 
+    def test_awaiting_state_requires_engine_six(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bundled = Path(tmp) / "bundled"
+            bundled.mkdir()
+            content = manifest("codex", "2026.06.10.1").replace(
+                'state = "idle"', 'state = "awaiting"'
+            )
+            (bundled / "codex.toml").write_text(content)
+
+            with self.assertRaisesRegex(check.CheckError, "requires min_engine_version 6"):
+                check.load_manifest_dir(bundled, engine_version=6)
+
+            (bundled / "codex.toml").write_text(
+                content.replace("min_engine_version = 1", "min_engine_version = 6")
+            )
+            check.load_manifest_dir(bundled, engine_version=6)
+
     def test_after_last_line_regex_must_be_strings(self):
         rule = {
             "id": "test",

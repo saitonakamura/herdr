@@ -21,7 +21,10 @@ use super::state::{
 
 fn is_background_completion_transition(prev_state: AgentState, new_state: AgentState) -> bool {
     matches!(new_state, AgentState::Idle)
-        && matches!(prev_state, AgentState::Working | AgentState::Blocked)
+        && matches!(
+            prev_state,
+            AgentState::Working | AgentState::Awaiting | AgentState::Blocked
+        )
 }
 
 fn is_completion_transition(change: &EffectiveStateChange) -> bool {
@@ -3411,6 +3414,26 @@ mod tests {
             notification_sound_for_state_change(false, AgentState::Unknown, AgentState::Idle),
             None
         );
+    }
+
+    #[test]
+    fn awaiting_is_quiet_and_its_end_is_a_completion() {
+        assert_eq!(
+            notification_sound_for_state_change(false, AgentState::Working, AgentState::Awaiting),
+            None
+        );
+        assert_eq!(
+            notification_toast_for_state_change(false, AgentState::Working, AgentState::Awaiting),
+            None
+        );
+        assert_eq!(
+            notification_sound_for_state_change(false, AgentState::Awaiting, AgentState::Idle),
+            Some(crate::sound::Sound::Done)
+        );
+        assert!(matches!(
+            notification_toast_for_state_change(false, AgentState::Awaiting, AgentState::Idle),
+            Some(ToastKind::Finished)
+        ));
     }
 
     #[test]

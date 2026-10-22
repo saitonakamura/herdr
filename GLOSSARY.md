@@ -22,7 +22,7 @@ _Avoid_: notification, inbox item
 ### Agent state
 
 **State**:
-What herdr sees an agent doing in its current turn: idle, working, blocked or done.
+What herdr sees an agent doing in its current turn: idle, working, awaiting, blocked or done.
 _Avoid_: status
 
 **Task status**:
@@ -32,6 +32,10 @@ _Avoid_: state, node status
 **Done**:
 The state of an agent that finished a turn which nobody has acknowledged yet.
 _Avoid_: finished, unseen, completed
+
+**Awaiting**:
+The state of an agent whose turn ended at its prompt while work it started runs on: sub-agents, children, a background shell. It takes messages at once, since their arrival is what it waits for.
+_Avoid_: background, waiting, parked
 
 **Acknowledgement**:
 Focusing a done agent's pane while the outer terminal has focus. One acknowledgement clears done for every client.

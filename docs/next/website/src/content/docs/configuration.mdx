@@ -359,7 +359,7 @@ The title renders on the Herdr server, so `{hostname}` names the machine the pan
 
 `client.window_title.set` overrides the configured title until `client.window_title.clear` hands it back.
 
-Agent status uses compact colored dots by default. To distinguish blocked, working, done, idle, and unknown states by shape as well as color, choose **distinct symbols** in Settings or configure:
+Agent status uses compact colored dots by default. To distinguish blocked, working, awaiting, done, idle, and unknown states by shape as well as color, choose **distinct symbols** in Settings or configure:
 
 ```toml
 [ui]
@@ -390,7 +390,7 @@ rows = [
 Agent rows accept these built-in tokens:
 
 - `state_icon` — colored icon for the agent's semantic state.
-- `state_text` — `idle`, `working`, `blocked`, `done`, or `unknown`, including a reported display label when present.
+- `state_text` — `idle`, `working`, `awaiting`, `blocked`, `done`, or `unknown`, including a reported display label when present.
 - `machine` — machine label when the client has multiple machines; omitted for a single local machine.
 - `workspace` — workspace name.
 - `tab` — tab name when available.

@@ -2927,6 +2927,27 @@ fn workspace_drag_rejects_foreign_endpoint_slots() {
 }
 
 #[test]
+fn awaiting_status_is_a_blue_dot_or_a_clock() {
+    use crate::api::schema::AgentStatus;
+    use crate::config::StatusIndicatorStyle;
+
+    let palette = crate::app::state::Palette::catppuccin();
+    assert_eq!(
+        status_icon(AgentStatus::Awaiting, StatusIndicatorStyle::Dots),
+        "●"
+    );
+    assert_eq!(
+        status_icon(AgentStatus::Awaiting, StatusIndicatorStyle::Symbols),
+        "◷"
+    );
+    assert_eq!(status_color(AgentStatus::Awaiting, &palette), palette.blue);
+    assert_ne!(
+        status_color(AgentStatus::Awaiting, &palette),
+        status_color(AgentStatus::Working, &palette)
+    );
+}
+
+#[test]
 fn collapsed_aggregate_workspace_status_uses_its_status_color() {
     use crate::api::schema::AgentStatus;
 

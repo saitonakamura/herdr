@@ -283,6 +283,8 @@ pub enum AgentStatus {
     Blocked,
     Done,
     Unknown,
+    // Appended last: the variant order is the private protocol's bincode tag.
+    Awaiting,
 }
 
 pub(crate) fn default_true() -> bool {

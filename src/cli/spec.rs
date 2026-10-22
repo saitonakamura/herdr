@@ -605,7 +605,7 @@ mod tests {
         assert!(!has_option(wait, "status"));
         assert_eq!(
             option_values(wait, "until"),
-            ["idle", "working", "blocked", "done", "unknown"]
+            ["idle", "working", "awaiting", "blocked", "done", "unknown"]
         );
         assert!(has_option(wait, "timeout"));
     }

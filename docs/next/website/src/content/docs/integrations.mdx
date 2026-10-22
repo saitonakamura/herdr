@@ -119,7 +119,7 @@ The hook reports Claude Code session identity on session start and decides the p
 | `Notification` `permission_prompt` | `blocked`, reason `permission` |
 | `Notification` `elicitation_dialog` | `blocked`, reason `form` |
 | `Stop` whose last line is `⏳ awaiting your answer` | `blocked`, reason `question` |
-| `Stop` whose last line is `🔄 awaiting background work`, or with a sub-agent still running | `working` (background) |
+| `Stop` whose last line is `🔄 awaiting background work`, or with a sub-agent still running | `awaiting` |
 | any other `Stop`, `StopFailure` | `idle` |
 
 Screen detection still covers what hooks cannot see. A dialog on screen blocks a working turn. A turn the screen has shown idle for three seconds has ended, because an interrupt fires no `Stop`. A reported permission or form ends once its dialog has been seen and is gone. Sub-agent hooks never change the parent pane's state, except a permission prompt raised for a sub-agent, which waits in the parent pane.

@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{agent_label, parse_agent_label, Agent};
 
-pub(crate) const MANIFEST_ENGINE_VERSION: u32 = 5;
+pub(crate) const MANIFEST_ENGINE_VERSION: u32 = 6;
 // Fork builds read the fork's published catalog so its manifest fixes are not shadowed by herdr.dev.
 const DEFAULT_CATALOG_URL: &str =
     "https://raw.githubusercontent.com/saitonakamura/herdr/master/distribution/agent-detection/index.toml";

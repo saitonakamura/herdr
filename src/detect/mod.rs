@@ -18,6 +18,16 @@ pub enum AgentState {
     Blocked,
     /// Plain shell or unrecognized program.
     Unknown,
+    /// The turn ended at the prompt while work the agent started runs on.
+    /// Appended last so existing serialized tags keep their values.
+    Awaiting,
+}
+
+impl AgentState {
+    /// The turn has ended and the agent sits at its prompt, nothing on screen moving.
+    pub fn at_prompt(self) -> bool {
+        matches!(self, Self::Idle | Self::Awaiting)
+    }
 }
 
 /// What a blocked agent waits on, when its integration or detection rule says.

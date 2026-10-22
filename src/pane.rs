@@ -1159,7 +1159,7 @@ fn spawn_basic_detection_task(
                 // job owns the screen, so it is withdrawn rather than left standing.
                 if agent_job.in_background()
                     && !lifecycle_authority_active
-                    && state == AgentState::Working
+                    && matches!(state, AgentState::Working | AgentState::Awaiting)
                 {
                     apply_agent_detection_publish_update(
                         state_events.clone(),
@@ -3233,7 +3233,7 @@ impl PaneRuntime {
                         // job owns the screen, so it is withdrawn rather than left standing.
                         if agent_job.in_background()
                             && !lifecycle_authority_active
-                            && state == AgentState::Working
+                            && matches!(state, AgentState::Working | AgentState::Awaiting)
                         {
                             apply_agent_detection_publish_update(
                                 state_events.clone(),

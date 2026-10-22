@@ -419,8 +419,9 @@ saved-machine client, the selected server's view applies to the combined agent
 list. Current workspace and tab context includes that selected machine, so an
 identical ID on another machine does not match; independent filter branches,
 such as `status` being `blocked`, still match agents on any connected machine.
-Effective status values are `idle`, `working`, `blocked`, `done`, and `unknown`;
-`done` means idle and not yet seen.
+Effective status values are `idle`, `working`, `awaiting`, `blocked`, `done`, and
+`unknown`; `done` means idle and not yet seen, and `awaiting` means the turn ended
+while work the agent started still runs.
 
 Sort fields are `workspace_order`, `tab_order`, `pane_order`, `attention`,
 `status`, `agent`, `seen`, `state_change_seq`, or `{"token":"name"}`. Sorts are

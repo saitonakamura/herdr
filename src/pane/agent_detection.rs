@@ -120,7 +120,7 @@ pub(super) struct IdleScreenScanSkipInput {
 }
 
 pub(super) fn should_skip_idle_screen_scan(input: IdleScreenScanSkipInput) -> bool {
-    let stable_state = input.state == AgentState::Idle
+    let stable_state = matches!(input.state, AgentState::Idle | AgentState::Awaiting)
         || (input.state == AgentState::Unknown && input.agent == Some(Agent::Codex));
     if !stable_state
         || input.agent.is_none()

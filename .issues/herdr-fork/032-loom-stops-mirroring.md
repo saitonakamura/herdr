@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-loom-stops-mirroring
 title: loom stops mirroring herdr's runtime facts
-status: in-progress
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee:
-claimed_by: macos/w1:pY/c367ceff-719f-4fae-b12b-dedd58587cf2
+claimed_by:
 ---
 
 ## Question
@@ -35,8 +35,8 @@ Keep `tests/run.sh` green, and add stub-herdr cases for the fork path.
 
 ## Resolution
 
-Draft, awaiting merge: dotfiles branch `herdr-fork/032-loom-stops-mirroring` (`9ceaabb`, review fixes `28c4b35`; master merged in as
-`f10dbb0`). No herdr change was needed: `agent list`, `pane list` and `message list --to/--from` already carry
+Merged 2026-10-22 as dotfiles `00e9777` (branch `herdr-fork/032-loom-stops-mirroring` at `3451aa7`: `9ceaabb`, review
+fixes `28c4b35`, loom 070 merged in). No herdr change was needed: `agent list`, `pane list` and `message list --to/--from` already carry
 every fact loom reads.
 
 - **Live nodes come from herdr.** On a herdr that answers the 035 annotations probe, `all_nodes` joins the registry

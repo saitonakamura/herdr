@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-cross-effort-spawn
 title: An agent starting work in another effort
-status: open
+status: in-progress
 labels:
   - wayfinder:grilling
 parent: herdr-fork-map
 blocked_by:
-assignee:
-claimed_by:
+assignee: saitonakamura
+claimed_by: macos/w1:pT/1e4f1472-5622-4ee9-a091-2801a149bf2b
 ---
 
 ## Question

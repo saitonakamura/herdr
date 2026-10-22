@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-restart-pane-commands
 title: Non-agent panes re-run their command on restore
-status: in-progress
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee:
-claimed_by: macos/w1:pV/a6559c7f-193e-49c5-95af-0196445aa5ae
+claimed_by: macos/a6559c7f-193e-49c5-95af-0196445aa5ae
 ---
 
 ## Question
@@ -27,7 +27,7 @@ Before building, decide with the user:
 
 ## Resolution
 
-Draft, pending merge: [PR #27](https://github.com/saitonakamura/herdr/pull/27), branch `fork/034-restart-commands`.
+Merged 2026-10-22 as `7858531d`: [PR #27](https://github.com/saitonakamura/herdr/pull/27) (branch `fork/034-restart-commands`, master merged in at 55ac811d).
 
 Decided with the user 2026-10-22:
 

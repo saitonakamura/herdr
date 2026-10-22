@@ -1,14 +1,14 @@
 ---
 id: herdr-fork-sidebar-program
 title: The herdr-sidebar program, v1
-status: in-progress
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
   - herdr-fork-agent-annotations
 assignee: saitonakamura
-claimed_by: macos/w1:pX/bf6db786-1101-4360-9494-f497e0df3517
+claimed_by:
 ---
 
 ## Question
@@ -62,7 +62,7 @@ Build `herdr-sidebar`, the program the sidebar pane runs. It is a Rust crate usi
 
 ## Resolution
 
-Draft, in review as [PR #29](https://github.com/saitonakamura/herdr/pull/29) (branch `fork/030-sidebar-program`); the ticket stays in-progress until it merges.
+Merged 2026-10-22 as `255cb431`: [PR #29](https://github.com/saitonakamura/herdr/pull/29).
 
 - **Program.**
   - `tools/sidebar/` (`herdr-sidebar`) reads only herdr's API: `session.snapshot` and `message.list`, re-read at most 20 times a second on any event, and from scratch after `events_lost` or a reconnect.

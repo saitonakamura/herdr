@@ -68,6 +68,9 @@ pub struct ServerCapabilities {
     /// Keeps a task status per agent (`agent.set_task_status`) and closes subtrees (`agent.close`).
     #[serde(default)]
     pub agent_task_status: bool,
+    /// Reports `last_user_input_at_ms` on pane and agent info.
+    #[serde(default)]
+    pub pane_user_input: bool,
     /// Keeps a per-pane restore command (`pane.set_restore_command`) and types it
     /// into the pane's fresh shell when a restart restores the pane.
     #[serde(default)]

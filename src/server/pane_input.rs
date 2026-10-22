@@ -200,6 +200,21 @@ pub(super) fn apply_terminal_attach_input(
     }
 }
 
+/// Whether raw attach input carries typing: a key press or repeat, text, or a
+/// paste. Mouse and focus reports from the host terminal do not count.
+pub(super) fn terminal_attach_input_is_typing(data: &[u8]) -> bool {
+    crate::raw_input::parse_framed_input(data)
+        .iter()
+        .any(|event| match event {
+            crate::raw_input::RawInputEvent::Key(key) => {
+                key.as_key_event().kind != KeyEventKind::Release
+            }
+            crate::raw_input::RawInputEvent::Text(text) => !text.as_str().is_empty(),
+            crate::raw_input::RawInputEvent::Paste(text) => !text.is_empty(),
+            _ => false,
+        })
+}
+
 #[cfg(test)]
 pub(crate) fn test_apply_client_pane_input_events(
     runtime: &crate::terminal::TerminalRuntime,
@@ -363,6 +378,15 @@ pub(super) fn apply_client_terminal_input_events(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn terminal_attach_typing_ignores_focus_and_mouse_reports() {
+        assert!(terminal_attach_input_is_typing(b"a"));
+        assert!(terminal_attach_input_is_typing(b"\x1b[200~pasted\x1b[201~"));
+        assert!(!terminal_attach_input_is_typing(b""));
+        assert!(!terminal_attach_input_is_typing(b"\x1b[I"));
+        assert!(!terminal_attach_input_is_typing(b"\x1b[<0;3;4M"));
+    }
 
     #[tokio::test]
     async fn terminal_attach_stale_geometry_falls_back_to_the_canonical_cell() {

@@ -163,6 +163,8 @@ pub struct TerminalState {
     pub agent_id: Option<super::AgentId>,
     pub parent_agent_id: Option<super::AgentId>,
     pub task_status: Option<crate::api::schema::TaskStatus>,
+    /// Unix epoch ms when a client last typed into this terminal; API writes never set it.
+    pub last_user_input_at_ms: Option<u64>,
     /// What programs keep on the agent; never read by Herdr itself.
     pub annotations: std::collections::BTreeMap<String, String>,
     pub cwd: PathBuf,
@@ -222,6 +224,7 @@ impl TerminalState {
             agent_id: None,
             parent_agent_id: None,
             task_status: None,
+            last_user_input_at_ms: None,
             annotations: std::collections::BTreeMap::new(),
             cwd,
             detected_agent: None,

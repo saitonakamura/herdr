@@ -277,6 +277,9 @@ pub struct AgentInfo {
     /// What the agent last said about its brief.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_status: Option<TaskStatus>,
+    /// Unix epoch ms when a client last typed into this pane: keys, text or paste, never API writes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_user_input_at_ms: Option<u64>,
     /// Keys and values a program keeps on the agent; Herdr never interprets them.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     #[schemars(schema_with = "super::common::annotation_values_schema")]

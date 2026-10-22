@@ -35,6 +35,7 @@ mod tab_names;
 mod terminal_targets;
 mod terminal_titles;
 mod theme_sync;
+mod user_input;
 mod window_title;
 mod worktrees;
 

@@ -491,6 +491,7 @@ fn restore_agent_identity(
         terminal.agent_launch = pane.agent_launch.clone();
         terminal.agent_home = pane.agent_home.clone();
         terminal.task_status = pane.task_status;
+        terminal.last_user_input_at_ms = pane.last_user_input_at_ms;
         terminal.restore_command = pane.restore_command.clone();
         terminal.annotations = pane.annotations.clone();
     }
@@ -1619,6 +1620,7 @@ mod tests {
                             agent_launch: None,
                             agent_home: None,
                             task_status: Some(crate::api::schema::TaskStatus::Complete),
+                            last_user_input_at_ms: Some(1_700_000_000_123),
                             restore_command: None,
                             annotations: std::collections::BTreeMap::from([(
                                 "effort".into(),
@@ -1685,6 +1687,7 @@ mod tests {
             terminal.task_status,
             Some(crate::api::schema::TaskStatus::Complete)
         );
+        assert_eq!(terminal.last_user_input_at_ms, Some(1_700_000_000_123));
         assert_eq!(
             terminal.annotations.get("effort").map(String::as_str),
             Some("pt:herdr-fork")
@@ -1726,6 +1729,7 @@ mod tests {
                             agent_launch: None,
                             agent_home: None,
                             task_status: None,
+                            last_user_input_at_ms: None,
                             restore_command: Some("npm run dev".into()),
                             annotations: Default::default(),
                         },
@@ -1806,6 +1810,7 @@ mod tests {
                                 agent_launch: None,
                                 agent_home: None,
                                 task_status: None,
+                                last_user_input_at_ms: None,
                                 restore_command: None,
                                 annotations: Default::default(),
                             },
@@ -1826,6 +1831,7 @@ mod tests {
                                 agent_launch: None,
                                 agent_home: None,
                                 task_status: None,
+                                last_user_input_at_ms: None,
                                 restore_command: None,
                                 annotations: Default::default(),
                             },
@@ -1889,6 +1895,7 @@ mod tests {
                     agent_launch: None,
                     agent_home: None,
                     task_status: None,
+                    last_user_input_at_ms: None,
                     restore_command: None,
                     annotations: Default::default(),
                 },
@@ -1913,6 +1920,7 @@ mod tests {
             agent_launch: None,
             agent_home: None,
             task_status: None,
+            last_user_input_at_ms: None,
             restore_command: None,
             annotations: Default::default(),
         };
@@ -2086,6 +2094,7 @@ mod tests {
                             agent_launch: None,
                             agent_home: None,
                             task_status: None,
+                            last_user_input_at_ms: None,
                             restore_command: None,
                             annotations: Default::default(),
                         },
@@ -2181,6 +2190,7 @@ mod tests {
             agent_id: None,
             parent_agent_id: None,
             task_status: None,
+            last_user_input_at_ms: None,
             restore_command: None,
             annotations: Default::default(),
             launch_env: vec![("LOOM_PARENT".into(), "1234abcd".into())],
@@ -2494,6 +2504,7 @@ mod tests {
                 agent_launch: None,
                 agent_home: None,
                 task_status: None,
+                last_user_input_at_ms: None,
                 restore_command: None,
                 annotations: Default::default(),
             },

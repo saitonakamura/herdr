@@ -568,6 +568,9 @@ pub struct PaneInfo {
     /// What the agent last said about its brief.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_status: Option<super::agents::TaskStatus>,
+    /// Unix epoch ms when a client last typed into this pane: keys, text or paste, never API writes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_user_input_at_ms: Option<u64>,
     /// Shell command a restart types into the pane's fresh shell.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub restore_command: Option<String>,

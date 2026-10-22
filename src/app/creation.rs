@@ -371,6 +371,7 @@ impl App {
                 .map(|launch| launch.args.clone()),
             agent_home: terminal.agent_home.as_ref().map(|home| home.path.clone()),
             task_status: terminal.task_status,
+            last_user_input_at_ms: terminal.last_user_input_at_ms,
             restore_command: terminal.restore_command.clone(),
             annotations: terminal.annotations.clone(),
             repo: terminal

@@ -79,6 +79,7 @@ fn default_capabilities() -> Option<ServerCapabilities> {
         worktree_tabs: true,
         agent_launch_resume: true,
         agent_task_status: true,
+        pane_user_input: true,
         pane_restore_command: true,
         agent_annotations: true,
     })
@@ -1167,6 +1168,7 @@ mod tests {
             launch_args: None,
             agent_home: None,
             task_status: None,
+            last_user_input_at_ms: None,
             restore_command: None,
             annotations: Default::default(),
             scroll: None,
@@ -1416,6 +1418,7 @@ mod tests {
                 worktree_tabs: false,
                 agent_launch_resume: false,
                 agent_task_status: false,
+                pane_user_input: false,
                 pane_restore_command: false,
                 agent_annotations: false,
             }),

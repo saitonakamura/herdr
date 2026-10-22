@@ -35,7 +35,7 @@ Keep `tests/run.sh` green, and add stub-herdr cases for the fork path.
 
 ## Resolution
 
-Draft, awaiting merge: dotfiles branch `herdr-fork/032-loom-stops-mirroring` (`9ceaabb`, master merged in as
+Draft, awaiting merge: dotfiles branch `herdr-fork/032-loom-stops-mirroring` (`9ceaabb`, review fixes `28c4b35`; master merged in as
 `f10dbb0`). No herdr change was needed: `agent list`, `pane list` and `message list --to/--from` already carry
 every fact loom reads.
 
@@ -55,7 +55,11 @@ every fact loom reads.
   reports herdr never had and progress. Inbox files no longer copy herdr's delivery time.
 - **Readers.** `tree`, `ui`, `view`, `whoami`, `close` and `doctor` read through `all_nodes`. `doctor` warns on a
   live node herdr holds without loom's annotations.
-- **Stock herdr** keeps the registry path. **Migration:** none; `loom restore` fills in missing annotations.
+- **Stock herdr** keeps the registry path. **Migration:** none; `loom restore` fills in missing annotations. A node
+  from before `loom migrate` is found by its pane and stays one node; its annotations go to the pane.
+- **Review fixes (`28c4b35`).** herdr is read before the node lock is taken; an inbox file whose message herdr no
+  longer lists counts as delivered; `loom ui`'s thread merges herdr's queue with loom's files; `pane.closed` checks
+  the node files against one `pane list`; a yes from the probe is kept per server boot (socket mtime). 425 tests.
 - **Verification.** `tests/run.sh`: 419 passed, with ten stub-herdr cases in `tests/test-live.sh`; a copy with the
   join disabled fails seven of them. Live smoke on a throwaway session (fork `0.9.5+fork.1` at 378bba24, two idle
   claude agents): herdr's rename, Parent and `needs_user` showed in `loom tree`/`whoami`, a `--user` reply showed in

@@ -1,7 +1,7 @@
 ---
 id: herdr-fork-sidebar-pane
 title: Sidebar pane
-status: in-progress
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
@@ -10,7 +10,7 @@ blocked_by:
   - herdr-fork-agent-identity-parent
   - herdr-fork-workspace-is-effort
 assignee:
-claimed_by: macos/w1:pS/f0047384-d08b-43e1-97f2-df45f517964a
+claimed_by:
 ---
 
 ## Question
@@ -69,7 +69,7 @@ Build herdr's half of the sidebar pane: the host. This covers ADR 0002 as amende
 
 ## Resolution
 
-Draft until [PR #28](https://github.com/saitonakamura/herdr/pull/28) merges.
+Merged 2026-10-22 as `8658913f`: [PR #28](https://github.com/saitonakamura/herdr/pull/28).
 
 - **Name.** The API calls it the **session pane**, since it belongs to the server session, not a workspace: `session_pane.get`, `.focus`, `.unfocus`. The documentation is in FORK.md § Sidebar pane, GLOSSARY.md and the `docs/next` socket API page.
 - **Focus is shared, not per client.**

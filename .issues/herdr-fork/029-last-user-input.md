@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-last-user-input
 title: "Say when a client last typed into a pane, so loom can tell a pane the user is using"
-status: in-progress
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee:
-claimed_by: macos/w1:pN/f4915a47-096c-4908-8d98-76080f5d667e
+claimed_by:
 ---
 
 ## Question
@@ -31,7 +31,7 @@ Verify with a throwaway session: type into a pane from an attached client and `p
 
 ## Resolution
 
-Draft. Branch `fork/029-last-user-input`, [PR #25](https://github.com/saitonakamura/herdr/pull/25), green and mergeable at 9ce8296e (origin/master merged in after #26 and #27, keeping both sides), not merged. The second commit ungates `raw_input::parse_framed_input` on Windows, where the server now needs it.
+Merged 2026-10-22 as `378bba24`: [PR #25](https://github.com/saitonakamura/herdr/pull/25) (branch `fork/029-last-user-input`, origin/master merged in after #26 and #27). loom reads it from dotfiles loom 068 (`loom close` refuses a user-held pane). The second commit ungates `raw_input::parse_framed_input` on Windows, where the server now needs it.
 
 - **As shipped, contract unchanged.** Field `last_user_input_at_ms` (unix epoch ms, omitted when unknown) on pane info and agent info. Capability `pane_user_input` under `capabilities` in `herdr status server --json`. No event.
 - **What counts.** In `src/server/headless.rs`: `ClientShellPaneInput` key press/repeat or text (the existing `keyboard_forwarded`) or a non-empty paste. Clipboard image paste to a pane or a direct terminal attach. Terminal-attach `ClientInput` that parses (`parse_framed_input`) as a key, text or paste, so the host terminal's focus and mouse reports don't count. Popup input and API writes never set it.

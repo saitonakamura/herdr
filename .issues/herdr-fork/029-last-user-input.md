@@ -31,7 +31,7 @@ Verify with a throwaway session: type into a pane from an attached client and `p
 
 ## Resolution
 
-Draft. Branch `fork/029-last-user-input`, [PR #25](https://github.com/saitonakamura/herdr/pull/25), not merged.
+Draft. Branch `fork/029-last-user-input`, [PR #25](https://github.com/saitonakamura/herdr/pull/25), green at c54bcc92, not merged. The second commit ungates `raw_input::parse_framed_input` on Windows, where the server now needs it.
 
 - **As shipped, contract unchanged.** Field `last_user_input_at_ms` (unix epoch ms, omitted when unknown) on pane info and agent info. Capability `pane_user_input` under `capabilities` in `herdr status server --json`. No event.
 - **What counts.** In `src/server/headless.rs`: `ClientShellPaneInput` key press/repeat or text (the existing `keyboard_forwarded`) or a non-empty paste. Clipboard image paste to a pane or a direct terminal attach. Terminal-attach `ClientInput` that parses (`parse_framed_input`) as a key, text or paste, so the host terminal's focus and mouse reports don't count. Popup input and API writes never set it.

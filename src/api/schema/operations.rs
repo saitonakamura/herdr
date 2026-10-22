@@ -207,6 +207,8 @@ mod tests {
             "plugin.pane.focus",
             "plugin.pane.close",
             "agent.close",
+            "session_pane.focus",
+            "session_pane.unfocus",
         ]
         .into_iter()
         .collect::<BTreeSet<_>>();

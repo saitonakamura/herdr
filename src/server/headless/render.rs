@@ -37,6 +37,19 @@ impl HeadlessServer {
         &self,
         client_id: u64,
     ) -> Option<(&crate::terminal::TerminalRuntime, crate::layout::PaneId)> {
+        if self.app.state.session_pane.focused
+            && self
+                .clients
+                .get(&client_id)
+                .is_some_and(|client| client.session_pane.is_some())
+        {
+            if let (Some(runtime), Some(pane_id)) = (
+                self.app.session_pane_runtime(),
+                self.app.state.session_pane.pane_id(),
+            ) {
+                return Some((runtime, pane_id));
+            }
+        }
         if self.popup_owner_tab_id == self.shell_tab_id_for_client(client_id) {
             if let Some(popup) = &self.app.state.popup_pane {
                 return self
@@ -294,6 +307,11 @@ impl HeadlessServer {
     pub(super) fn sync_immediate_pty_sources(&self) {
         let (has_app_target, direct_terminal_targets) = self.pty_render_targets();
         let mut pane_ids = HashSet::new();
+        if let Some(pane_id) = self.app.state.session_pane.pane_id() {
+            if self.any_client_receives_session_pane() {
+                pane_ids.insert(pane_id);
+            }
+        }
         if has_app_target {
             for (&client_id, client) in &self.clients {
                 if !client.is_active_shell_client() || client.writer.is_none() {

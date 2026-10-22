@@ -28,6 +28,7 @@ pub(crate) type RenderTarget = (
 pub(crate) enum ClientShellInputTarget {
     Pane(String),
     Popup(String),
+    SessionPane(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -178,6 +179,8 @@ pub(crate) struct ClientConnection {
     /// Last coherent shell replacement sent to this client.
     pub(crate) shell_snapshot: Option<crate::protocol::ClientShellSnapshot>,
     pub(crate) shell_agent_completions: Option<crate::protocol::endpoint::EndpointAgentCompletions>,
+    /// Session pane delivery, present when the client opted in.
+    pub(crate) session_pane: Option<SessionPaneDelivery>,
     /// View policy paired with the last coherent shell replacement.
     pub(crate) shell_agent_view: Option<crate::api::schema::AgentViewSetParams>,
     /// Monotonic shell replacement revision for this connection.
@@ -194,6 +197,26 @@ pub(crate) struct ClientConnection {
     pub(crate) shell_uses_endpoint_keybindings: bool,
     /// Channels for sending framed ServerMessage data to the client writer thread.
     pub(crate) writer: Option<ClientWriter>,
+}
+
+/// What a client was last sent about the session pane, so unchanged state is not resent.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct SessionPaneDelivery {
+    pub(crate) revision: u64,
+    /// `None` until a running pane is sent, since a client starts out native.
+    pub(crate) last_sent: Option<SessionPaneSentState>,
+    /// The client's slot for the pane, as (cols, rows).
+    pub(crate) slot: Option<(u16, u16)>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SessionPaneSentState {
+    pub(crate) terminal_id: String,
+    pub(crate) content_seq: u64,
+    pub(crate) size: (u16, u16),
+    pub(crate) focused: bool,
+    pub(crate) widths: (u16, u16),
+    pub(crate) mouse: (bool, bool),
 }
 
 impl ClientConnection {
@@ -248,6 +271,7 @@ impl ClientConnection {
             shell_location: None,
             shell_snapshot: None,
             shell_agent_completions: None,
+            session_pane: None,
             shell_agent_view: None,
             shell_projection_revision: 0,
             shell_endpoint_command_in_flight: false,

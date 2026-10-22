@@ -618,6 +618,12 @@ impl HeadlessServer {
                 }
                 true
             }
+            AppEvent::PaneDied {
+                pane_id,
+                exit_reason,
+            } if self.app.state.session_pane.is_pane(*pane_id) => self
+                .app
+                .handle_session_pane_died(*pane_id, &format!("{exit_reason:?}")),
             AppEvent::PaneDied { pane_id, .. }
             | AppEvent::WorktreeRuntimeRestoreFailed { pane_id, .. } => {
                 let focus_before = self.shell_focus_targets();

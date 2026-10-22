@@ -884,6 +884,12 @@ impl ClientShellState {
                         .as_ref()
                         .filter(|hit| hit.pane_id == gesture.hit.pane_id)
                         .cloned()
+                } else if gesture.hit.session_pane {
+                    self.hits
+                        .session_pane
+                        .as_ref()
+                        .filter(|hit| hit.pane_id == gesture.hit.pane_id)
+                        .cloned()
                 } else {
                     self.hits
                         .panes
@@ -944,6 +950,51 @@ impl ClientShellState {
         }
         if self.popup_terminal_id.is_some() {
             return;
+        }
+        if let Some(hit) = self.hits.session_pane.clone() {
+            if self.overlay.is_none() && super::contains(hit.inner_rect, point) {
+                match mouse.kind {
+                    MouseEventKind::Down(button) => {
+                        self.push_pane_mouse_event(&hit, mouse, mouse.modifiers, outcome);
+                        if hit.mouse_reporting {
+                            self.pane_mouse_gesture = Some(ClientPaneMouseGesture {
+                                last_position: self.pane_mouse_position(&hit, mouse),
+                                hit,
+                                button,
+                                stripped_modifiers: crossterm::event::KeyModifiers::empty(),
+                                last_event: mouse,
+                            });
+                        }
+                    }
+                    MouseEventKind::Moved if hit.mouse_reporting => {
+                        self.push_pane_mouse_event(&hit, mouse, mouse.modifiers, outcome);
+                    }
+                    MouseEventKind::ScrollUp
+                    | MouseEventKind::ScrollDown
+                    | MouseEventKind::ScrollLeft
+                    | MouseEventKind::ScrollRight => {
+                        self.push_pane_mouse_event(&hit, mouse, mouse.modifiers, outcome);
+                    }
+                    MouseEventKind::Up(_) | MouseEventKind::Drag(_) | MouseEventKind::Moved => {}
+                }
+                return;
+            }
+            // Clicking a pane takes keyboard focus back from the session pane.
+            if matches!(mouse.kind, MouseEventKind::Down(_))
+                && self.session_pane_focused()
+                && self
+                    .hits
+                    .panes
+                    .iter()
+                    .any(|pane| super::contains(pane.rect, point))
+            {
+                self.push_endpoint_method(
+                    crate::api::schema::Method::SessionPaneUnfocus(
+                        crate::api::schema::EmptyParams::default(),
+                    ),
+                    outcome,
+                );
+            }
         }
         if self.config.mouse_capture
             && !self.replaying_url_click
@@ -2384,6 +2435,8 @@ impl ClientShellState {
         );
         let target = if hit.popup {
             ClientInputTarget::Popup(hit.pane_id.clone())
+        } else if hit.session_pane {
+            ClientInputTarget::SessionPane(hit.pane_id.clone())
         } else {
             ClientInputTarget::Pane(hit.pane_id.clone())
         };

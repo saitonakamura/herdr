@@ -862,6 +862,43 @@ pub(super) fn finish_client_shell_input(
     Ok(false)
 }
 
+/// Stores an endpoint's session pane and redraws. A pane that appears, goes or
+/// changes width moves the pane surface, so the endpoint hears the new size.
+pub(super) fn apply_endpoint_session_pane(
+    state: &mut ClientState,
+    endpoints: &mut endpoint::EndpointRegistry,
+    endpoint_id: &endpoint::ClientEndpointId,
+    endpoint_active: bool,
+    update: crate::protocol::session_pane::SessionPaneUpdate,
+) {
+    let pixel_mouse_available = state.pixel_mouse_available();
+    let Some(shell) = state.shell.as_mut() else {
+        return;
+    };
+    let (cols, rows) = state.reported_size;
+    let (changed, resized) = shell.set_endpoint_session_pane(endpoint_id, update, (cols, rows));
+    if !changed || !endpoint_active {
+        return;
+    }
+    let resize = resized.then(|| {
+        client_shell_resize_message(
+            shell,
+            cols,
+            rows,
+            state.reported_cell_size.0,
+            state.reported_cell_size.1,
+            pixel_mouse_available,
+        )
+    });
+    let frame = shell.compose(cols, rows);
+    if let Some(resize) = resize {
+        endpoints.send_to(endpoint_id, &resize);
+    }
+    if let Some(frame) = frame {
+        state.present_frame(frame);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

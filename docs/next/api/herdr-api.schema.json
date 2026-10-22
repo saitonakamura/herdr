@@ -7103,6 +7103,54 @@
             "params"
           ],
           "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "session_pane.get",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/EmptyParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "session_pane.focus",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/EmptyParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "session_pane.unfocus",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/EmptyParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
         }
       ],
       "properties": {
@@ -11682,6 +11730,22 @@
                 "agents"
               ],
               "type": "object"
+            },
+            {
+              "properties": {
+                "session_pane": {
+                  "$ref": "#/schemas/success_response/$defs/SessionPaneInfo"
+                },
+                "type": {
+                  "const": "session_pane",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "session_pane"
+              ],
+              "type": "object"
             }
           ]
         },
@@ -11746,6 +11810,68 @@
           },
           "required": [
             "live_handoff"
+          ],
+          "type": "object"
+        },
+        "SessionPaneInfo": {
+          "description": "The server's one session pane: a terminal that belongs to no workspace or tab,\nrunning the program configured as `ui.sidebar.pane`. Clients that support it\ndraw it in place of their native sidebar.",
+          "properties": {
+            "argv": {
+              "items": {
+                "type": "string"
+              },
+              "type": [
+                "array",
+                "null"
+              ]
+            },
+            "collapsed_width": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "cols": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "focused": {
+              "description": "Whether the program holds keyboard focus. Focus is shared by every client.",
+              "type": "boolean"
+            },
+            "restarts": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "rows": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "status": {
+              "description": "`off`, `running`, `restarting` or `failed`. Readers should treat unknown values as `off`.",
+              "type": "string"
+            },
+            "width": {
+              "description": "Expanded width, from `ui.sidebar_width` clamped by the sidebar bounds.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "status",
+            "focused",
+            "cols",
+            "rows",
+            "width",
+            "collapsed_width",
+            "restarts"
           ],
           "type": "object"
         },

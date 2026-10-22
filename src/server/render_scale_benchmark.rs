@@ -34,6 +34,8 @@ struct RenderPipeline {
     app: App,
     client: ClientShellState,
     graphics_delivery: crate::kitty_graphics::surface::DeliveryCache,
+    /// Redraw count of the stub sidebar program, when a session pane runs.
+    session_pane_redraws: Option<usize>,
 }
 
 impl RenderPipeline {
@@ -68,10 +70,79 @@ impl RenderPipeline {
             app,
             client,
             graphics_delivery: crate::kitty_graphics::surface::DeliveryCache::default(),
+            session_pane_redraws: None,
         }
     }
 
+    fn with_session_pane(mut self) -> Self {
+        let width = self.app.state.session_pane.config.width;
+        self.app
+            .install_test_session_pane(TerminalRuntime::test_with_screen_bytes(width, ROWS, b""));
+        self.session_pane_redraws = Some(0);
+        self.redraw_session_pane();
+        self
+    }
+
+    /// One event's worth of work for a stub sidebar that redraws every row: the
+    /// program's output, the server's encode, the client's decode.
+    fn redraw_session_pane(&mut self) -> (Duration, Duration) {
+        let Some(redraws) = self.session_pane_redraws.as_mut() else {
+            return (Duration::ZERO, Duration::ZERO);
+        };
+        *redraws += 1;
+        let width = usize::from(self.app.state.session_pane.config.width);
+        let frame: String = (0..ROWS)
+            .map(|row| {
+                format!(
+                    "\x1b[{};1H{:<width$.width$}",
+                    row + 1,
+                    format!("{row} {redraws}")
+                )
+            })
+            .collect();
+        self.app
+            .session_pane_runtime()
+            .expect("benchmark session pane")
+            .test_process_pty_bytes(frame.as_bytes());
+
+        let started = Instant::now();
+        let view = super::client_shell::render_session_pane_view(
+            &self.app,
+            self.app.state.session_pane.size,
+            None,
+        )
+        .expect("benchmark session pane view");
+        let message = crate::protocol::session_pane::update_message(
+            &crate::protocol::session_pane::SessionPaneUpdate {
+                boot_id: "bench-boot".into(),
+                revision: *redraws as u64,
+                pane: Some(view),
+            },
+        )
+        .expect("benchmark session pane message");
+        let framed = bincode::serde::encode_to_vec(&message, bincode::config::standard())
+            .expect("benchmark session pane frame");
+        let server_elapsed = started.elapsed();
+
+        let started = Instant::now();
+        let (message, _): (crate::protocol::ServerMessage, usize) =
+            bincode::serde::decode_from_slice(&framed, bincode::config::standard())
+                .expect("benchmark session pane decode");
+        let crate::protocol::ServerMessage::EndpointControl { data, .. } = message else {
+            panic!("benchmark session pane is a named control");
+        };
+        let update = crate::protocol::session_pane::decode_update(&data)
+            .expect("benchmark session pane update");
+        self.client.set_endpoint_session_pane(
+            &crate::client::endpoint::ClientEndpointId::Local,
+            update,
+            (COLS, ROWS),
+        );
+        (server_elapsed, started.elapsed())
+    }
+
     fn render_once(&mut self) -> (Duration, Duration) {
+        let (session_server, session_client) = self.redraw_session_pane();
         let surface_size = self.client.surface_size(COLS, ROWS);
         let started = Instant::now();
         let target = self
@@ -96,7 +167,7 @@ impl RenderPipeline {
             1,
         )
         .expect("benchmark surface");
-        let server_elapsed = started.elapsed();
+        let server_elapsed = started.elapsed() + session_server;
         self.graphics_delivery = rendered.graphics_delivery;
 
         let started = Instant::now();
@@ -115,7 +186,7 @@ impl RenderPipeline {
                 .compose(COLS, ROWS)
                 .expect("benchmark pipeline should compose a complete frame"),
         );
-        let client_elapsed = started.elapsed();
+        let client_elapsed = started.elapsed() + session_client;
 
         (server_elapsed, client_elapsed)
     }
@@ -296,6 +367,41 @@ fn profile_snapshot_encoding(
     }
     let (construction, total) = (0..SAMPLE_COUNT).map(|_| run()).unzip();
     (summarize(construction), summarize(total))
+}
+
+/// The session pane is one more PTY: its redraws should cost the same at any pane count.
+fn print_session_pane_profiles() {
+    for (label, build) in [
+        (
+            "background workspaces",
+            workspaces as fn(usize) -> Vec<Workspace>,
+        ),
+        ("active panes", active_panes),
+    ] {
+        println!("session pane {label}: stub program redraws every row on every frame");
+        println!(
+            "       count  pane  server_median_us  client_median_us  total_median_us  total_p95_us"
+        );
+        for count in [1, 15] {
+            for pane in [false, true] {
+                let pipeline = RenderPipeline::new(build(count));
+                let pipeline = if pane {
+                    pipeline.with_session_pane()
+                } else {
+                    pipeline
+                };
+                let stats = profile_pipeline(pipeline);
+                println!(
+                    "  {count:>10}  {:>4}  {:>16}  {:>16}  {:>15}  {:>12}",
+                    if pane { "on" } else { "off" },
+                    stats.server.median_us,
+                    stats.client.median_us,
+                    stats.total.median_us,
+                    stats.total.p95_us,
+                );
+            }
+        }
+    }
 }
 
 fn print_snapshot_encoding_profiles(label: &str, build: fn(usize) -> Vec<Workspace>) {
@@ -606,6 +712,7 @@ fn print_surface_reuse_profiles() {
 #[tokio::test(flavor = "current_thread")]
 #[ignore = "manual client-rendered pipeline scaling profile"]
 async fn render_scale_profile() {
+    print_session_pane_profiles();
     print_profiles("background workspaces (one pane each)", workspaces);
     print_snapshot_encoding_profiles("background workspaces", workspaces);
     print_profiles("active panes (one workspace)", active_panes);

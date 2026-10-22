@@ -290,6 +290,9 @@ pub enum ResponseResult {
         #[serde(default, skip_serializing_if = "super::is_false")]
         dry_run: bool,
     },
+    SessionPane {
+        session_pane: super::session::SessionPaneInfo,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

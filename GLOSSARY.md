@@ -72,7 +72,7 @@ A tab label set by hand, which stops the tab following its agent's title until i
 _Avoid_: custom name, manual name
 
 **Sidebar pane**:
-A terminal pane that occupies the sidebar slot in every workspace and tab, running a program the user chooses.
+A terminal pane that occupies the sidebar slot in every workspace and tab, running a program the user chooses. herdr's API calls it the session pane, since it belongs to the server session rather than to any workspace.
 _Avoid_: custom sidebar, plugin sidebar
 
 **Scope**:

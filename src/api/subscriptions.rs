@@ -733,6 +733,7 @@ mod tests {
             launch_args: None,
             agent_home: None,
             task_status: None,
+            last_user_input_at_ms: None,
             scroll,
             revision: 0,
         }

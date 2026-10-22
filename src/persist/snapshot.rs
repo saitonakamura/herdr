@@ -133,6 +133,8 @@ pub struct PaneSnapshot {
     pub agent_home: Option<crate::agent_resume::AgentHome>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_status: Option<crate::api::schema::TaskStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_user_input_at_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -425,6 +427,7 @@ fn capture_tab(
                 agent_launch: terminal.and_then(|terminal| terminal.agent_launch.clone()),
                 agent_home: terminal.and_then(|terminal| terminal.agent_home.clone()),
                 task_status: terminal.and_then(|terminal| terminal.task_status),
+                last_user_input_at_ms: terminal.and_then(|terminal| terminal.last_user_input_at_ms),
             },
         );
     }
@@ -785,6 +788,7 @@ mod tests {
                 agent_launch: None,
                 agent_home: None,
                 task_status: None,
+                last_user_input_at_ms: None,
             },
         );
         panes.insert(
@@ -803,6 +807,7 @@ mod tests {
                 agent_launch: None,
                 agent_home: None,
                 task_status: None,
+                last_user_input_at_ms: None,
             },
         );
 
@@ -1371,6 +1376,7 @@ mod tests {
         terminal.agent_id = crate::terminal::AgentId::parse("1234abcd");
         terminal.parent_agent_id = crate::terminal::AgentId::parse("2345bcde");
         terminal.task_status = Some(crate::api::schema::TaskStatus::NeedsUser);
+        terminal.last_user_input_at_ms = Some(1_700_000_000_123);
 
         let snapshot = capture_from_state(&state);
         let pane = &snapshot.workspaces[0].tabs[0].panes[&root.raw()];
@@ -1379,6 +1385,7 @@ mod tests {
         assert_eq!(json["agent_id"], "1234abcd");
         assert_eq!(json["parent_agent_id"], "2345bcde");
         assert_eq!(json["task_status"], "needs_user");
+        assert_eq!(json["last_user_input_at_ms"], 1_700_000_000_123_u64);
     }
 
     #[test]
@@ -1603,6 +1610,7 @@ mod tests {
                 agent_launch: None,
                 agent_home: None,
                 task_status: None,
+                last_user_input_at_ms: None,
             },
         );
         panes.insert(
@@ -1623,6 +1631,7 @@ mod tests {
                 agent_launch: None,
                 agent_home: None,
                 task_status: None,
+                last_user_input_at_ms: None,
             },
         );
 

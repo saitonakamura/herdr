@@ -313,6 +313,8 @@ Those commands include `foreground_cwd` when Herdr can resolve the cwd of the fo
 
 `pane get` and `pane list` include `scroll` when terminal scroll metrics are available. `scroll.offset_from_bottom == 0` means the pane is at the bottom of its scrollback.
 
+`pane get`, `pane list`, `agent get` and `agent list` include `last_user_input_at_ms`, the Unix time in milliseconds when a client last typed into the pane: a key press or repeat, text, or a paste, including a clipboard image paste and input through `agent attach`. Mouse, scroll and focus input do not count, and neither do API writes such as `pane send-text`, `pane send-keys`, `pane send-input`, `agent prompt` or message delivery, so a script can tell a pane a person is using from one it drives itself. The field is absent until the first such input and survives server restarts. It is not published as an event; poll `pane get`. Servers that report it advertise `pane_user_input` under `capabilities` in `herdr status server --json`.
+
 Report display-only pane metadata without taking over semantic state:
 
 ```bash

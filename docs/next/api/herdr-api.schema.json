@@ -976,6 +976,15 @@
                 "null"
               ]
             },
+            "last_user_input_at_ms": {
+              "description": "Unix epoch ms when a client last typed into this pane: keys, text or paste, never API writes.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
             "launch_args": {
               "description": "Args the agent was started with through Herdr; a resume reuses them,\nminus those that select a session or run headless.",
               "items": {
@@ -7391,6 +7400,15 @@
             "interactive_ready": {
               "type": "boolean"
             },
+            "last_user_input_at_ms": {
+              "description": "Unix epoch ms when a client last typed into this pane: keys, text or paste, never API writes.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
             "launch_args": {
               "description": "Args the agent was started with through Herdr; a resume reuses them,\nminus those that select a session or run headless.",
               "items": {
@@ -8943,6 +8961,15 @@
             "label": {
               "type": [
                 "string",
+                "null"
+              ]
+            },
+            "last_user_input_at_ms": {
+              "description": "Unix epoch ms when a client last typed into this pane: keys, text or paste, never API writes.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
                 "null"
               ]
             },
@@ -11635,6 +11662,11 @@
               "type": "boolean"
             },
             "live_handoff": {
+              "type": "boolean"
+            },
+            "pane_user_input": {
+              "default": false,
+              "description": "Reports `last_user_input_at_ms` on pane and agent info.",
               "type": "boolean"
             },
             "ssh_agent_registration": {

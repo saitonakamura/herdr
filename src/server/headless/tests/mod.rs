@@ -8480,3 +8480,72 @@ async fn done_clears_once_for_every_client_when_its_pane_is_focused_in_a_focused
     );
     shutdown_test_runtimes(&mut server);
 }
+
+#[tokio::test]
+async fn client_typing_records_last_user_input_and_api_writes_do_not() {
+    let mut server = test_headless_server();
+    let mut input_rx = install_focused_test_runtime(&mut server, b"PS> ");
+    server.app.state.ensure_test_terminals();
+    let pane_id = server.app.state.workspaces[0].tabs[0].root_pane;
+    let public_pane_id = server.app.public_pane_id(0, pane_id).unwrap();
+    let (_control_rx, _render_rx) = connect_matching_test_shell(&mut server, 1);
+    let last_input = |server: &mut HeadlessServer| {
+        let response = server.app.handle_api_request(crate::api::schema::Request {
+            id: "get".into(),
+            method: crate::api::schema::Method::PaneGet(crate::api::schema::PaneTarget {
+                pane_id: server.app.public_pane_id(0, pane_id).unwrap(),
+            }),
+        });
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+        response["result"]["pane"]["last_user_input_at_ms"].as_u64()
+    };
+
+    server.app.handle_api_request(crate::api::schema::Request {
+        id: "send".into(),
+        method: crate::api::schema::Method::PaneSendText(crate::api::schema::PaneSendTextParams {
+            pane_id: public_pane_id.clone(),
+            text: "scripted".into(),
+        }),
+    });
+    assert_eq!(
+        input_rx.try_recv().unwrap(),
+        Bytes::from_static(b"scripted")
+    );
+    assert_eq!(
+        last_input(&mut server),
+        None,
+        "API writes are not user input"
+    );
+
+    server.handle_server_event_with_render_impact(ServerEvent::ClientShellPaneInput {
+        client_id: 1,
+        pane_id: public_pane_id.clone(),
+        events: vec![crate::protocol::ClientPaneInputEvent::Mouse {
+            kind: crate::protocol::ClientMouseKind::Moved,
+            position: crate::protocol::ClientMousePosition::Cell { column: 1, row: 0 },
+            geometry: None,
+            modifiers: 0,
+            lines: 0,
+        }],
+    });
+    assert_eq!(last_input(&mut server), None, "mouse input is not typing");
+
+    server.handle_server_event_with_render_impact(ServerEvent::ClientShellPaneInput {
+        client_id: 1,
+        pane_id: public_pane_id.clone(),
+        events: vec![crate::protocol::ClientPaneInputEvent::Paste(
+            "pasted".into(),
+        )],
+    });
+    let pasted = last_input(&mut server).expect("a client paste is user input");
+
+    server.handle_server_event_with_render_impact(ServerEvent::ClientShellPaneInput {
+        client_id: 1,
+        pane_id: public_pane_id,
+        events: vec![crate::protocol::ClientPaneInputEvent::TextCommit(
+            "Z".into(),
+        )],
+    });
+    assert!(last_input(&mut server).is_some_and(|typed| typed >= pasted));
+    shutdown_test_runtimes(&mut server);
+}

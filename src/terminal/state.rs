@@ -148,6 +148,8 @@ pub struct TerminalState {
     pub agent_id: Option<super::AgentId>,
     pub parent_agent_id: Option<super::AgentId>,
     pub task_status: Option<crate::api::schema::TaskStatus>,
+    /// Unix epoch ms when a client last typed into this terminal; API writes never set it.
+    pub last_user_input_at_ms: Option<u64>,
     pub cwd: PathBuf,
     pub detected_agent: Option<Agent>,
     pub fallback_state: AgentState,
@@ -203,6 +205,7 @@ impl TerminalState {
             agent_id: None,
             parent_agent_id: None,
             task_status: None,
+            last_user_input_at_ms: None,
             cwd,
             detected_agent: None,
             fallback_state: AgentState::Unknown,

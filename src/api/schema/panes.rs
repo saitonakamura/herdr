@@ -554,6 +554,9 @@ pub struct PaneInfo {
     /// What the agent last said about its brief.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_status: Option<super::agents::TaskStatus>,
+    /// Unix epoch ms when a client last typed into this pane: keys, text or paste, never API writes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_user_input_at_ms: Option<u64>,
     /// The Git checkout containing `cwd`; absent outside one or before its first refresh.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repo: Option<PaneRepoInfo>,

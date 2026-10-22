@@ -285,6 +285,7 @@ struct ServerCapabilitiesJson {
     worktree_tabs: bool,
     agent_launch_resume: bool,
     agent_task_status: bool,
+    pane_user_input: bool,
 }
 
 #[derive(Serialize)]
@@ -335,6 +336,7 @@ fn server_status_json(server: &ServerRuntimeStatus) -> ServerStatusJson {
                     worktree_tabs: capabilities.worktree_tabs,
                     agent_launch_resume: capabilities.agent_launch_resume,
                     agent_task_status: capabilities.agent_task_status,
+                    pane_user_input: capabilities.pane_user_input,
                 }),
             compatible: protocol.map(|value| value == crate::protocol::PROTOCOL_VERSION),
             endpoint_compatible: capabilities.as_ref().and_then(|capabilities| {
@@ -437,6 +439,7 @@ mod tests {
                 worktree_tabs: false,
                 agent_launch_resume: false,
                 agent_task_status: false,
+                pane_user_input: false,
             }),
         }
     }
@@ -449,6 +452,7 @@ mod tests {
         assert_eq!(value["capabilities"]["worktree_post_create"], false);
         assert_eq!(value["capabilities"]["agent_launch_resume"], false);
         assert_eq!(value["capabilities"]["agent_task_status"], false);
+        assert_eq!(value["capabilities"]["pane_user_input"], false);
     }
 
     #[test]

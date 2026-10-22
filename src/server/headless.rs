@@ -66,7 +66,7 @@ use crate::server::notifications::{
 use crate::server::pane_input::{
     apply_client_pane_input_events, apply_client_popup_input_events,
     apply_client_terminal_input_events, apply_terminal_attach_input, apply_terminal_attach_scroll,
-    terminal_attach_mouse_position,
+    terminal_attach_input_is_typing, terminal_attach_mouse_position,
 };
 use crate::server::shutdown::{ServerStop, ShutdownReason};
 use crate::server::socket_paths::{
@@ -1179,10 +1179,16 @@ impl HeadlessServer {
                 else {
                     return false;
                 };
-                if let Some(runtime) = self.runtime_for_terminal_id_string(terminal_id) {
+                let Some(terminal) = self.terminal_id_by_string(terminal_id) else {
+                    return true;
+                };
+                if let Some(runtime) = self.app.terminal_runtimes.get(&terminal) {
                     let payload = paste_payload_for_runtime(runtime, &path);
-                    if let Err(err) = runtime.try_send_bytes(Bytes::from(payload)) {
-                        warn!(client_id, terminal_id = %terminal_id, err = %err, "terminal attach clipboard image paste failed");
+                    match runtime.try_send_bytes(Bytes::from(payload)) {
+                        Ok(()) => self.app.note_user_input(&terminal),
+                        Err(err) => {
+                            warn!(client_id, terminal_id = %terminal_id, err = %err, "terminal attach clipboard image paste failed")
+                        }
                     }
                 }
                 true
@@ -1216,11 +1222,16 @@ impl HeadlessServer {
                 ) else {
                     return foreground_changed | geometry_changed;
                 };
-                if let Err(err) = apply_client_pane_input_events(
+                match apply_client_pane_input_events(
                     runtime,
                     &[protocol::ClientPaneInputEvent::Paste(path)],
                 ) {
-                    warn!(client_id, pane_id, err = %err, "client shell clipboard image paste failed");
+                    Ok(_) => self
+                        .app
+                        .note_user_input_in_pane(workspace_index, runtime_pane_id),
+                    Err(err) => {
+                        warn!(client_id, pane_id, err = %err, "client shell clipboard image paste failed")
+                    }
                 }
                 true
             }
@@ -2096,9 +2107,15 @@ impl HeadlessServer {
                 else {
                     return false;
                 };
-                if let Some(runtime) = self.runtime_for_terminal_id_string(terminal_id) {
-                    if let Err(err) = apply_terminal_attach_input(runtime, data) {
-                        warn!(client_id, terminal_id = %terminal_id, err = %err);
+                let Some(terminal) = self.terminal_id_by_string(terminal_id) else {
+                    return true;
+                };
+                let typed = terminal_attach_input_is_typing(&data);
+                if let Some(runtime) = self.app.terminal_runtimes.get(&terminal) {
+                    match apply_terminal_attach_input(runtime, data) {
+                        Ok(()) if typed => self.app.note_user_input(&terminal),
+                        Ok(()) => {}
+                        Err(err) => warn!(client_id, terminal_id = %terminal_id, err = %err),
                     }
                 }
                 true
@@ -2448,6 +2465,15 @@ impl HeadlessServer {
                 let scroll_changed = runtime.scroll_metrics() != scroll_before;
                 if keyboard_forwarded {
                     self.note_interactive_input(runtime_pane_id, Instant::now());
+                }
+                // A paste is typing too, though it does not open the render-latency window.
+                let pasted = input_result.is_ok()
+                    && events.iter().any(|event| {
+                        matches!(event, protocol::ClientPaneInputEvent::Paste(text) if !text.is_empty())
+                    });
+                if keyboard_forwarded || pasted {
+                    self.app
+                        .note_user_input_in_pane(workspace_index, runtime_pane_id);
                 }
                 if let Err(err) = input_result {
                     warn!(client_id, pane_id, err = %err, "targeted client shell input failed");

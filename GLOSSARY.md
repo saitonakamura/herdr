@@ -12,8 +12,12 @@ A coding agent with a stable identity that outlives its pane, its sessions and s
 _Avoid_: node, pane
 
 **Parent**:
-The agent that started this agent in the same effort. When the parent is closed, the child becomes top-level.
+The agent that started this agent in the same effort. When the parent is closed, the child becomes top-level. An agent started from another effort has a Source instead.
 _Avoid_: spawner, owner
+
+**Source**:
+The agent that started this agent from another effort. It gets this agent's reports and may answer them, but closing it never closes this agent.
+_Avoid_: parent, spawner, origin
 
 **Annotation**:
 A key and value a program keeps on an agent. herdr stores it with the agent and never interprets it.

@@ -242,6 +242,7 @@ fn reply_to_probe(request: ApiRequestMessage) {
                 launch_args: None,
                 agent_home: None,
                 task_status: None,
+                restore_command: None,
                 annotations: Default::default(),
                 scroll: None,
                 revision: 0,

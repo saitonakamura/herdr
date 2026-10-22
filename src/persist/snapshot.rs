@@ -133,6 +133,8 @@ pub struct PaneSnapshot {
     pub agent_home: Option<crate::agent_resume::AgentHome>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_status: Option<crate::api::schema::TaskStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restore_command: Option<String>,
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub annotations: std::collections::BTreeMap<String, String>,
 }
@@ -427,6 +429,7 @@ fn capture_tab(
                 agent_launch: terminal.and_then(|terminal| terminal.agent_launch.clone()),
                 agent_home: terminal.and_then(|terminal| terminal.agent_home.clone()),
                 task_status: terminal.and_then(|terminal| terminal.task_status),
+                restore_command: terminal.and_then(|terminal| terminal.restore_command.clone()),
                 annotations: terminal
                     .map(|terminal| terminal.annotations.clone())
                     .unwrap_or_default(),
@@ -790,6 +793,7 @@ mod tests {
                 agent_launch: None,
                 agent_home: None,
                 task_status: None,
+                restore_command: None,
                 annotations: Default::default(),
             },
         );
@@ -809,6 +813,7 @@ mod tests {
                 agent_launch: None,
                 agent_home: None,
                 task_status: None,
+                restore_command: None,
                 annotations: Default::default(),
             },
         );
@@ -1612,6 +1617,7 @@ mod tests {
                 agent_launch: None,
                 agent_home: None,
                 task_status: None,
+                restore_command: None,
                 annotations: Default::default(),
             },
         );
@@ -1633,6 +1639,7 @@ mod tests {
                 agent_launch: None,
                 agent_home: None,
                 task_status: None,
+                restore_command: None,
                 annotations: Default::default(),
             },
         );

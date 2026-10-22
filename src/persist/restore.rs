@@ -474,6 +474,10 @@ fn unavailable_restored_terminal(
     terminal
 }
 
+fn restore_command_input(command: &str) -> bytes::Bytes {
+    bytes::Bytes::from(format!("{command}\r"))
+}
+
 /// Agent identity and how the agent was started outlive the process, so they
 /// are restored whether or not the agent itself is resumed.
 fn restore_agent_identity(
@@ -487,6 +491,7 @@ fn restore_agent_identity(
         terminal.agent_launch = pane.agent_launch.clone();
         terminal.agent_home = pane.agent_home.clone();
         terminal.task_status = pane.task_status;
+        terminal.restore_command = pane.restore_command.clone();
         terminal.annotations = pane.annotations.clone();
     }
 }
@@ -764,6 +769,14 @@ fn restore_tab(
                 #[cfg(unix)]
                 if let Some(agent_state) = handoff_agent_state {
                     terminal.restore_handoff_agent_state(agent_state);
+                }
+                // A handed-off pane is still running its command.
+                if !was_imported {
+                    if let Some(command) = terminal.restore_command.as_deref() {
+                        if let Err(err) = runtime.try_send_bytes(restore_command_input(command)) {
+                            warn!(pane_id = id.raw(), err = %err, "failed to type restore command");
+                        }
+                    }
                 }
                 panes.insert(*id, PaneState::new(terminal_id.clone()));
                 terminal_runtimes.insert(terminal_id, runtime);
@@ -1606,6 +1619,7 @@ mod tests {
                             agent_launch: None,
                             agent_home: None,
                             task_status: Some(crate::api::schema::TaskStatus::Complete),
+                            restore_command: None,
                             annotations: std::collections::BTreeMap::from([(
                                 "effort".into(),
                                 "pt:herdr-fork".into(),
@@ -1678,6 +1692,80 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn restore_keeps_a_plain_pane_restore_command() {
+        let cwd = std::env::current_dir().unwrap();
+        let snapshot = SessionSnapshot {
+            version: super::super::snapshot::SNAPSHOT_VERSION,
+            workspaces: vec![WorkspaceSnapshot {
+                id: Some("workspace".into()),
+                custom_name: None,
+                identity_cwd: cwd.clone(),
+                worktree_space: None,
+                public_pane_numbers: HashMap::new(),
+                next_public_pane_number: 0,
+                public_tab_numbers: Vec::new(),
+                next_public_tab_number: 0,
+                tabs: vec![TabSnapshot {
+                    custom_name: None,
+                    followed_name: None,
+                    worktree: None,
+                    layout: LayoutSnapshot::Pane(0),
+                    panes: HashMap::from([(
+                        0,
+                        super::super::snapshot::PaneSnapshot {
+                            cwd,
+                            label: None,
+                            agent_name: None,
+                            managed_agent_kind: None,
+                            agent_session: None,
+                            agent_resume: None,
+                            launch_argv: None,
+                            agent_id: None,
+                            parent_agent_id: None,
+                            launch_env: Vec::new(),
+                            agent_launch: None,
+                            agent_home: None,
+                            task_status: None,
+                            restore_command: Some("npm run dev".into()),
+                            annotations: Default::default(),
+                        },
+                    )]),
+                    zoomed: false,
+                    focused: Some(0),
+                    root_pane: Some(0),
+                }],
+                active_tab: 0,
+            }],
+            active: Some(0),
+            selected: 0,
+            sidebar_width: None,
+            sidebar_section_split: None,
+            collapsed_space_keys: Default::default(),
+            messages: Default::default(),
+        };
+        let (events, _event_rx) = mpsc::channel(4);
+
+        let (_workspaces, terminals, runtimes) = restore(
+            &snapshot,
+            None,
+            24,
+            80,
+            0,
+            test_restore_shell(),
+            crate::config::ShellModeConfig::NonLogin,
+            false,
+            events,
+            Arc::new(Notify::new()),
+            Arc::new(RenderSignal::new()),
+        );
+
+        let (terminal_id, terminal) = terminals.iter().next().expect("restored terminal");
+        assert_eq!(terminal.restore_command.as_deref(), Some("npm run dev"));
+        assert!(runtimes.contains_key(terminal_id));
+        assert_eq!(restore_command_input("npm run dev"), "npm run dev\r");
+    }
+
+    #[tokio::test]
     async fn restore_preserves_public_id_mapping_after_pane_id_remap() {
         let cwd = std::env::current_dir().unwrap();
         let snapshot = SessionSnapshot {
@@ -1718,6 +1806,7 @@ mod tests {
                                 agent_launch: None,
                                 agent_home: None,
                                 task_status: None,
+                                restore_command: None,
                                 annotations: Default::default(),
                             },
                         ),
@@ -1737,6 +1826,7 @@ mod tests {
                                 agent_launch: None,
                                 agent_home: None,
                                 task_status: None,
+                                restore_command: None,
                                 annotations: Default::default(),
                             },
                         ),
@@ -1799,6 +1889,7 @@ mod tests {
                     agent_launch: None,
                     agent_home: None,
                     task_status: None,
+                    restore_command: None,
                     annotations: Default::default(),
                 },
             )
@@ -1822,6 +1913,7 @@ mod tests {
             agent_launch: None,
             agent_home: None,
             task_status: None,
+            restore_command: None,
             annotations: Default::default(),
         };
         let snapshot = SessionSnapshot {
@@ -1994,6 +2086,7 @@ mod tests {
                             agent_launch: None,
                             agent_home: None,
                             task_status: None,
+                            restore_command: None,
                             annotations: Default::default(),
                         },
                     )]),
@@ -2088,6 +2181,7 @@ mod tests {
             agent_id: None,
             parent_agent_id: None,
             task_status: None,
+            restore_command: None,
             annotations: Default::default(),
             launch_env: vec![("LOOM_PARENT".into(), "1234abcd".into())],
             agent_launch: Some(crate::agent_resume::AgentLaunch {
@@ -2400,6 +2494,7 @@ mod tests {
                 agent_launch: None,
                 agent_home: None,
                 task_status: None,
+                restore_command: None,
                 annotations: Default::default(),
             },
         );

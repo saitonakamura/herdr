@@ -182,6 +182,23 @@ pub(crate) fn joined(name: &'static str, value: &'static str) -> Input<String> {
     .verbatim()
 }
 
+pub(crate) fn restore_command() -> Input<Option<String>> {
+    Input::rest("command", "COMMAND", 1, |slot, value| {
+        *slot = Some(value.to_owned());
+        Ok(())
+    })
+    .verbatim()
+    .configure(|arg| arg.required(false).conflicts_with("clear"))
+}
+
+pub(crate) fn clear_restore_command() -> Input<Option<String>> {
+    Input::flag("clear", |slot, _| {
+        *slot = None;
+        Ok(())
+    })
+    .configure(|arg| arg.conflicts_with("run"))
+}
+
 pub(crate) fn keys() -> Input<Vec<String>> {
     Input::positional("key", 1, |slot: &mut Vec<String>, value| {
         slot.push(value.to_owned());
@@ -699,6 +716,14 @@ pub(super) const LEAVES: &[Leaf] = &[
         Quiet,
         PaneRunProjection,
         PaneSendInput
+    ),
+    leaf!(
+        "set-restore-command",
+        "Set the command a restart re-runs in a pane",
+        "cli:request",
+        Json,
+        PaneSetRestoreCommandProjection,
+        PaneSetRestoreCommand
     ),
     Leaf {
         name: "report-agent",

@@ -125,7 +125,16 @@ impl Config {
             .chain(self.ui.sidebar.spaces.repo_token_diagnostic())
             .chain(self.ui.sidebar.pane_diagnostics())
             .chain(self.invalid_headless_size_diagnostic())
+            .chain(self.sidebar_program_diagnostic())
             .collect()
+    }
+
+    /// Fork-only: `[sidebar]` belongs to `herdr-sidebar`, which reads only a table.
+    fn sidebar_program_diagnostic(&self) -> Option<String> {
+        self.sidebar
+            .as_ref()
+            .filter(|value| !value.is_table())
+            .map(|_| "sidebar must be a table ([sidebar]); herdr-sidebar ignores it".to_string())
     }
 
     pub(crate) fn headless_size(&self) -> (u16, u16) {

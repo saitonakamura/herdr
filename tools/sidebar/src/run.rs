@@ -444,13 +444,10 @@ impl StatusWatch {
                     }
                     continue;
                 }
+                let mut newer = None;
                 let err = client.subscribe(
                     api::status_subscriptions(&panes),
-                    |stream| {
-                        if let (Ok(mut slot), Ok(stream)) = (slot.lock(), stream.try_clone()) {
-                            *slot = Some(stream);
-                        }
-                    },
+                    |stream| newer = connected(&slot, &rx, stream),
                     || {},
                     |_| {
                         let _ = events.send(Msg::Invalidate {
@@ -461,6 +458,10 @@ impl StatusWatch {
                 );
                 if let Ok(mut slot) = slot.lock() {
                     slot.take();
+                }
+                if let Some(newer) = newer {
+                    panes = newer;
+                    continue;
                 }
                 // a pane closed under the request, or the server went away: wait
                 // for a newer set, else retry this one
@@ -502,6 +503,28 @@ impl StatusWatch {
             let _ = stream.shutdown(std::net::Shutdown::Both);
         }
     }
+}
+
+/// Publishes a fresh connection for `watch` to shut down, then looks for a set
+/// queued before it was published: `watch` found nothing to close then, so this
+/// connection would subscribe to a stale set. It shuts itself down and hands back
+/// the newest set instead.
+fn connected(
+    slot: &Mutex<Option<UnixStream>>,
+    rx: &Receiver<Vec<String>>,
+    stream: &UnixStream,
+) -> Option<Vec<String>> {
+    if let (Ok(mut slot), Ok(clone)) = (slot.lock(), stream.try_clone()) {
+        *slot = Some(clone);
+    }
+    let mut newest = None;
+    while let Ok(newer) = rx.try_recv() {
+        newest = Some(newer);
+    }
+    if newest.is_some() {
+        let _ = stream.shutdown(std::net::Shutdown::Both);
+    }
+    newest
 }
 
 fn spawn_signals(tx: Sender<Msg>) -> std::io::Result<()> {
@@ -606,5 +629,42 @@ pub fn ctl(verb: &str, pane: Option<&str>) -> Result<String, String> {
     match line.strip_prefix("error: ") {
         Some(err) => Err(err.to_string()),
         None => Ok(line),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_set_queued_before_the_connection_is_published_wins() {
+        let slot = Mutex::new(None);
+        let (tx, rx) = mpsc::channel();
+        let (stream, mut peer) = UnixStream::pair().unwrap();
+        tx.send(vec!["w1:p1".to_string()]).unwrap();
+        tx.send(vec!["w1:p1".to_string(), "w1:p2".to_string()])
+            .unwrap();
+
+        let newest = connected(&slot, &rx, &stream);
+
+        assert_eq!(newest, Some(vec!["w1:p1".to_string(), "w1:p2".to_string()]));
+        // the stale connection is shut down, so its reader returns at once
+        let mut buf = [0u8; 1];
+        assert_eq!(std::io::Read::read(&mut peer, &mut buf).unwrap(), 0);
+        assert!(slot.lock().unwrap().is_some());
+    }
+
+    #[test]
+    fn with_nothing_queued_the_connection_stays_up() {
+        let slot = Mutex::new(None);
+        let (_tx, rx) = mpsc::channel::<Vec<String>>();
+        let (stream, peer) = UnixStream::pair().unwrap();
+
+        assert_eq!(connected(&slot, &rx, &stream), None);
+
+        peer.set_nonblocking(true).unwrap();
+        let mut buf = [0u8; 1];
+        let read = std::io::Read::read(&mut &peer, &mut buf);
+        assert_eq!(read.unwrap_err().kind(), std::io::ErrorKind::WouldBlock);
     }
 }

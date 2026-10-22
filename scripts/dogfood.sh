@@ -29,33 +29,47 @@ asset_name() {
   esac
 }
 
-place() { # path name: copy in, check it runs, rename over the old one
+stage() { # path name: copy in beside the old one and check it runs
   cp "$1" "$prefix/bin/$2.new"
   chmod 755 "$prefix/bin/$2.new"
-  "$prefix/bin/$2.new" --version >/dev/null || die "the new $2 does not run"
-  mv -f "$prefix/bin/$2.new" "$prefix/bin/$2"
+  "$prefix/bin/$2.new" --version >/dev/null || {
+    rm -f "$prefix/bin/herdr.new" "$prefix/bin/herdr-sidebar.new"
+    die "the new $2 does not run"
+  }
 }
 
-install_binary() { # herdr-path herdr-sidebar-path source-description
+install_binary() { # herdr-path herdr-sidebar-path-or-empty source-description
   mkdir -p "$prefix/bin"
-  place "$1" herdr
-  # the sidebar program (ADR 0006); a running sidebar pane keeps its old inode too
-  place "$2" herdr-sidebar
+  # both are checked before either is renamed in, so a bad one leaves no half install
+  stage "$1" herdr
+  # the sidebar program (ADR 0006); releases before it have none
+  [ -z "$2" ] || stage "$2" herdr-sidebar
+  # renamed over the old ones, so a running server and sidebar pane keep their inodes
+  mv -f "$prefix/bin/herdr.new" "$prefix/bin/herdr"
+  [ -z "$2" ] || mv -f "$prefix/bin/herdr-sidebar.new" "$prefix/bin/herdr-sidebar"
   printf '%s\ninstalled %s\n' "$3" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$prefix/SOURCE"
   status
 }
 
 cmd_release() {
-  local tag="${1:-}" asset
+  local tag="${1:-}" asset sidebar patterns names
   [ -n "$tag" ] || tag=$(gh release list -R "$repo_slug" --limit 1 --json tagName -q '.[0].tagName')
   asset=$(asset_name)
   sidebar=${asset/herdr-/herdr-sidebar-}
+  patterns=(-p "$asset" -p SHA256SUMS)
+  # releases before herdr-fork 030 ship no sidebar; rolling back to one keeps the installed sidebar
+  names=$(gh release view "$tag" -R "$repo_slug" --json assets -q '.assets[].name') || die "no release $tag"
+  if grep -qx "$sidebar" <<<"$names"; then
+    patterns+=(-p "$sidebar")
+  else
+    echo "dogfood: release $tag has no $sidebar; leaving herdr-sidebar as it is" >&2
+    sidebar=
+  fi
   tmp=$(mktemp -d)
   trap 'rm -rf "$tmp"' EXIT
-  gh release download "$tag" -R "$repo_slug" -D "$tmp" -p "$asset" -p "$sidebar" -p SHA256SUMS
-  [ -f "$tmp/$sidebar" ] || die "release $tag has no $sidebar"
-  (cd "$tmp" && sha256sum --check --ignore-missing --strict SHA256SUMS) || die "checksum mismatch for $asset or $sidebar"
-  install_binary "$tmp/$asset" "$tmp/$sidebar" "release $tag ($asset)"
+  gh release download "$tag" -R "$repo_slug" -D "$tmp" "${patterns[@]}"
+  (cd "$tmp" && sha256sum --check --ignore-missing --strict SHA256SUMS) || die "checksum mismatch for $asset${sidebar:+ or $sidebar}"
+  install_binary "$tmp/$asset" "${sidebar:+$tmp/$sidebar}" "release $tag ($asset)"
 }
 
 # a PR number resolves to its head branch; anything else is taken as a branch name

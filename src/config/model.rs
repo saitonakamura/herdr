@@ -324,8 +324,9 @@ pub struct Config {
     pub experimental: ExperimentalConfig,
     pub remote: RemoteConfig,
     /// Fork-only: the `herdr-sidebar` program's own settings. herdr keeps them
-    /// out of its unknown-key diagnostics and never reads them.
-    pub sidebar: toml::Table,
+    /// out of its unknown-key diagnostics and never reads them; any value is
+    /// accepted, so a wrong one costs a diagnostic, not the whole config.
+    pub sidebar: Option<toml::Value>,
 }
 
 #[derive(Debug)]

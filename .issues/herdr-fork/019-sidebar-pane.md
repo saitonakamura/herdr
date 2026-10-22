@@ -66,3 +66,25 @@ Build herdr's half of the sidebar pane: the host. This covers ADR 0002 as amende
 - herdr-fork-sidebar-content
 - herdr-fork-agent-identity-parent
 - herdr-fork-workspace-is-effort
+
+## Resolution
+
+Draft until [PR #28](https://github.com/saitonakamura/herdr/pull/28) merges.
+
+- **Name.** The API calls it the **session pane**, since it belongs to the server session, not a workspace: `session_pane.get`, `.focus`, `.unfocus`. The documentation is in FORK.md § Sidebar pane, GLOSSARY.md and the `docs/next` socket API page.
+- **Focus is shared, not per client.**
+  - Keyboard focus is a session fact, like pane focus, so the server owns it, and every client that shows the pane sends its keys there.
+  - herdr never takes Esc. The program gives focus back with `session_pane.unfocus` or with any pane, tab or workspace focus method. Clicking a pane does too.
+  - `keys.focus_sidebar` (unbound) toggles focus, so a stuck program cannot trap the keyboard.
+  - The program gets focus reports (`\e[I` and `\e[O`) when it enables them.
+- **Wire.**
+  - The client opts in with the hello flag `session_pane`, and the server advertises the `session_pane` capability.
+  - Frames, input and slot size travel as named controls (`endpoint.session-pane.v1`, `.input.v1`, `.slot.v1`). Generation-1 codecs are untouched.
+  - The server owns the width: `ui.sidebar_width`, clamped. Each client reports its slot, and the PTY follows the foreground client's slot.
+  - Shells showing several machines keep the native sidebar.
+- **Lifecycle.**
+  - Restart backoff runs from 0.5s, doubling to 30s.
+  - Five exits in a row that each lasted under 30s leave the program down, with one `warn!` and one Custom notification. A config reload gives it another try.
+  - A live handoff drops the program, as it drops the popup, and the new server starts it fresh.
+- **Events.** `events.subscribe` already covers everything 018 draws. Annotation events belong to 035.
+- **Performance.** `just bench-render-scale` has a session pane section. A stub that redraws every row adds a constant 110–175µs for each frame it redraws, with no scaling between 1 and 15 panes. Output from the sidebar alone never renders the pane surface.

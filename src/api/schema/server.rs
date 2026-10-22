@@ -72,4 +72,7 @@ pub struct ServerCapabilities {
     /// into the pane's fresh shell when a restart restores the pane.
     #[serde(default)]
     pub pane_restore_command: bool,
+    /// Keeps annotations per agent (`agent.annotate`).
+    #[serde(default)]
+    pub agent_annotations: bool,
 }

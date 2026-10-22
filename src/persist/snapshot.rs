@@ -135,6 +135,8 @@ pub struct PaneSnapshot {
     pub task_status: Option<crate::api::schema::TaskStatus>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub restore_command: Option<String>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub annotations: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -428,6 +430,9 @@ fn capture_tab(
                 agent_home: terminal.and_then(|terminal| terminal.agent_home.clone()),
                 task_status: terminal.and_then(|terminal| terminal.task_status),
                 restore_command: terminal.and_then(|terminal| terminal.restore_command.clone()),
+                annotations: terminal
+                    .map(|terminal| terminal.annotations.clone())
+                    .unwrap_or_default(),
             },
         );
     }
@@ -789,6 +794,7 @@ mod tests {
                 agent_home: None,
                 task_status: None,
                 restore_command: None,
+                annotations: Default::default(),
             },
         );
         panes.insert(
@@ -808,6 +814,7 @@ mod tests {
                 agent_home: None,
                 task_status: None,
                 restore_command: None,
+                annotations: Default::default(),
             },
         );
 
@@ -1376,6 +1383,7 @@ mod tests {
         terminal.agent_id = crate::terminal::AgentId::parse("1234abcd");
         terminal.parent_agent_id = crate::terminal::AgentId::parse("2345bcde");
         terminal.task_status = Some(crate::api::schema::TaskStatus::NeedsUser);
+        terminal.annotations = std::collections::BTreeMap::from([("role".into(), "worker".into())]);
 
         let snapshot = capture_from_state(&state);
         let pane = &snapshot.workspaces[0].tabs[0].panes[&root.raw()];
@@ -1384,6 +1392,7 @@ mod tests {
         assert_eq!(json["agent_id"], "1234abcd");
         assert_eq!(json["parent_agent_id"], "2345bcde");
         assert_eq!(json["task_status"], "needs_user");
+        assert_eq!(json["annotations"], serde_json::json!({"role": "worker"}));
     }
 
     #[test]
@@ -1609,6 +1618,7 @@ mod tests {
                 agent_home: None,
                 task_status: None,
                 restore_command: None,
+                annotations: Default::default(),
             },
         );
         panes.insert(
@@ -1630,6 +1640,7 @@ mod tests {
                 agent_home: None,
                 task_status: None,
                 restore_command: None,
+                annotations: Default::default(),
             },
         );
 

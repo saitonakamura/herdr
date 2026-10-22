@@ -734,6 +734,7 @@ mod tests {
             agent_home: None,
             task_status: None,
             restore_command: None,
+            annotations: Default::default(),
             scroll,
             revision: 0,
         }

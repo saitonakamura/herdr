@@ -1,9 +1,9 @@
 use std::time::{Duration, Instant};
 
 use crate::api::schema::{
-    AgentCloseParams, AgentPromptParams, AgentReadParams, AgentRenameParams, AgentSendKeysParams,
-    AgentSetArgsParams, AgentSetParentParams, AgentSetTaskStatusParams, AgentStartParams,
-    AgentTarget, AgentWaitParams, EmptyParams, ErrorBody, ErrorResponse, Method,
+    AgentAnnotateParams, AgentCloseParams, AgentPromptParams, AgentReadParams, AgentRenameParams,
+    AgentSendKeysParams, AgentSetArgsParams, AgentSetParentParams, AgentSetTaskStatusParams,
+    AgentStartParams, AgentTarget, AgentWaitParams, EmptyParams, ErrorBody, ErrorResponse, Method,
     PaneProcessInfoParams, PaneTarget, Request,
 };
 
@@ -61,6 +61,7 @@ pub(super) fn run_agent_command(args: &[String]) -> std::io::Result<i32> {
         Operation::SetParent(params) => agent_set_parent(params),
         Operation::SetTaskStatus(params) => agent_set_task_status(params),
         Operation::Close(params) => agent_close(params),
+        Operation::Annotate(params) => agent_annotate(params),
         Operation::Wait(params) => agent_wait(params),
         Operation::Prompt(params) => agent_prompt(params),
         Operation::Start(params) => agent_start(params),
@@ -610,6 +611,13 @@ fn agent_set_task_status(params: AgentSetTaskStatusParams) -> std::io::Result<i3
     super::print_response(&super::send_request(&Request {
         id: "cli:agent:set_task_status".into(),
         method: Method::AgentSetTaskStatus(params),
+    })?)
+}
+
+fn agent_annotate(params: AgentAnnotateParams) -> std::io::Result<i32> {
+    super::print_response(&super::send_request(&Request {
+        id: "cli:agent:annotate".into(),
+        method: Method::AgentAnnotate(params),
     })?)
 }
 

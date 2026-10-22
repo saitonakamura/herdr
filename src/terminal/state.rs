@@ -163,6 +163,8 @@ pub struct TerminalState {
     pub agent_id: Option<super::AgentId>,
     pub parent_agent_id: Option<super::AgentId>,
     pub task_status: Option<crate::api::schema::TaskStatus>,
+    /// What programs keep on the agent; never read by Herdr itself.
+    pub annotations: std::collections::BTreeMap<String, String>,
     pub cwd: PathBuf,
     pub detected_agent: Option<Agent>,
     pub fallback_state: AgentState,
@@ -220,6 +222,7 @@ impl TerminalState {
             agent_id: None,
             parent_agent_id: None,
             task_status: None,
+            annotations: std::collections::BTreeMap::new(),
             cwd,
             detected_agent: None,
             fallback_state: AgentState::Unknown,

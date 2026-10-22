@@ -571,6 +571,10 @@ pub struct PaneInfo {
     /// Shell command a restart types into the pane's fresh shell.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub restore_command: Option<String>,
+    /// Keys and values a program keeps on the agent; Herdr never interprets them.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    #[schemars(schema_with = "super::common::annotation_values_schema")]
+    pub annotations: std::collections::BTreeMap<String, String>,
     /// The Git checkout containing `cwd`; absent outside one or before its first refresh.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repo: Option<PaneRepoInfo>,

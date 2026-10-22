@@ -22,6 +22,30 @@ pub(super) fn metadata_token_values_schema(
     })
 }
 
+/// Keys match sidebar token names; the limits live beside `normalize_annotations`.
+pub(super) fn annotation_patch_schema(
+    _generator: &mut schemars::SchemaGenerator,
+) -> schemars::Schema {
+    schemars::json_schema!({
+        "type": "object",
+        "minProperties": 1,
+        "maxProperties": 32,
+        "propertyNames": { "pattern": "^[A-Za-z0-9_-]{1,32}$" },
+        "additionalProperties": { "type": ["string", "null"], "maxLength": 512 }
+    })
+}
+
+pub(super) fn annotation_values_schema(
+    _generator: &mut schemars::SchemaGenerator,
+) -> schemars::Schema {
+    schemars::json_schema!({
+        "type": "object",
+        "maxProperties": 32,
+        "propertyNames": { "pattern": "^[A-Za-z0-9_-]{1,32}$" },
+        "additionalProperties": { "type": "string", "maxLength": 512 }
+    })
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema, Default)]
 pub struct EmptyParams {}
 

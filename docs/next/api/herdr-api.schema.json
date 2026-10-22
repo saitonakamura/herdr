@@ -939,6 +939,18 @@
             "agent_status": {
               "$ref": "#/schemas/event/$defs/AgentStatus"
             },
+            "annotations": {
+              "additionalProperties": {
+                "maxLength": 512,
+                "type": "string"
+              },
+              "description": "Keys and values a program keeps on the agent; Herdr never interprets them.",
+              "maxProperties": 32,
+              "propertyNames": {
+                "pattern": "^[A-Za-z0-9_-]{1,32}$"
+              },
+              "type": "object"
+            },
             "blocked_reason": {
               "anyOf": [
                 {
@@ -1551,6 +1563,35 @@
     },
     "request": {
       "$defs": {
+        "AgentAnnotateParams": {
+          "properties": {
+            "annotations": {
+              "additionalProperties": {
+                "maxLength": 512,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "description": "Annotations to set; a null or empty value clears that key. Keys not named stay as they are.",
+              "maxProperties": 32,
+              "minProperties": 1,
+              "propertyNames": {
+                "pattern": "^[A-Za-z0-9_-]{1,32}$"
+              },
+              "type": "object"
+            },
+            "target": {
+              "description": "Agent id, agent name, or pane id. A pane without an agent gets an agent id too.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "target",
+            "annotations"
+          ],
+          "type": "object"
+        },
         "AgentBlockedReason": {
           "description": "What a blocked agent waits on.",
           "enum": [
@@ -7091,6 +7132,22 @@
             "params"
           ],
           "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "agent.annotate",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/AgentAnnotateParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
         }
       ],
       "properties": {
@@ -7392,6 +7449,18 @@
             },
             "agent_status": {
               "$ref": "#/schemas/success_response/$defs/AgentStatus"
+            },
+            "annotations": {
+              "additionalProperties": {
+                "maxLength": 512,
+                "type": "string"
+              },
+              "description": "Keys and values a program keeps on the agent; Herdr never interprets them.",
+              "maxProperties": 32,
+              "propertyNames": {
+                "pattern": "^[A-Za-z0-9_-]{1,32}$"
+              },
+              "type": "object"
             },
             "blocked_reason": {
               "anyOf": [
@@ -8953,6 +9022,18 @@
             },
             "agent_status": {
               "$ref": "#/schemas/success_response/$defs/AgentStatus"
+            },
+            "annotations": {
+              "additionalProperties": {
+                "maxLength": 512,
+                "type": "string"
+              },
+              "description": "Keys and values a program keeps on the agent; Herdr never interprets them.",
+              "maxProperties": 32,
+              "propertyNames": {
+                "pattern": "^[A-Za-z0-9_-]{1,32}$"
+              },
+              "type": "object"
             },
             "blocked_reason": {
               "anyOf": [
@@ -11658,6 +11739,11 @@
         },
         "ServerCapabilities": {
           "properties": {
+            "agent_annotations": {
+              "default": false,
+              "description": "Keeps annotations per agent (`agent.annotate`).",
+              "type": "boolean"
+            },
             "agent_launch_resume": {
               "default": false,
               "description": "Resumes a restored agent with its `agent start` args, its pane's `--env`\nand its session's profile directory.",

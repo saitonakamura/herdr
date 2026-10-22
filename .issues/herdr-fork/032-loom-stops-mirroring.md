@@ -6,7 +6,6 @@ labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
-  - herdr-fork-agent-annotations
 assignee:
 claimed_by:
 ---

@@ -3098,6 +3098,7 @@ mod tests {
                 agent_launch_resume: false,
                 agent_task_status: false,
                 pane_restore_command: false,
+                agent_annotations: false,
             }),
         };
         let missing_baseline = crate::api::RuntimeStatus {
@@ -3178,6 +3179,7 @@ mod tests {
                     agent_launch_resume: false,
                     agent_task_status: false,
                     pane_restore_command: false,
+                    agent_annotations: false,
                 }),
             },
         };
@@ -3442,6 +3444,7 @@ mod tests {
                     agent_launch_resume: false,
                     agent_task_status: false,
                     pane_restore_command: false,
+                    agent_annotations: false,
                 }),
             },
         };

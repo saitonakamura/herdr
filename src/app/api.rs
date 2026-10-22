@@ -1167,6 +1167,7 @@ impl App {
                 return self.handle_agent_set_task_status(request.id, params)
             }
             Method::AgentClose(params) => return self.handle_agent_close(request.id, params),
+            Method::AgentAnnotate(params) => return self.handle_agent_annotate(request.id, params),
             Method::AgentViewSet(params) => return self.handle_agent_view_set(request.id, params),
             Method::AgentViewClear(params) => {
                 return self.handle_agent_view_clear(request.id, params);

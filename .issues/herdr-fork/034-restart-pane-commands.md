@@ -24,3 +24,16 @@ Before building, decide with the user:
 ## Parent
 
 [000-map](./000-map.md)
+
+## Resolution
+
+Draft, pending merge: [PR #27](https://github.com/saitonakamura/herdr/pull/27), branch `fork/034-restart-commands`.
+
+Decided with the user 2026-10-22:
+
+- **Which command:** explicit mark only. `herdr pane set-restore-command [--run|--clear] <pane> <command>` (API `pane.set_restore_command`, capability `pane_restore_command`) stores a one-line shell command on the pane, persisted as `restore_command`. Panes `layout.apply` starts with a `command` get one automatically. Plugin panes, popups and custom keybinding commands do not.
+- **How it runs:** typed into the pane's fresh shell on a cold restart, like agent resume (rc and direnv first; Ctrl-C leaves a shell). An agent pane with a resumable session still resumes the agent, and live-handoff panes are not re-run.
+- **cwd and env:** the pane's saved cwd and its `--env`.
+- **Fit beside upstream:** one optional field each on `TerminalState`, `PaneSnapshot` and `PaneInfo`, typed after the plain-shell spawn in `restore_tab`. The setter is in `src/app/pane_restore_command.rs`.
+
+No loom or dotfiles change was needed: nothing there reads or writes these fields.

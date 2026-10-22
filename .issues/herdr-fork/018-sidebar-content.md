@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-sidebar-content
 title: What the sidebar shows and how it is driven
-status: open
+status: in-progress
 labels:
   - wayfinder:grilling
 parent: herdr-fork-map
 blocked_by:
-assignee:
-claimed_by:
+assignee: saitonakamura
+claimed_by: macos/w1:pJ/4b860d51-4e02-4eec-abe3-7e0d71cc4486
 ---
 
 ## Question

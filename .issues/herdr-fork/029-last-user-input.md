@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-last-user-input
 title: "Say when a client last typed into a pane, so loom can tell a pane the user is using"
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee:
-claimed_by:
+claimed_by: macos/w1:pN/f4915a47-096c-4908-8d98-76080f5d667e
 ---
 
 ## Question

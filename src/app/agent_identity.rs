@@ -658,17 +658,41 @@ mod tests {
         }
 
         fn move_to_new_tab(&mut self, id: &str, ws_idx: usize) -> serde_json::Value {
-            let pane_id = self.agent(id)["pane_id"].as_str().unwrap().to_string();
             let workspace_id = self.f.app.public_workspace_id(ws_idx);
+            self.move_pane(
+                id,
+                crate::api::schema::PaneMoveDestination::NewTab {
+                    workspace_id: Some(workspace_id),
+                    label: None,
+                },
+            )
+        }
+
+        fn move_pane(
+            &mut self,
+            id: &str,
+            destination: crate::api::schema::PaneMoveDestination,
+        ) -> serde_json::Value {
+            let pane_id = self.agent(id)["pane_id"].as_str().unwrap().to_string();
             self.f
                 .call(Method::PaneMove(crate::api::schema::PaneMoveParams {
                     pane_id,
-                    destination: crate::api::schema::PaneMoveDestination::NewTab {
-                        workspace_id: Some(workspace_id),
-                        label: None,
-                    },
+                    destination,
                     focus: false,
                 }))
+        }
+
+        /// Sets a Parent the way a snapshot or handoff carries it: unchecked.
+        fn plant_parent(&mut self, child: &str, parent: &str) {
+            let child = crate::terminal::AgentId::parse(child).unwrap();
+            let terminal_id = self.f.app.terminal_with_agent_id(&child).unwrap();
+            self.f
+                .app
+                .state
+                .terminals
+                .get_mut(&terminal_id)
+                .unwrap()
+                .parent_agent_id = crate::terminal::AgentId::parse(parent);
         }
 
         fn assert_no_cross_workspace_parent(&self) {
@@ -787,16 +811,8 @@ mod tests {
         let mut s = spread();
         let [a, b] = [0, 1].map(|i| s.agents[0][i].clone());
         let there = s.agents[1][0].clone();
-        // A snapshot or handoff carries parents as they were saved, unchecked.
         for (child, parent) in [(&b, &a), (&a, &there), (&there, &b)] {
-            let child = crate::terminal::AgentId::parse(child).unwrap();
-            let terminal_id = s.f.app.terminal_with_agent_id(&child).unwrap();
-            s.f.app
-                .state
-                .terminals
-                .get_mut(&terminal_id)
-                .unwrap()
-                .parent_agent_id = crate::terminal::AgentId::parse(parent);
+            s.plant_parent(child, parent);
         }
         s.f.app.state.agent_identities_dirty = true;
         let seq = s.last_seq();
@@ -808,5 +824,216 @@ mod tests {
         assert_eq!(s.parent_of(&there), None);
         assert_eq!(s.unparented_updates(seq), sorted(vec![a, there]));
         s.assert_no_cross_workspace_parent();
+    }
+
+    #[test]
+    fn moving_to_an_existing_tab_or_a_new_workspace_drops_the_crossing_parents() {
+        for destination in ["existing tab", "new workspace"] {
+            let mut s = spread();
+            let [a, b, c, d] = [0, 1, 2, 3].map(|i| s.agents[0][i].clone());
+            s.f.set_parent(&b, Some(&a));
+            s.f.set_parent(&c, Some(&b));
+            s.f.set_parent(&d, Some(&a));
+            let seq = s.last_seq();
+            let destination = if destination == "existing tab" {
+                crate::api::schema::PaneMoveDestination::Tab {
+                    tab_id: s.f.app.public_tab_id(1, 0).unwrap(),
+                    target_pane_id: None,
+                    split: crate::api::schema::SplitDirection::Right,
+                    ratio: None,
+                }
+            } else {
+                crate::api::schema::PaneMoveDestination::NewWorkspace {
+                    label: None,
+                    tab_label: None,
+                }
+            };
+
+            let moved = s.move_pane(&b, destination);
+
+            assert_eq!(moved["result"]["type"], "pane_move", "{moved}");
+            assert!(moved["result"]["move_result"]["pane"]["parent_agent_id"].is_null());
+            assert_eq!(s.parent_of(&b), None);
+            assert_eq!(s.parent_of(&c), None);
+            assert_eq!(s.parent_of(&d), Some(a));
+            assert_eq!(s.unparented_updates(seq), sorted(vec![b, c]));
+            s.assert_no_cross_workspace_parent();
+        }
+    }
+
+    #[test]
+    fn a_move_that_closes_its_workspace_keeps_the_parents_that_shift_index() {
+        let mut s = spread();
+        // The plain workspace goes first, so closing it shifts the adversarial one to index 0.
+        s.f.app.state.workspaces.swap(0, 1);
+        s.agents.swap(0, 1);
+        let solo = s.agents[0][0].clone();
+        let [a, b, c] = [0, 1, 2].map(|i| s.agents[1][i].clone());
+        s.f.set_parent(&b, Some(&a));
+        s.f.set_parent(&c, Some(&b));
+        let workspaces = s.f.app.state.workspaces.len();
+        let seq = s.last_seq();
+
+        let moved = s.move_pane(
+            &solo,
+            crate::api::schema::PaneMoveDestination::NewWorkspace {
+                label: None,
+                tab_label: None,
+            },
+        );
+
+        assert_eq!(moved["result"]["type"], "pane_move", "{moved}");
+        assert!(moved["result"]["move_result"]["closed_workspace_id"].is_string());
+        assert_eq!(s.f.app.state.workspaces.len(), workspaces);
+        assert_eq!(s.parent_of(&b), Some(a));
+        assert_eq!(s.parent_of(&c), Some(b));
+        assert!(s.unparented_updates(seq).is_empty());
+        s.assert_no_cross_workspace_parent();
+    }
+
+    /// `b` keeps its same-workspace parent `a`; `a` and `there` were saved with parents
+    /// in another workspace. Returns the snapshot and those three ids.
+    fn snapshot_with_crossing_parents() -> (crate::persist::SessionSnapshot, [String; 3]) {
+        let mut s = spread();
+        let [a, b] = [0, 1].map(|i| s.agents[0][i].clone());
+        let there = s.agents[1][0].clone();
+        for (child, parent) in [(&b, &a), (&a, &there), (&there, &b)] {
+            s.plant_parent(child, parent);
+        }
+        let snapshot = crate::persist::capture(
+            &s.f.app.state.workspaces,
+            &s.f.app.state.terminals,
+            &s.f.app.terminal_runtimes,
+            Some(0),
+            0,
+        );
+        (snapshot, [a, b, there])
+    }
+
+    fn restore_config() -> crate::config::Config {
+        let mut config = crate::config::Config::default();
+        config.terminal.default_shell = if cfg!(windows) {
+            "C:\\Windows\\System32\\whoami.exe".into()
+        } else {
+            "/bin/sh".into()
+        };
+        config
+    }
+
+    /// Each agent's parent as the first API request after startup sees it.
+    fn parents_seen_first(app: &mut App) -> std::collections::BTreeMap<String, Option<String>> {
+        let response = app.handle_api_request(Request {
+            id: "t".into(),
+            method: Method::PaneList(crate::api::schema::PaneListParams::default()),
+        });
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+        response["result"]["panes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|pane| {
+                let agent = pane["agent_id"].as_str()?.to_string();
+                Some((agent, pane["parent_agent_id"].as_str().map(str::to_string)))
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_restored_session_drops_cross_workspace_parents() {
+        let _guard = crate::config::test_config_env_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let home =
+            std::env::temp_dir().join(format!("herdr-parent-restore-{}", std::process::id()));
+        let previous = std::env::var_os("XDG_CONFIG_HOME");
+        std::env::set_var("XDG_CONFIG_HOME", &home);
+        let (snapshot, [a, b, there]) = snapshot_with_crossing_parents();
+        let path = crate::session::data_dir().join("session.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, serde_json::to_string(&snapshot).unwrap()).unwrap();
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let policy = crate::app::AppPolicy {
+            restore_session: true,
+            ..crate::app::AppPolicy::TEST
+        };
+
+        let app = App::try_new(
+            &restore_config(),
+            policy,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        let parents = app.map(|mut app| parents_seen_first(&mut app));
+
+        match previous {
+            Some(value) => std::env::set_var("XDG_CONFIG_HOME", value),
+            None => std::env::remove_var("XDG_CONFIG_HOME"),
+        }
+        let _ = std::fs::remove_dir_all(&home);
+        let parents = parents.unwrap();
+        assert_eq!(parents.get(&b), Some(&Some(a.clone())), "{parents:?}");
+        assert_eq!(parents.get(&a), Some(&None), "{parents:?}");
+        assert_eq!(parents.get(&there), Some(&None), "{parents:?}");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_live_handoff_drops_cross_workspace_parents() {
+        let (snapshot, [a, b, there]) = snapshot_with_crossing_parents();
+        let config = restore_config();
+        let (events, _event_rx) = tokio::sync::mpsc::channel(64);
+        // The outgoing server: real PTYs for every saved pane, handed over by fd.
+        let (workspaces, terminals, runtimes) = crate::persist::restore(
+            &snapshot,
+            None,
+            24,
+            80,
+            4096,
+            &config.terminal.default_shell,
+            crate::config::ShellModeConfig::NonLogin,
+            false,
+            events,
+            std::sync::Arc::new(tokio::sync::Notify::new()),
+            std::sync::Arc::new(crate::render_signal::RenderSignal::new()),
+        );
+        let runtimes = crate::terminal::TerminalRuntimeRegistry::from(runtimes);
+        let handed = crate::persist::capture(&workspaces, &terminals, &runtimes, Some(0), 0);
+        let mut imports = std::collections::HashMap::new();
+        for tab in workspaces.iter().flat_map(|workspace| &workspace.tabs) {
+            for (pane_id, pane) in &tab.panes {
+                let runtime = runtimes.get(&pane.attached_terminal_id).unwrap();
+                runtime
+                    .pause_handoff_reader(std::time::Duration::from_secs(2))
+                    .unwrap();
+                let state = runtime.handoff_runtime_state(pane_id.raw());
+                let state = serde_json::from_value(serde_json::to_value(state).unwrap()).unwrap();
+                imports.insert(
+                    pane_id.raw(),
+                    crate::handoff_runtime::ImportedHandoffRuntime {
+                        master_fd: runtime.duplicate_handoff_fd().unwrap(),
+                        state,
+                    },
+                );
+            }
+        }
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let mut app = App::new_from_handoff(
+            &config,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+            &handed,
+            &mut imports,
+        )
+        .unwrap();
+        let parents = parents_seen_first(&mut app);
+
+        assert_eq!(parents.get(&b), Some(&Some(a.clone())), "{parents:?}");
+        assert_eq!(parents.get(&a), Some(&None), "{parents:?}");
+        assert_eq!(parents.get(&there), Some(&None), "{parents:?}");
+        drop(app);
+        drop(runtimes);
     }
 }

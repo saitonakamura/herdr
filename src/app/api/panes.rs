@@ -1286,6 +1286,13 @@ impl App {
         };
 
         self.state.remove_alias_shadowed_by_new_pane(moved_pane_id);
+        // A Parent stays inside one workspace: the moved agent and the children it
+        // left behind lose theirs before the result is built.
+        let dropped_parents = if cross_workspace {
+            self.drop_cross_workspace_parents()
+        } else {
+            Vec::new()
+        };
         self.state.mark_session_dirty();
         self.schedule_session_save();
         let Some(pane) = self.pane_info(target_ws_idx, moved_pane_id) else {
@@ -1365,6 +1372,11 @@ impl App {
             self.emit_layout_updated_snapshot(source_layout);
         }
         self.emit_layout_updated_snapshot((*move_result.target_layout).clone());
+        for terminal_id in dropped_parents {
+            if let Some((ws_idx, pane_id)) = self.pane_for_terminal(&terminal_id) {
+                self.emit_pane_updated(ws_idx, pane_id);
+            }
+        }
 
         encode_success(id, ResponseResult::PaneMove { move_result })
     }

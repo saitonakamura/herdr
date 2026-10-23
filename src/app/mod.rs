@@ -598,7 +598,8 @@ impl App {
             host_cell_size: crate::kitty_graphics::HostCellSize::default(),
             session_dirty: false,
             terminal_runtime_shutdowns: Vec::new(),
-            // Restored identities may name parents whose panes did not come back.
+            // Restored identities may name parents whose panes did not come back, or
+            // parents in another workspace (ADR 0008); the first sync drops both.
             agent_identities_dirty: true,
             messages: restored_messages,
             message_delivery_due: true,
@@ -756,6 +757,7 @@ impl App {
         app.terminal_runtimes = runtimes.into();
         app.state.messages = snapshot.messages.clone();
         app.state.message_delivery_due = true;
+        // Handed-over parents may sit in another workspace (ADR 0008); the first sync drops them.
         app.state.agent_identities_dirty = true;
         app.state.active = snapshot
             .active

@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-source-links
 title: Source links between efforts
-status: in-progress
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee:
-claimed_by: macos/w1:p11/dbb9b231-4036-42d7-af37-fac11e847743
+claimed_by:
 ---
 
 ## Question
@@ -57,6 +57,8 @@ Per [ADR 0008](../../docs/adr/0008-parent-stays-in-a-workspace.md) and [033's re
 - herdr-fork-agent-annotations
 
 ## Resolution
+
+Merged 2026-10-23: herdr PR #30 as `54f3bdfa` (head `d9afbba9`), dotfiles `6ae7a73` (branch `herdr-fork/039-source-links` at `05d751d`, 447/447 loom tests on the merge).
 
 Draft, until both merge: herdr [PR #30](https://github.com/saitonakamura/herdr/pull/30) (head `d9afbba9`), dotfiles branch `herdr-fork/039-source-links` (tip `05d751d`, with the spawner's review fixes).
 

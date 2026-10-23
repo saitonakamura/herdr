@@ -1,7 +1,7 @@
 ---
 id: herdr-fork-sidebar-dotfiles
 title: Turn the sidebar pane on in the dotfiles
-status: blocked
+status: open
 labels:
   - wayfinder:task
 parent: herdr-fork-map

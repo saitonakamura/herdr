@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-source-links
 title: Source links between efforts
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee:
-claimed_by:
+claimed_by: macos/w1:p11/dbb9b231-4036-42d7-af37-fac11e847743
 ---
 
 ## Question

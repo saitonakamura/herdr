@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use super::{terminal_targets::TerminalTargetError, App};
 use crate::terminal::{AgentId, TerminalId};
@@ -8,6 +8,7 @@ pub(super) enum AgentParentError {
     InvalidParent(String),
     ParentNotFound(String),
     Cycle(String),
+    CrossWorkspace(String),
 }
 
 impl App {
@@ -62,6 +63,7 @@ impl App {
                 changed.push(terminal_id.clone());
             }
         }
+        changed.extend(self.drop_cross_workspace_parents());
         let dropped = self.state.messages.retain_recipients(&live);
         if dropped > 0 {
             tracing::info!(dropped, "dropped messages to agents that are gone");
@@ -114,8 +116,12 @@ impl App {
         };
         let parent_id = AgentId::parse(&parent)
             .ok_or_else(|| AgentParentError::InvalidParent(parent.clone()))?;
-        if self.terminal_with_agent_id(&parent_id).is_none() {
+        let Some(parent_terminal) = self.terminal_with_agent_id(&parent_id) else {
             return Err(AgentParentError::ParentNotFound(parent));
+        };
+        let workspace_of = |terminal| self.pane_for_terminal(terminal).map(|(ws_idx, _)| ws_idx);
+        if workspace_of(&parent_terminal) != workspace_of(terminal_id) {
+            return Err(AgentParentError::CrossWorkspace(parent));
         }
         let own_id = self
             .state
@@ -140,6 +146,57 @@ impl App {
             }
         }
         Ok(Some(parent_id))
+    }
+
+    /// Clears every Parent that names an agent in another workspace, since a
+    /// Parent stays inside one (ADR 0008). Returns the terminals it changed;
+    /// the caller saves and publishes `pane.updated` for them.
+    pub(crate) fn drop_cross_workspace_parents(&mut self) -> Vec<TerminalId> {
+        let workspace_of: HashMap<&TerminalId, usize> = self
+            .state
+            .workspaces
+            .iter()
+            .enumerate()
+            .flat_map(|(ws_idx, ws)| {
+                ws.tabs
+                    .iter()
+                    .flat_map(|tab| tab.panes.values())
+                    .map(move |pane| (&pane.attached_terminal_id, ws_idx))
+            })
+            .collect();
+        let agent_workspace: HashMap<&AgentId, usize> = self
+            .state
+            .terminals
+            .values()
+            .filter_map(|terminal| {
+                Some((
+                    terminal.agent_id.as_ref()?,
+                    *workspace_of.get(&terminal.id)?,
+                ))
+            })
+            .collect();
+        let crossing: Vec<TerminalId> = self
+            .state
+            .terminals
+            .values()
+            .filter(|terminal| {
+                let parent_ws = terminal
+                    .parent_agent_id
+                    .as_ref()
+                    .and_then(|parent| agent_workspace.get(parent));
+                let own_ws = workspace_of.get(&terminal.id);
+                parent_ws
+                    .zip(own_ws)
+                    .is_some_and(|(parent, own)| parent != own)
+            })
+            .map(|terminal| terminal.id.clone())
+            .collect();
+        for terminal_id in &crossing {
+            if let Some(terminal) = self.state.terminals.get_mut(terminal_id) {
+                terminal.parent_agent_id = None;
+            }
+        }
+        crossing
     }
 
     /// Gives the terminal an agent id if it has none and, when `parent` is
@@ -197,6 +254,10 @@ impl App {
             AgentParentError::Cycle(parent) => crate::api::schema::ErrorBody {
                 code: "agent_parent_cycle".into(),
                 message: format!("agent {parent} is the target or one of its descendants"),
+            },
+            AgentParentError::CrossWorkspace(parent) => crate::api::schema::ErrorBody {
+                code: "agent_parent_cross_workspace".into(),
+                message: format!("agent parent {parent} is in another workspace"),
             },
         }
     }
@@ -511,5 +572,241 @@ mod tests {
                     if pane.agent_id.as_deref() == Some(child.as_str())
                         && pane.parent_agent_id.is_none())
         }));
+    }
+
+    /// Workspace 0 is the adversarial identity workspace (raw pane ids and tab
+    /// positions differ from public numbers); workspace 1 is a plain one.
+    /// Every pane runs a detected agent, and `agents[ws]` lists their ids.
+    struct Spread {
+        f: Fixture,
+        agents: [Vec<String>; 2],
+    }
+
+    fn spread() -> Spread {
+        let mut f = fixture();
+        f.app.state.workspaces = vec![
+            crate::workspace::Workspace::test_adversarial_identity_state(),
+            crate::workspace::Workspace::test_new("other"),
+        ];
+        f.root = f.app.state.workspaces[0].tabs[0].root_pane;
+        f.app.state.ensure_test_terminals();
+        for terminal in f.app.state.terminals.values_mut() {
+            terminal.set_detected_state(Some(Agent::Pi), AgentState::Idle);
+        }
+        f.app.sync_agent_identities();
+        let mut agents = [Vec::new(), Vec::new()];
+        for (ws_idx, ids) in agents.iter_mut().enumerate() {
+            for tab in &f.app.state.workspaces[ws_idx].tabs {
+                for pane in tab.panes.values() {
+                    let terminal = &f.app.state.terminals[&pane.attached_terminal_id];
+                    ids.push(terminal.agent_id.as_ref().unwrap().as_str().to_string());
+                }
+            }
+            ids.sort();
+        }
+        assert!(
+            agents[0].len() >= 4,
+            "the adversarial workspace has several panes"
+        );
+        Spread { f, agents }
+    }
+
+    fn sorted(mut ids: Vec<String>) -> Vec<String> {
+        ids.sort();
+        ids
+    }
+
+    impl Spread {
+        fn agent(&mut self, id: &str) -> serde_json::Value {
+            self.f
+                .call(Method::AgentGet(AgentTarget { target: id.into() }))["result"]["agent"]
+                .clone()
+        }
+
+        fn parent_of(&mut self, id: &str) -> Option<String> {
+            self.agent(id)["parent_agent_id"]
+                .as_str()
+                .map(str::to_string)
+        }
+
+        fn last_seq(&self) -> u64 {
+            self.f
+                .events
+                .events_after(0)
+                .last()
+                .map(|(seq, _)| *seq)
+                .unwrap_or(0)
+        }
+
+        /// Agent ids of the `pane.updated` events after `seq` that show no parent.
+        fn unparented_updates(&self, seq: u64) -> Vec<String> {
+            let mut ids: Vec<String> = self
+                .f
+                .events
+                .events_after(seq)
+                .iter()
+                .filter_map(|(_, event)| match &event.data {
+                    EventData::PaneUpdated { pane } if pane.parent_agent_id.is_none() => {
+                        pane.agent_id.clone()
+                    }
+                    _ => None,
+                })
+                .collect();
+            ids.sort();
+            ids.dedup();
+            ids
+        }
+
+        fn move_to_new_tab(&mut self, id: &str, ws_idx: usize) -> serde_json::Value {
+            let pane_id = self.agent(id)["pane_id"].as_str().unwrap().to_string();
+            let workspace_id = self.f.app.public_workspace_id(ws_idx);
+            self.f
+                .call(Method::PaneMove(crate::api::schema::PaneMoveParams {
+                    pane_id,
+                    destination: crate::api::schema::PaneMoveDestination::NewTab {
+                        workspace_id: Some(workspace_id),
+                        label: None,
+                    },
+                    focus: false,
+                }))
+        }
+
+        fn assert_no_cross_workspace_parent(&self) {
+            self.f.app.state.assert_invariants_for_test();
+            for terminal in self.f.app.state.terminals.values() {
+                let Some(parent) = &terminal.parent_agent_id else {
+                    continue;
+                };
+                let parent_terminal = self.f.app.terminal_with_agent_id(parent).unwrap();
+                assert_eq!(
+                    self.f.app.pane_for_terminal(&terminal.id).map(|(ws, _)| ws),
+                    self.f
+                        .app
+                        .pane_for_terminal(&parent_terminal)
+                        .map(|(ws, _)| ws),
+                    "{:?} keeps parent {parent:?} from another workspace",
+                    terminal.agent_id
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn set_parent_refuses_a_parent_in_another_workspace() {
+        let mut s = spread();
+        let (here, there) = (s.agents[0][0].clone(), s.agents[1][0].clone());
+        let sibling = s.agents[0][1].clone();
+        s.f.set_parent(&here, Some(&sibling));
+
+        let refused = s.f.set_parent(&here, Some(&there));
+
+        assert_eq!(refused["error"]["code"], "agent_parent_cross_workspace");
+        assert_eq!(s.parent_of(&here), Some(sibling));
+        let reverse = s.f.set_parent(&there, Some(&here));
+        assert_eq!(reverse["error"]["code"], "agent_parent_cross_workspace");
+        assert_eq!(s.parent_of(&there), None);
+        s.assert_no_cross_workspace_parent();
+    }
+
+    #[tokio::test]
+    async fn agent_start_refuses_a_parent_in_another_workspace_before_typing() {
+        let mut s = spread();
+        let there = s.agents[1][0].clone();
+        let shell = s.f.public(s.f.root);
+        let terminal_id = s.f.app.state.terminal_id_for_pane(0, s.f.root).unwrap();
+        s.f.app
+            .state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .set_detected_state(None, AgentState::Unknown);
+        let (runtime, mut receiver) =
+            crate::terminal::TerminalRuntime::test_with_channel_capacity(80, 24, 4);
+        s.f.app.terminal_runtimes.insert(terminal_id, runtime);
+
+        let refused =
+            s.f.call(Method::AgentStart(crate::api::schema::AgentStartParams {
+                name: "worker".into(),
+                kind: "pi".into(),
+                pane_id: shell,
+                args: Vec::new(),
+                parent: Some(there),
+                timeout_ms: Some(4_000),
+            }));
+
+        assert_eq!(refused["error"]["code"], "agent_parent_cross_workspace");
+        assert!(
+            receiver.try_recv().is_err(),
+            "nothing typed for a parent in another workspace"
+        );
+    }
+
+    #[test]
+    fn moving_a_pane_to_another_workspace_drops_its_parent_and_its_childrens() {
+        let mut s = spread();
+        let [a, b, c, d] = [0, 1, 2, 3].map(|i| s.agents[0][i].clone());
+        s.f.set_parent(&b, Some(&a));
+        s.f.set_parent(&c, Some(&b));
+        s.f.set_parent(&d, Some(&a));
+        let seq = s.last_seq();
+
+        let moved = s.move_to_new_tab(&b, 1);
+
+        assert_eq!(moved["result"]["type"], "pane_move", "{moved}");
+        assert!(moved["result"]["move_result"]["pane"]["parent_agent_id"].is_null());
+        assert_eq!(s.parent_of(&b), None, "the moved agent loses its parent");
+        assert_eq!(
+            s.parent_of(&c),
+            None,
+            "a child left behind loses its parent"
+        );
+        assert_eq!(s.parent_of(&d), Some(a), "other links stay");
+        assert_eq!(s.unparented_updates(seq), sorted(vec![b, c]));
+        s.assert_no_cross_workspace_parent();
+    }
+
+    #[test]
+    fn moving_a_pane_within_its_workspace_keeps_every_parent() {
+        let mut s = spread();
+        let [a, b, c] = [0, 1, 2].map(|i| s.agents[0][i].clone());
+        s.f.set_parent(&b, Some(&a));
+        s.f.set_parent(&c, Some(&b));
+        let seq = s.last_seq();
+
+        let moved = s.move_to_new_tab(&b, 0);
+
+        assert_eq!(moved["result"]["type"], "pane_move", "{moved}");
+        assert_eq!(s.parent_of(&b), Some(a));
+        assert_eq!(s.parent_of(&c), Some(b));
+        assert!(s.unparented_updates(seq).is_empty());
+        s.assert_no_cross_workspace_parent();
+    }
+
+    #[test]
+    fn restored_state_drops_cross_workspace_parents_once_identities_sync() {
+        let mut s = spread();
+        let [a, b] = [0, 1].map(|i| s.agents[0][i].clone());
+        let there = s.agents[1][0].clone();
+        // A snapshot or handoff carries parents as they were saved, unchecked.
+        for (child, parent) in [(&b, &a), (&a, &there), (&there, &b)] {
+            let child = crate::terminal::AgentId::parse(child).unwrap();
+            let terminal_id = s.f.app.terminal_with_agent_id(&child).unwrap();
+            s.f.app
+                .state
+                .terminals
+                .get_mut(&terminal_id)
+                .unwrap()
+                .parent_agent_id = crate::terminal::AgentId::parse(parent);
+        }
+        s.f.app.state.agent_identities_dirty = true;
+        let seq = s.last_seq();
+
+        s.f.app.sync_agent_identities();
+
+        assert_eq!(s.parent_of(&b), Some(a.clone()));
+        assert_eq!(s.parent_of(&a), None);
+        assert_eq!(s.parent_of(&there), None);
+        assert_eq!(s.unparented_updates(seq), sorted(vec![a, there]));
+        s.assert_no_cross_workspace_parent();
     }
 }

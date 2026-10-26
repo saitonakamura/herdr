@@ -157,14 +157,22 @@ pub fn lines(items: &[Item], width: u16, config: &Config) -> Vec<Line> {
                     target: Some(Target::FocusPane(pane.pane_id.clone())),
                 });
             }
-            Item::New => out.push(Line {
-                spans: vec![span(
-                    if narrow { "+" } else { " + new" },
-                    fg(Some(config.muted)),
-                )],
-                key,
-                target: Some(Target::NewWorkspace),
-            }),
+            Item::New => {
+                // a dead row, so a click just under the last agent doesn't open a workspace
+                out.push(Line {
+                    spans: Vec::new(),
+                    key: "gap".into(),
+                    target: None,
+                });
+                out.push(Line {
+                    spans: vec![span(
+                        if narrow { "+" } else { " + new" },
+                        fg(Some(config.muted)),
+                    )],
+                    key,
+                    target: Some(Target::NewWorkspace),
+                });
+            }
         }
     }
     out

@@ -713,6 +713,10 @@ impl App {
             self.mode = Mode::Normal;
             return Vec::new();
         }
+        // a spacer row belongs to no item and does nothing
+        if line.target.is_none() && line.spans.iter().all(|s| s.target.is_none()) {
+            return Vec::new();
+        }
         if right {
             if let Some(item) = self.item(&line.key) {
                 self.open_menu(&item);
@@ -1188,6 +1192,24 @@ mod tests {
         let effects = press(&mut app, KeyCode::Char('p'));
         assert!(
             matches!(&effects[..], [Effect::Call("plugin.pane.open", params)] if params["plugin_id"] == "loom")
+        );
+    }
+
+    #[test]
+    fn the_row_above_new_is_a_dead_gap() {
+        let mut app = app("glyphs = \"unicode\"");
+        let lines = draw(&mut app, 40, 30);
+        let new = lines.iter().position(|l| l.trim() == "+ new").unwrap();
+        assert_eq!(lines[new - 1].trim(), "");
+        let selected = app.selected.clone();
+        for button in [MouseButton::Left, MouseButton::Right] {
+            assert!(click(&mut app, 3, (new - 1) as u16, button).is_empty());
+        }
+        assert_eq!(app.selected, selected);
+        assert!(matches!(app.mode, Mode::Normal));
+        assert_eq!(
+            click(&mut app, 3, new as u16, MouseButton::Left),
+            [Effect::Call("workspace.create", json!({ "focus": true }))]
         );
     }
 

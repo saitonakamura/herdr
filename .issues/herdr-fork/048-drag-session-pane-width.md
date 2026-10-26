@@ -49,3 +49,12 @@ Make that boundary draggable when the session pane is shown:
 ## Parent
 
 [000-map](./000-map.md)
+
+## Resolution
+
+Draft until [PR #36 drag the sidebar pane divider](https://github.com/saitonakamura/herdr/pull/36) merges.
+
+- The expanded session pane gives its last column to a `│` divider, drawn and hit like the native one; the program gets one column less. Collapsed and hidden modes are unchanged.
+- A drag previews locally, then calls the new advertised `session_pane.set_width {width}` (`null` resets to `ui.sidebar_width`, sent on double-click). The server clamps it by the sidebar bounds and every client follows the next update. A server without the method keeps the divider still, with no notice.
+- **Where it persists:** in the server's session snapshot (`session_pane_width`, out of the layout fingerprint), also carried through a live handoff. It is not in client preferences like the native manual width, because one program draws for every client, so the width is a server fact.
+- Live-verified in a throwaway session with herdr-sidebar: wider, narrower, server restart, double-click, and a second client following.

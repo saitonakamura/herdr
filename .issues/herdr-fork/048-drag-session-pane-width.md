@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-drag-session-pane-width
 title: Drag the divider between the sidebar pane and the tabs to resize it
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee:
-claimed_by:
+claimed_by: macos/w1:p15/1e87e4d4-58ad-49a7-a910-a4e576ec9cc9
 ---
 
 ## Question

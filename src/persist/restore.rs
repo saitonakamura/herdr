@@ -1640,6 +1640,7 @@ mod tests {
             sidebar_section_split: None,
             collapsed_space_keys: Default::default(),
             messages: Default::default(),
+            session_pane_width: None,
         };
         let (events, _event_rx) = mpsc::channel(4);
 
@@ -1746,6 +1747,7 @@ mod tests {
             sidebar_section_split: None,
             collapsed_space_keys: Default::default(),
             messages: Default::default(),
+            session_pane_width: None,
         };
         let (events, _event_rx) = mpsc::channel(4);
 
@@ -1849,6 +1851,7 @@ mod tests {
             sidebar_section_split: None,
             collapsed_space_keys: Default::default(),
             messages: Default::default(),
+            session_pane_width: None,
         };
         let (events, _event_rx) = mpsc::channel(4);
 
@@ -1985,6 +1988,7 @@ mod tests {
             sidebar_section_split: None,
             collapsed_space_keys: Default::default(),
             messages: Default::default(),
+            session_pane_width: None,
         };
         let (events, _event_rx) = mpsc::channel(4);
 
@@ -2111,6 +2115,7 @@ mod tests {
             sidebar_section_split: None,
             collapsed_space_keys: Default::default(),
             messages: Default::default(),
+            session_pane_width: None,
         };
         let (events, _event_rx) = mpsc::channel(4);
 
@@ -2232,6 +2237,7 @@ mod tests {
             sidebar_section_split: None,
             collapsed_space_keys: Default::default(),
             messages: Default::default(),
+            session_pane_width: None,
         };
 
         let (_workspaces, terminals, _runtimes) = restore(
@@ -2557,6 +2563,7 @@ mod tests {
             sidebar_section_split: Some(0.5),
             collapsed_space_keys: Default::default(),
             messages: Default::default(),
+            session_pane_width: None,
         };
         history.layout_fingerprint = super::super::snapshot::layout_fingerprint(&snapshot);
         (snapshot, history)

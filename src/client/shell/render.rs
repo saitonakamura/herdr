@@ -28,6 +28,16 @@ pub(in crate::client::shell) fn render_sidebar_background(
     }
 }
 
+fn render_session_pane_divider(buffer: &mut Buffer, area: Rect, palette: &Palette) {
+    // No background: the program and the panes on either side keep their own.
+    for y in area.y..area.bottom() {
+        if let Some(cell) = buffer.cell_mut((area.x, y)) {
+            cell.set_symbol("│");
+            cell.set_style(Style::default().fg(palette.surface_dim));
+        }
+    }
+}
+
 pub(super) fn render_mode_bar(
     buffer: &mut Buffer,
     pane_area: Rect,
@@ -250,6 +260,8 @@ pub(super) struct ShellRenderState<'a> {
     pub(super) workspace_drop_indicator_row: Option<u16>,
     /// The session pane fills the sidebar slot, so the native sidebar stays undrawn.
     pub(super) session_pane_active: bool,
+    /// The endpoint lets the session pane's divider set its width.
+    pub(super) session_pane_resizable: bool,
 }
 
 pub(super) fn render_shell(
@@ -269,7 +281,14 @@ pub(super) fn render_shell(
             &mut hits,
         );
     }
-    if layout.sidebar.width > 0 && !state.session_pane_active {
+    if state.session_pane_active {
+        let divider =
+            super::session_pane::session_pane_divider(layout.sidebar, state.sidebar_collapsed);
+        render_session_pane_divider(buffer, divider, &config.palette);
+        if state.session_pane_resizable {
+            hits.sidebar_divider = divider;
+        }
+    } else if layout.sidebar.width > 0 {
         if state.endpoints.len() > 1 {
             if state.sidebar_collapsed {
                 super::endpoint_sidebar::render_collapsed(

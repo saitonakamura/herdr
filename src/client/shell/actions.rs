@@ -570,7 +570,8 @@ impl ClientShellState {
             }
         }
         match pending.kind {
-            PendingEndpointKind::Generic => {}
+            // The preview gives way to the endpoint's next update once nothing is in flight.
+            PendingEndpointKind::Generic | PendingEndpointKind::SessionPaneWidth => {}
             PendingEndpointKind::PaneLinkResolve { .. } => unreachable!("handled above"),
             PendingEndpointKind::ProductAnnouncementDismiss { version, id } => {
                 return match result {

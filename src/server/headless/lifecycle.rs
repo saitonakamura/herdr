@@ -77,6 +77,7 @@ impl HeadlessServer {
             self.app.state.selected,
         );
         snapshot.messages = self.app.state.messages.clone();
+        snapshot.session_pane_width = self.app.state.session_pane.width_override;
 
         let mut handoff_entries = Vec::new();
         for (terminal_id, runtime) in self.app.terminal_runtimes.iter() {

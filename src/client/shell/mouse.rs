@@ -952,7 +952,11 @@ impl ClientShellState {
             return;
         }
         if let Some(hit) = self.hits.session_pane.clone() {
-            if self.overlay.is_none() && super::contains(hit.inner_rect, point) {
+            // A chrome drag, such as the divider's, keeps its moves and release over the pane.
+            if self.overlay.is_none()
+                && self.chrome_drag.is_none()
+                && super::contains(hit.inner_rect, point)
+            {
                 match mouse.kind {
                     MouseEventKind::Down(button) => {
                         self.push_pane_mouse_event(&hit, mouse, mouse.modifiers, outcome);
@@ -1075,6 +1079,10 @@ impl ClientShellState {
             match self.chrome_drag.as_ref() {
                 Some(ClientChromeDrag::SidebarWidth) => {
                     self.set_sidebar_width_from_column(mouse.column, outcome);
+                    return;
+                }
+                Some(ClientChromeDrag::SessionPaneWidth) => {
+                    self.drag_session_pane_divider(mouse.column, outcome);
                     return;
                 }
                 Some(ClientChromeDrag::SidebarSection) => {
@@ -1410,6 +1418,9 @@ impl ClientShellState {
                     }
                     ClientChromeDrag::SidebarWidth | ClientChromeDrag::SidebarSection => {
                         self.persist_chrome_preferences(outcome);
+                    }
+                    ClientChromeDrag::SessionPaneWidth => {
+                        self.release_session_pane_divider(outcome);
                     }
                     ClientChromeDrag::WorkspaceScrollbar { .. }
                     | ClientChromeDrag::AgentScrollbar { .. }
@@ -2007,7 +2018,9 @@ impl ClientShellState {
                         now.duration_since(last) <= std::time::Duration::from_millis(350)
                     });
                     self.last_sidebar_divider_click = Some(now);
-                    if double_click {
+                    if self.session_pane_view().is_some() {
+                        self.press_session_pane_divider(mouse.column, double_click, outcome);
+                    } else if double_click {
                         self.sidebar_width = self.config.sidebar_width;
                         self.sidebar_width_manual = false;
                         self.invalidate_pane_surface();

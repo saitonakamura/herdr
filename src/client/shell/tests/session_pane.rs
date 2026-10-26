@@ -106,8 +106,10 @@ fn session_pane_replaces_the_native_sidebar_and_disables_its_divider() {
         "native sidebar drawn:\n{text}"
     );
     let hit = state.hits.session_pane.as_ref().expect("session pane hit");
-    assert_eq!(hit.rect, Rect::new(0, 0, 20, 20));
+    // The last column is the divider, drawn but still while the server cannot set widths.
+    assert_eq!(hit.rect, Rect::new(0, 0, 19, 20));
     assert_eq!(state.hits.sidebar_divider, Rect::default());
+    assert_eq!(frame.cells[19].symbol, "│");
     assert!(state.hits.workspaces.is_empty());
     // Unfocused, the cursor stays the focused pane's.
     assert_ne!(
@@ -269,7 +271,7 @@ fn slot_size_is_reported_once_per_change_and_only_with_a_pane() {
     };
     assert_eq!(
         slot(state.take_session_pane_slot_message(106, 20)),
-        Some((20, 20))
+        Some((19, 20))
     );
     assert_eq!(slot(state.take_session_pane_slot_message(106, 20)), None);
     state.sidebar_collapsed = true;
@@ -356,4 +358,193 @@ fn a_pane_from_another_connection_or_server_is_dropped_with_its_focus() {
     rebooted.boot_id = "boot-2".into();
     state.set_endpoint_snapshot_for_generation(&ClientEndpointId::Local, 2, Box::new(rebooted));
     assert!(state.session_pane_view().is_none());
+}
+
+fn resizable_shell(focused: bool) -> ClientShellState {
+    let mut state = shell_with_session_pane(focused);
+    state.set_endpoint_methods(Some(vec![
+        "session_pane.set_width".into(),
+        "session_pane.unfocus".into(),
+    ]));
+    state.compose(106, 20).expect("frame");
+    state
+}
+
+fn mouse(state: &mut ClientShellState, kind: MouseEventKind, column: u16) -> ClientShellInput {
+    state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
+        kind,
+        column,
+        row: 5,
+        modifiers: KeyModifiers::empty(),
+    })])
+}
+
+/// The `session_pane.set_width` requests among `input`'s actions, with their ids.
+fn set_width_requests(input: &ClientShellInput) -> Vec<(String, Option<u16>)> {
+    input
+        .actions
+        .iter()
+        .filter_map(|action| match action {
+            ClientShellAction::Endpoint { request, .. } => match &request.method {
+                crate::api::schema::Method::SessionPaneSetWidth(params) => {
+                    Some((request.id.clone(), params.width))
+                }
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect()
+}
+
+fn update_width(state: &mut ClientShellState, revision: u64, width: u16) -> (bool, bool) {
+    let mut pane = view(false);
+    pane.width = width;
+    state.set_endpoint_session_pane(
+        &ClientEndpointId::Local,
+        None,
+        SessionPaneUpdate {
+            boot_id: "boot-1".into(),
+            revision,
+            pane: Some(pane),
+        },
+        (106, 20),
+    )
+}
+
+#[test]
+fn the_divider_beside_an_expanded_session_pane_is_the_drag_handle() {
+    let mut state = resizable_shell(false);
+    assert_eq!(state.hits.sidebar_divider, Rect::new(19, 0, 1, 20));
+    assert_eq!(
+        state.hits.session_pane.as_ref().map(|hit| hit.rect),
+        Some(Rect::new(0, 0, 19, 20))
+    );
+
+    // Collapsed, the pane keeps its whole narrow slot and nothing drags.
+    state.sidebar_collapsed = true;
+    state.invalidate_pane_surface();
+    state.set_pane_surface(surface());
+    let frame = state.compose(106, 20).expect("frame");
+    assert_eq!(state.hits.sidebar_divider, Rect::default());
+    assert_eq!(
+        state.hits.session_pane.as_ref().map(|hit| hit.rect),
+        Some(Rect::new(0, 0, 6, 20))
+    );
+    assert_ne!(frame.cells[5].symbol, "│");
+}
+
+#[test]
+fn dragging_the_divider_previews_locally_then_asks_the_server() {
+    let mut state = resizable_shell(false);
+
+    // A press on the divider starts a drag and goes to neither the program nor a pane.
+    let press = mouse(&mut state, MouseEventKind::Down(MouseButton::Left), 19);
+    assert!(session_pane_events(&press.requests).is_empty());
+    assert!(set_width_requests(&press).is_empty());
+    assert!(matches!(
+        state.chrome_drag,
+        Some(ClientChromeDrag::SessionPaneWidth)
+    ));
+
+    let drag = mouse(&mut state, MouseEventKind::Drag(MouseButton::Left), 27);
+    assert!(drag.resize && drag.repaint);
+    assert_eq!(state.layout(106, 20).sidebar.width, 28);
+    assert!(set_width_requests(&drag).is_empty());
+    // Past the sidebar bounds the drag stops at them.
+    mouse(&mut state, MouseEventKind::Drag(MouseButton::Left), 80);
+    assert_eq!(state.layout(106, 20).sidebar.width, 36);
+    mouse(&mut state, MouseEventKind::Drag(MouseButton::Left), 23);
+    // The program hears its new slot while the drag goes on.
+    assert!(state.take_session_pane_slot_message(106, 20).is_some());
+
+    // Moves and the release over the redrawn pane still belong to the drag.
+    state.set_pane_surface(surface());
+    state.compose(106, 20).expect("frame");
+    let narrower = mouse(&mut state, MouseEventKind::Drag(MouseButton::Left), 21);
+    assert!(session_pane_events(&narrower.requests).is_empty());
+    let release = mouse(&mut state, MouseEventKind::Up(MouseButton::Left), 21);
+    assert!(session_pane_events(&release.requests).is_empty());
+    let [(request_id, Some(22))] = &set_width_requests(&release)[..] else {
+        panic!("expected one set_width(22)");
+    };
+    assert!(state.chrome_drag.is_none());
+
+    // An update sent before the server applied the width does not undo the drag.
+    update_width(&mut state, 2, 20);
+    assert_eq!(state.layout(106, 20).sidebar.width, 22);
+
+    let (repaint, _) = state.handle_endpoint_result(
+        "boot-1",
+        request_id,
+        Ok(crate::api::schema::ResponseResult::Ok {}),
+    );
+    assert!(!repaint);
+    assert_eq!(state.layout(106, 20).sidebar.width, 22);
+
+    // Once the request is answered, the server's width wins.
+    assert_eq!(update_width(&mut state, 3, 22), (true, false));
+    assert_eq!(state.session_pane_width_preview, None);
+    assert_eq!(state.layout(106, 20).sidebar.width, 22);
+    assert_eq!(update_width(&mut state, 4, 30), (true, true));
+    assert_eq!(state.layout(106, 20).sidebar.width, 30);
+}
+
+#[test]
+fn a_rejected_width_gives_way_to_the_next_update() {
+    let mut state = resizable_shell(false);
+    mouse(&mut state, MouseEventKind::Down(MouseButton::Left), 19);
+    mouse(&mut state, MouseEventKind::Drag(MouseButton::Left), 29);
+    let release = mouse(&mut state, MouseEventKind::Up(MouseButton::Left), 29);
+    let [(request_id, Some(30))] = &set_width_requests(&release)[..] else {
+        panic!("expected one set_width(30)");
+    };
+    state.handle_endpoint_result(
+        "boot-1",
+        request_id,
+        Err(ClientShellEndpointError {
+            code: Some("endpoint_timeout".into()),
+            message: "timed out".into(),
+        }),
+    );
+    // The update carries the same pane, but the width still has to come back.
+    assert_eq!(update_width(&mut state, 2, 20), (true, true));
+    assert_eq!(state.layout(106, 20).sidebar.width, 20);
+}
+
+#[test]
+fn a_click_without_a_move_sends_nothing_and_a_double_click_resets() {
+    let mut state = resizable_shell(false);
+    let press = mouse(&mut state, MouseEventKind::Down(MouseButton::Left), 19);
+    assert!(!press.resize);
+    let release = mouse(&mut state, MouseEventKind::Up(MouseButton::Left), 19);
+    assert!(set_width_requests(&release).is_empty());
+    assert_eq!(state.session_pane_width_preview, None);
+
+    state.compose(106, 20).expect("frame");
+    let reset = mouse(&mut state, MouseEventKind::Down(MouseButton::Left), 19);
+    assert!(matches!(&set_width_requests(&reset)[..], [(_, None)]));
+    assert!(state.chrome_drag.is_none());
+    // Until the server answers, the client draws its own configured width.
+    assert_eq!(
+        state.layout(106, 20).sidebar.width,
+        state.config.sidebar_width
+    );
+}
+
+#[test]
+fn a_server_without_set_width_keeps_the_divider_still_and_quiet() {
+    let mut state = shell_with_session_pane(false);
+    state.set_endpoint_methods(Some(vec!["session_pane.unfocus".into()]));
+    state.compose(106, 20).expect("frame");
+    assert_eq!(state.hits.sidebar_divider, Rect::default());
+
+    let press = mouse(&mut state, MouseEventKind::Down(MouseButton::Left), 19);
+    let drag = mouse(&mut state, MouseEventKind::Drag(MouseButton::Left), 27);
+    let release = mouse(&mut state, MouseEventKind::Up(MouseButton::Left), 27);
+    for input in [&press, &drag, &release] {
+        assert!(set_width_requests(input).is_empty());
+        assert!(!input.resize);
+    }
+    assert_eq!(state.layout(106, 20).sidebar.width, 20);
+    assert!(state.visible_endpoint_notice.is_none());
 }

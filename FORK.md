@@ -110,16 +110,21 @@ program once in a terminal that belongs to no workspace or tab, and clients draw
 it in place of the native sidebar ([ADR 0002](./docs/adr/0002-sidebar-pane.md),
 [0005](./docs/adr/0005-collapsed-sidebar-is-the-pane.md)). The API, which may not
 say "sidebar", calls it the **session pane** (`session_pane.get`, `.focus`,
-`.unfocus`; `docs/next` socket API page).
+`.unfocus`, `.set_width`; `docs/next` socket API page).
 
 - Expanded, it is `ui.sidebar_width` clamped by the sidebar bounds, the same for
-  every client, and its divider does not drag. Collapsed, it is
+  every client. Its last column is a divider like the native sidebar's: dragging
+  it calls `session_pane.set_width`, which every client follows, and a
+  double-click goes back to `ui.sidebar_width`. The server keeps that width in the
+  saved session, not in a client's preferences, because one program draws for
+  every client. Collapsed, it is
   `ui.sidebar.pane_collapsed_width` (default 8); `sidebar_collapsed_mode =
   "hidden"` still gives it no width. Mobile layouts and shells showing several
   machines keep the native sidebar.
 - Its process gets `HERDR_SOCKET_PATH`, `HERDR_SESSION` and `HERDR_CONFIG_PATH`
   but no `HERDR_PANE_ID`. It is not listed, snapshotted, saved or carried through a
-  live handoff; every server start runs it afresh.
+  live handoff, though a width set by dragging is; every server start runs it
+  afresh.
 - An exit shows the native sidebar and restarts it after 0.5s, doubling to 30s.
   Five quick exits in a row (each under 30s) leave it down with one `warn!` and
   one notification, until a config reload. A reload that changes `pane` restarts

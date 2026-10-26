@@ -35,8 +35,18 @@ pub struct SessionPaneInfo {
     pub focused: bool,
     pub cols: u16,
     pub rows: u16,
-    /// Expanded width, from `ui.sidebar_width` clamped by the sidebar bounds.
+    /// Expanded width: the one `session_pane.set_width` set, else `ui.sidebar_width`,
+    /// clamped by the sidebar bounds.
     pub width: u16,
     pub collapsed_width: u16,
     pub restarts: u64,
+}
+
+/// Sets the session pane's expanded width for every client. The server clamps it
+/// by the sidebar bounds and keeps it across restarts; `null` goes back to
+/// `ui.sidebar_width`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema, Default)]
+pub struct SessionPaneSetWidthParams {
+    #[serde(default)]
+    pub width: Option<u16>,
 }

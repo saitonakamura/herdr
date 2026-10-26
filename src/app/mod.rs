@@ -434,6 +434,9 @@ impl App {
             .as_ref()
             .map(|snapshot| snapshot.messages.clone())
             .unwrap_or_default();
+        let restored_session_pane_width = snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.session_pane_width);
         let (workspaces, active, selected) = if let Some(snap) = snapshot {
             let history = config
                 .experimental
@@ -583,13 +586,14 @@ impl App {
             ),
             plugin_panes: std::collections::HashMap::new(),
             popup_pane: None,
-            session_pane: session_pane::SessionPaneState {
-                size: (
-                    session_pane::SessionPaneConfig::from_config(config).width,
-                    config.headless_size().1,
-                ),
-                config: session_pane::SessionPaneConfig::from_config(config),
-                ..session_pane::SessionPaneState::default()
+            session_pane: {
+                let mut pane = session_pane::SessionPaneState {
+                    config: session_pane::SessionPaneConfig::from_config(config),
+                    width_override: restored_session_pane_width,
+                    ..session_pane::SessionPaneState::default()
+                };
+                pane.size = (pane.width(), config.headless_size().1);
+                pane
             },
             plugin_command_logs: Vec::new(),
             next_plugin_command_log_id: 1,
@@ -757,6 +761,7 @@ impl App {
         app.terminal_runtimes = runtimes.into();
         app.state.messages = snapshot.messages.clone();
         app.state.message_delivery_due = true;
+        app.state.session_pane.width_override = snapshot.session_pane_width;
         // Handed-over parents may sit in another workspace (ADR 0008); the first sync drops them.
         app.state.agent_identities_dirty = true;
         app.state.active = snapshot

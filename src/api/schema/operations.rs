@@ -209,6 +209,7 @@ mod tests {
             "agent.close",
             "session_pane.focus",
             "session_pane.unfocus",
+            "session_pane.set_width",
             "popup.open",
         ]
         .into_iter()

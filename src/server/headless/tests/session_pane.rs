@@ -256,3 +256,52 @@ async fn synchronized_output_holds_the_pane_back_only_for_a_while() {
     assert!(matches!(&texts[..], [Some(_)]), "{texts:?}");
     shutdown_test_runtimes(&mut server);
 }
+
+#[tokio::test]
+async fn a_set_width_is_clamped_and_reaches_every_client() {
+    let (mut server, _) = server_with_session_pane(b"SIDE");
+    let first = connect(&mut server, 1, true);
+    let second = connect(&mut server, 2, true);
+    server.stream_session_pane();
+    session_pane_updates(&first);
+    session_pane_updates(&second);
+
+    let set_width = |server: &mut HeadlessServer, width| {
+        let response = server.app.handle_api_request(api::schema::Request {
+            id: "width".into(),
+            method: api::schema::Method::SessionPaneSetWidth(
+                api::schema::SessionPaneSetWidthParams { width },
+            ),
+        });
+        let response: serde_json::Value = serde_json::from_str(&response).expect("response");
+        server.stream_session_pane();
+        let widths = [&first, &second].map(|control| {
+            session_pane_updates(control)
+                .iter()
+                .map(|update| update.pane.as_ref().map(|view| view.width))
+                .collect::<Vec<_>>()
+        });
+        (response["result"]["session_pane"]["width"].as_u64(), widths)
+    };
+
+    assert_eq!(
+        set_width(&mut server, Some(31)),
+        (Some(31), [vec![Some(31)], vec![Some(31)]])
+    );
+    // Past the sidebar bounds it stops at them.
+    assert_eq!(
+        set_width(&mut server, Some(999)),
+        (Some(36), [vec![Some(36)], vec![Some(36)]])
+    );
+    // The same width again changes nothing, so nothing is resent.
+    assert_eq!(
+        set_width(&mut server, Some(40)),
+        (Some(36), [vec![], vec![]])
+    );
+    // `null` goes back to `ui.sidebar_width`.
+    assert_eq!(
+        set_width(&mut server, None),
+        (Some(26), [vec![Some(26)], vec![Some(26)]])
+    );
+    shutdown_test_runtimes(&mut server);
+}

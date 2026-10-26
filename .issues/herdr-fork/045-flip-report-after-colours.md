@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-flip-report-after-colours
 title: Forward a light/dark flip only after the new colours have landed
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee:
-claimed_by:
+claimed_by: macos/w1:p14/814e177d-60ce-4d73-a96d-7abaa7bd3bef
 ---
 
 ## Question

@@ -238,8 +238,9 @@ pub fn parse_target_name(name: &str) -> Result<Option<String>, String> {
     normalize_name(name)
 }
 
-pub fn stop_session(name: Option<&str>) -> Result<SessionInfo, String> {
-    stop_session_with_timeout(name, STOP_WAIT_TIMEOUT)
+/// Stops a session, waiting up to `timeout` (default 15s) for its sockets to close.
+pub fn stop_session(name: Option<&str>, timeout: Option<Duration>) -> Result<SessionInfo, String> {
+    stop_session_with_timeout(name, timeout.unwrap_or(STOP_WAIT_TIMEOUT))
 }
 
 pub(crate) fn stop_active_server() -> Result<(), String> {

@@ -265,6 +265,10 @@ fn session_command() -> Command {
             Command::new("stop")
                 .about("Stop a session")
                 .arg(required("name", "NAME"))
+                .arg(
+                    option("timeout", "SECONDS")
+                        .help("Seconds to wait for the server to exit (default 15)"),
+                )
                 .arg(json_flag()),
         )
         .subcommand(

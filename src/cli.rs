@@ -501,12 +501,17 @@ fn session_list(args: &[String]) -> std::io::Result<i32> {
     Ok(0)
 }
 
+const SESSION_STOP_USAGE: &str = "usage: herdr session stop <name> [--timeout <seconds>] [--json]";
+
 fn session_stop(args: &[String]) -> std::io::Result<i32> {
-    let (name, json) =
-        match parse_session_name_and_json(args, "usage: herdr session stop <name> [--json]") {
-            Ok(parsed) => parsed,
-            Err(code) => return Ok(code),
-        };
+    let (args, timeout) = match parse_stop_timeout(args) {
+        Ok(parsed) => parsed,
+        Err(code) => return Ok(code),
+    };
+    let (name, json) = match parse_session_name_and_json(&args, SESSION_STOP_USAGE) {
+        Ok(parsed) => parsed,
+        Err(code) => return Ok(code),
+    };
 
     let target = match crate::session::parse_target_name(&name) {
         Ok(target) => target,
@@ -515,7 +520,7 @@ fn session_stop(args: &[String]) -> std::io::Result<i32> {
             return Ok(1);
         }
     };
-    match crate::session::stop_session(target.as_deref()) {
+    match crate::session::stop_session(target.as_deref(), timeout) {
         Ok(session) => {
             if json {
                 _print_json(&serde_json::json!({
@@ -927,6 +932,37 @@ fn parse_session_json_only(args: &[String], usage: &str) -> Result<bool, i32> {
     }
 }
 
+/// Takes `--timeout <seconds>` (or `--timeout=<seconds>`) out of the args; the rest
+/// parse as before. A big server can take longer than the default to save and exit.
+fn parse_stop_timeout(args: &[String]) -> Result<(Vec<String>, Option<std::time::Duration>), i32> {
+    let mut rest = Vec::new();
+    let mut timeout = None;
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        if arg == "--" {
+            rest.push(arg.clone());
+            rest.extend(iter.by_ref().cloned());
+            break;
+        }
+        let value = if arg == "--timeout" {
+            iter.next().map(String::as_str)
+        } else if let Some(value) = arg.strip_prefix("--timeout=") {
+            Some(value)
+        } else {
+            rest.push(arg.clone());
+            continue;
+        };
+        match value.and_then(|v| v.parse::<u64>().ok()).filter(|s| *s > 0) {
+            Some(seconds) => timeout = Some(std::time::Duration::from_secs(seconds)),
+            None => {
+                eprintln!("{SESSION_STOP_USAGE}");
+                return Err(2);
+            }
+        }
+    }
+    Ok((rest, timeout))
+}
+
 fn parse_session_name_and_json(args: &[String], usage: &str) -> Result<(String, bool), i32> {
     let mut name = None;
     let mut json = false;
@@ -1006,7 +1042,7 @@ fn print_session_help() {
     eprintln!("herdr session commands:");
     eprintln!("  herdr session list [--json]");
     eprintln!("  herdr session attach <name>");
-    eprintln!("  herdr session stop <name> [--json]");
+    eprintln!("  herdr session stop <name> [--timeout <seconds>] [--json]");
     eprintln!("  herdr session delete <name> [--json]");
     eprintln!("  use 'default' as <name> to target the default session for stop");
 }
@@ -1017,6 +1053,36 @@ fn _print_json<T: Serialize>(value: &T) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn session_stop_takes_a_timeout_in_seconds() {
+        let args = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let secs = std::time::Duration::from_secs;
+        assert_eq!(
+            super::parse_stop_timeout(&args(&["work", "--timeout", "180", "--json"])),
+            Ok((args(&["work", "--json"]), Some(secs(180))))
+        );
+        assert_eq!(
+            super::parse_stop_timeout(&args(&["--timeout=30", "work"])),
+            Ok((args(&["work"]), Some(secs(30))))
+        );
+        assert_eq!(
+            super::parse_stop_timeout(&args(&["work"])),
+            Ok((args(&["work"]), None))
+        );
+        // after `--` it is a session name
+        assert_eq!(
+            super::parse_stop_timeout(&args(&["--", "--timeout"])),
+            Ok((args(&["--", "--timeout"]), None))
+        );
+        for bad in [
+            &["work", "--timeout"][..],
+            &["work", "--timeout", "0"],
+            &["work", "--timeout=x"],
+        ] {
+            assert_eq!(super::parse_stop_timeout(&args(bad)), Err(2), "{bad:?}");
+        }
+    }
+
     #[test]
     fn parses_channel_set_argument() {
         assert_eq!(

@@ -158,6 +158,28 @@ class ConventionalCommitTests(unittest.TestCase):
         self.assertTrue(conventional_commits.valid_subject("feat!: change config"))
         self.assertFalse(conventional_commits.valid_subject("update preview channel"))
 
+    def test_git_subjects_skip_merge_commits(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            def git(*args):
+                subprocess.run(
+                    ["git", "-C", tmp, "-c", "user.name=t", "-c", "user.email=t@t",
+                     "-c", "commit.gpgsign=false", *args],
+                    check=True, capture_output=True,
+                )
+            git("init", "-q", "-b", "master")
+            git("commit", "-q", "--allow-empty", "-m", "chore: base")
+            git("checkout", "-q", "-b", "topic")
+            git("commit", "-q", "--allow-empty", "-m", "fix: on the branch")
+            git("checkout", "-q", "master")
+            git("merge", "-q", "--no-ff", "-m", "Merge pull request #1 from x/topic", "topic")
+            cwd = os.getcwd()
+            os.chdir(tmp)
+            try:
+                subjects = conventional_commits.git_subjects("HEAD~1..HEAD")
+            finally:
+                os.chdir(cwd)
+        self.assertEqual(subjects, ["fix: on the branch"])
+
     def test_commit_message_subject_skips_comments(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "COMMIT_EDITMSG"

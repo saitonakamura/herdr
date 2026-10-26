@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-light-dark-flip-chain
 title: Re-measure the light/dark flip chain, kitty to herdr to each harness
-status: open
+status: in-progress
 labels:
   - wayfinder:research
 parent: herdr-fork-map
 blocked_by:
 assignee:
-claimed_by:
+claimed_by: macos/w1:p13/4a781e51-3692-40d3-bf38-99874d1afc9d
 ---
 
 ## Question

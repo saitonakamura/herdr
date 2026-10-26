@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-drag-session-pane-width
 title: Drag the divider between the sidebar pane and the tabs to resize it
-status: in-progress
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee:
-claimed_by: macos/w1:p15/1e87e4d4-58ad-49a7-a910-a4e576ec9cc9
+claimed_by:
 ---
 
 ## Question
@@ -52,7 +52,7 @@ Make that boundary draggable when the session pane is shown:
 
 ## Resolution
 
-Draft until [PR #36 drag the sidebar pane divider](https://github.com/saitonakamura/herdr/pull/36) merges.
+Merged 2026-10-26: [PR #36 drag the sidebar pane divider](https://github.com/saitonakamura/herdr/pull/36) as `a355b99c`.
 
 - The expanded session pane gives its last column to a `│` divider, drawn and hit like the native one; the program gets one column less. Collapsed and hidden modes are unchanged.
 - A drag previews locally, then calls the new advertised `session_pane.set_width {width}` (`null` resets to `ui.sidebar_width`, sent on double-click). The server clamps it by the sidebar bounds and every client follows the next update. A server without the method keeps the divider still, with no notice.

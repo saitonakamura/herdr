@@ -295,6 +295,7 @@ fn agent_lines(agent: &AgentItem, width: u16, config: &Config, key: String) -> V
     ];
     if let Some(brand) = &brand {
         lead.push(span(brand.text.clone(), fg(brand.color)));
+        lead.push(span(" ", Style::default()));
     }
     let lead_width: usize = lead.iter().map(|s| s.text.width()).sum();
 
@@ -433,7 +434,7 @@ fn agent_lines(agent: &AgentItem, width: u16, config: &Config, key: String) -> V
         if !parts.is_empty() {
             // line 2 sits under the name, past the guides and glyphs
             let indent = format!(" {}", continuation(agent));
-            let state_width = state.text.width() + brand.as_ref().map_or(0, |b| b.text.width());
+            let state_width = state.text.width() + brand.as_ref().map_or(0, |b| b.text.width() + 1);
             let pad = " ".repeat(state_width);
             let room = width.saturating_sub(indent.width() + pad.width());
             out.push(Line {
@@ -525,18 +526,18 @@ mod tests {
         let text: Vec<String> = lines.iter().map(Line::text).collect();
         assert!(text[0].starts_with("▾ dogfood pt:herdr-fork"), "{text:?}");
         assert_eq!(text[1].width(), 40);
-        assert!(text[1].starts_with(" ✓✻cockpit pt:herdr-fork"), "{text:?}");
+        assert!(text[1].starts_with(" ✓✻ cockpit pt:herdr-fork"), "{text:?}");
         assert!(text[1].ends_with(" 2m"), "{text:?}");
         assert!(text[2].contains("⎇master ↑1 ±2"), "{text:?}");
         assert!(
-            text.iter().any(|l| l.starts_with(" ├ ●✻alpha fork-030")),
+            text.iter().any(|l| l.starts_with(" ├ ●✻ alpha fork-030")),
             "{text:?}"
         );
         assert!(
-            text.iter().any(|l| l.starts_with(" │ └ ○✻alpha-one")),
+            text.iter().any(|l| l.starts_with(" │ └ ○✻ alpha-one")),
             "{text:?}"
         );
-        assert!(text.iter().any(|l| l.starts_with(" └ ●✻beta")), "{text:?}");
+        assert!(text.iter().any(|l| l.starts_with(" └ ●✻ beta")), "{text:?}");
         assert!(
             text.iter().any(|l| l.contains("remote ← alpha")),
             "{text:?}"

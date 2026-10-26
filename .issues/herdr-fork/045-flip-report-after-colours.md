@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-flip-report-after-colours
 title: Forward a light/dark flip only after the new colours have landed
-status: in-progress
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee:
-claimed_by: macos/w1:p14/814e177d-60ce-4d73-a96d-7abaa7bd3bef
+claimed_by:
 ---
 
 ## Question
@@ -59,9 +59,7 @@ Also:
 
 ## Resolution
 
-Draft until [saitonakamura/herdr#31 forward appearance after background reply](https://github.com/saitonakamura/herdr/pull/31)
-merges. Branch `fork/045-flip-report-after-colours`, `d0e50067`. CI is green on
-ubuntu, macOS and Windows.
+Merged 2026-10-26: herdr PR #31 as `d9dd9fc3` (head `d0e50067`) and dotfiles `769d4a0` (branch at `ee84144`, 448/448 loom tests on the merge). The dogfood binary was rebuilt at `d9dd9fc3` before the dotfiles merge.
 
 **The fix, as asked, in the client** (`src/client/shell/input.rs`, `state.rs`).
 On kitty's `?997`, the colour query goes out as before, but the appearance is

@@ -69,12 +69,25 @@ fn ctl(verb: &str, pane: Option<&str>) -> i32 {
 #[cfg(unix)]
 fn run() -> i32 {
     match run::run(run::Paths::from_env()) {
-        Ok(()) => 0,
+        Ok(run::Exit::Quit) => 0,
+        Ok(run::Exit::Upgrade(exe)) => upgrade(&exe),
         Err(err) => {
             eprintln!("herdr-sidebar: {err}");
             1
         }
     }
+}
+
+/// Runs the newly installed binary in this process, so the pane keeps going
+/// without herdr's restart backoff. If that fails, exiting lets herdr restart it.
+#[cfg(unix)]
+fn upgrade(exe: &std::path::Path) -> i32 {
+    use std::os::unix::process::CommandExt;
+    let err = std::process::Command::new(exe)
+        .args(std::env::args_os().skip(1))
+        .exec();
+    eprintln!("herdr-sidebar: upgrade: {err}");
+    1
 }
 
 #[cfg(not(unix))]

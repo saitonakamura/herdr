@@ -153,7 +153,11 @@ it draws and does is 018's resolution (`.issues/herdr-fork/018-sidebar-content.m
   redraws. The dirty count is herdr's, which runs `git status` only while a
   native agent row shows `git_dirty`, so keep that token in `[ui.sidebar.agents]`.
 - **Config.** `[sidebar]` in `config.toml` and `config.fork.toml`, merged like the
-  overlay, read at start and on SIGHUP. herdr accepts the table and never reads it.
+  overlay, read at start, on SIGHUP and within about two seconds of either file
+  changing. herdr accepts the table and never reads it.
+- **Upgrades.** The program checks its own binary every second. When a new one is
+  renamed over it, as `scripts/dogfood.sh` installs, it runs the new binary in
+  the same pane and process, so the sidebar updates without a session restart.
 
   ```toml
   [sidebar]

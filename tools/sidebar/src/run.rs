@@ -43,8 +43,21 @@ enum Msg {
         reply: Sender<Result<String, String>>,
     },
     Reload,
+    /// The installed binary at this path was replaced; run the new one in this pane.
+    Upgrade(PathBuf),
     Quit,
 }
+
+/// How the sidebar stopped.
+pub enum Exit {
+    Quit,
+    /// Replace this process with the binary now installed at this path, taken at
+    /// start: on linux `current_exe` names the deleted file once it is replaced.
+    Upgrade(PathBuf),
+}
+
+/// How often the binary and the config file are checked for changes.
+const WATCH_EVERY: Duration = Duration::from_secs(1);
 
 fn now_secs() -> u64 {
     SystemTime::now()
@@ -72,7 +85,7 @@ impl Paths {
     }
 }
 
-pub fn run(paths: Paths) -> std::io::Result<()> {
+pub fn run(paths: Paths) -> std::io::Result<Exit> {
     let client = Client {
         socket: paths.herdr_socket.clone(),
     };
@@ -82,6 +95,11 @@ pub fn run(paths: Paths) -> std::io::Result<()> {
     spawn_input(tx.clone());
     spawn_subscription(client.clone(), tx.clone());
     spawn_signals(tx.clone())?;
+    spawn_file_watch(
+        tx.clone(),
+        std::env::current_exe().ok(),
+        paths.config.clone(),
+    );
     let _ctl = CtlSocket::bind(&paths.ctl, tx.clone());
 
     enable_raw_mode()?;
@@ -123,7 +141,7 @@ fn event_loop(
     rx: &Receiver<Msg>,
     mut status: StatusWatch,
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
-) -> std::io::Result<()> {
+) -> std::io::Result<Exit> {
     let mut clock = AgeClock::default();
     let mut stale = true;
     let mut dirty = true;
@@ -140,7 +158,8 @@ fn event_loop(
             None => rx.recv().map_err(|_| RecvTimeoutError::Disconnected),
         };
         match msg {
-            Ok(Msg::Quit) | Err(RecvTimeoutError::Disconnected) => return Ok(()),
+            Ok(Msg::Quit) | Err(RecvTimeoutError::Disconnected) => return Ok(Exit::Quit),
+            Ok(Msg::Upgrade(exe)) => return Ok(Exit::Upgrade(exe)),
             Ok(Msg::Term(event)) => {
                 let effects = match event {
                     Event::Key(key) => app.key(key),
@@ -527,6 +546,86 @@ fn connected(
     newest
 }
 
+/// What tells one version of a file from the next: dogfood installs by renaming
+/// a new file over the old, so the inode changes even when the mtime does not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Fingerprint {
+    inode: u64,
+    len: u64,
+    modified: Option<SystemTime>,
+}
+
+fn fingerprint(path: &Path) -> Option<Fingerprint> {
+    use std::os::unix::fs::MetadataExt;
+    let meta = std::fs::metadata(path).ok()?;
+    Some(Fingerprint {
+        inode: meta.ino(),
+        len: meta.len(),
+        modified: meta.modified().ok(),
+    })
+}
+
+/// Watches one file. A change counts once it has held still for one poll, so a
+/// file still being written is not acted on half way.
+struct FileWatch {
+    path: PathBuf,
+    seen: Option<Fingerprint>,
+    /// A version seen once and not yet settled.
+    pending: Option<Option<Fingerprint>>,
+}
+
+impl FileWatch {
+    fn new(path: PathBuf) -> Self {
+        let seen = fingerprint(&path);
+        FileWatch {
+            path,
+            seen,
+            pending: None,
+        }
+    }
+
+    /// True once per settled change, including the file appearing or going away.
+    fn changed(&mut self) -> bool {
+        let now = fingerprint(&self.path);
+        if now == self.seen {
+            self.pending = None;
+            return false;
+        }
+        if self.pending != Some(now) {
+            self.pending = Some(now);
+            return false;
+        }
+        self.seen = now;
+        self.pending = None;
+        true
+    }
+}
+
+/// Reloads the config when either of its files changes, and upgrades when the
+/// binary does.
+fn spawn_file_watch(tx: Sender<Msg>, exe: Option<PathBuf>, config: PathBuf) {
+    std::thread::spawn(move || {
+        let mut exe = exe.map(FileWatch::new);
+        let overlay = FileWatch::new(config::overlay_path(&config));
+        let mut configs = [FileWatch::new(config), overlay];
+        loop {
+            std::thread::sleep(WATCH_EVERY);
+            // both are polled every time, so one change can't hide the other's
+            let changed = configs.iter_mut().fold(false, |any, w| w.changed() | any);
+            if changed && tx.send(Msg::Reload).is_err() {
+                return;
+            }
+            // a missing binary is mid-install or uninstalled; nothing to run yet
+            if let Some(watch) = exe.as_mut() {
+                if watch.changed() && fingerprint(&watch.path).is_some() {
+                    let _ = tx.send(Msg::Upgrade(watch.path.clone()));
+                    return;
+                }
+            }
+        }
+    });
+}
+
 fn spawn_signals(tx: Sender<Msg>) -> std::io::Result<()> {
     use signal_hook::consts::{SIGHUP, SIGINT, SIGTERM};
     let mut signals = signal_hook::iterator::Signals::new([SIGHUP, SIGINT, SIGTERM])?;
@@ -635,6 +734,63 @@ pub fn ctl(verb: &str, pane: Option<&str>) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("herdr-sidebar-watch-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_file_renamed_over_counts_once_it_holds_still_for_a_poll() {
+        let dir = scratch("rename");
+        let path = dir.join("herdr-sidebar");
+        std::fs::write(&path, "old").unwrap();
+        let mut watch = FileWatch::new(path.clone());
+        assert!(!watch.changed());
+
+        // same length and possibly the same mtime: only the inode tells them apart
+        std::fs::write(dir.join("new"), "new").unwrap();
+        std::fs::rename(dir.join("new"), &path).unwrap();
+        assert!(
+            !watch.changed(),
+            "first sighting waits for the file to settle"
+        );
+        assert!(watch.changed());
+        assert!(!watch.changed(), "a change counts once");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_file_still_changing_does_not_count_until_it_stops() {
+        let dir = scratch("growing");
+        let path = dir.join("config.toml");
+        std::fs::write(&path, "a").unwrap();
+        let mut watch = FileWatch::new(path.clone());
+        std::fs::write(&path, "ab").unwrap();
+        assert!(!watch.changed());
+        std::fs::write(&path, "abc").unwrap();
+        assert!(!watch.changed());
+        assert!(watch.changed());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_file_appearing_or_going_away_counts() {
+        let dir = scratch("appear");
+        let path = dir.join("config.toml");
+        let mut watch = FileWatch::new(path.clone());
+        assert!(!watch.changed());
+        std::fs::write(&path, "a").unwrap();
+        assert!(!watch.changed());
+        assert!(watch.changed());
+        std::fs::remove_file(&path).unwrap();
+        assert!(!watch.changed());
+        assert!(watch.changed());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn a_set_queued_before_the_connection_is_published_wins() {

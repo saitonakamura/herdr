@@ -161,7 +161,7 @@ impl HeadlessServer {
             content_seq: runtime.content_seq(),
             size: (cols, rows),
             focused: pane.focused,
-            widths: (pane.config.width, pane.config.collapsed_width),
+            widths: (pane.width(), pane.config.collapsed_width),
             mouse: (
                 runtime.mouse_reporting_enabled(),
                 runtime.sgr_pixel_mouse_enabled(),

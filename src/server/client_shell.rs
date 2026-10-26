@@ -561,7 +561,7 @@ pub(super) fn render_session_pane_view(
     Some(protocol::session_pane::SessionPaneView {
         terminal_id: terminal_id.to_string(),
         focused: pane.focused,
-        width: pane.config.width,
+        width: pane.width(),
         collapsed_width: pane.config.collapsed_width,
         mouse_reporting: runtime.mouse_reporting_enabled(),
         sgr_pixel_mouse: runtime.sgr_pixel_mouse_enabled(),

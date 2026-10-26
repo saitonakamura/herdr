@@ -5,7 +5,7 @@ use super::{App, SESSION_SAVE_DEBOUNCE};
 enum SessionSaveJob {
     Clear,
     Save {
-        snapshot: crate::persist::SessionSnapshot,
+        snapshot: Box<crate::persist::SessionSnapshot>,
         history: Option<crate::persist::SessionHistorySnapshot>,
     },
 }
@@ -49,6 +49,7 @@ impl App {
                 self.state.selected,
             );
             snapshot.messages = self.state.messages.clone();
+            snapshot.session_pane_width = self.state.session_pane.width_override;
             let history = self.persist_pane_history.then(|| {
                 crate::persist::capture_history(
                     &snapshot,
@@ -56,7 +57,10 @@ impl App {
                     &self.terminal_runtimes,
                 )
             });
-            SessionSaveJob::Save { snapshot, history }
+            SessionSaveJob::Save {
+                snapshot: Box::new(snapshot),
+                history,
+            }
         }
     }
 
@@ -144,5 +148,30 @@ fn run_session_save_job(
     match job {
         SessionSaveJob::Clear => writer.clear(),
         SessionSaveJob::Save { snapshot, history } => writer.save(&snapshot, history.as_ref()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_saved_session_keeps_a_set_session_pane_width() {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &crate::config::Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        app.state.workspaces = vec![crate::workspace::Workspace::test_new("width")];
+        let saved = |app: &App| match app.capture_session_save_job() {
+            SessionSaveJob::Save { snapshot, .. } => snapshot.session_pane_width,
+            SessionSaveJob::Clear => panic!("expected a save"),
+        };
+        assert_eq!(saved(&app), None);
+        app.set_session_pane_width(Some(30));
+        assert_eq!(saved(&app), Some(30));
     }
 }

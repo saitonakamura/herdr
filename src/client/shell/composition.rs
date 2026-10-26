@@ -78,6 +78,7 @@ impl ClientShellState {
             dragged_workspace_id: None,
             workspace_drop_indicator_row: None,
             session_pane_active: false,
+            session_pane_resizable: false,
         };
         if let Some(snapshot) = local_snapshot {
             render::render_sidebar(
@@ -206,6 +207,7 @@ impl ClientShellState {
             _ => (None, None),
         };
         let session_pane_active = layout.sidebar.width > 0 && self.session_pane_view().is_some();
+        let session_pane_resizable = self.session_pane_resizable();
         let mut buffer = Buffer::empty(Rect::new(0, 0, cols, rows));
         self.hits = render::render_shell(
             &mut buffer,
@@ -236,6 +238,7 @@ impl ClientShellState {
                 dragged_workspace_id,
                 workspace_drop_indicator_row,
                 session_pane_active,
+                session_pane_resizable,
             },
         );
         self.hits.panes = surface
@@ -351,7 +354,7 @@ impl ClientShellState {
         let (session_pane_hit, session_pane_cursor) = super::session_pane::compose_session_pane(
             &mut frame,
             super::session_pane::session_pane_view_in(&self.endpoints),
-            layout.sidebar,
+            super::session_pane::session_pane_slot(layout.sidebar, self.sidebar_collapsed),
         );
         self.hits.session_pane = session_pane_hit;
         if let Some(cursor) = session_pane_cursor {

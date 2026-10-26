@@ -4548,6 +4548,22 @@
           ],
           "type": "object"
         },
+        "SessionPaneSetWidthParams": {
+          "description": "Sets the session pane's expanded width for every client. The server clamps it\nby the sidebar bounds and keeps it across restarts; `null` goes back to\n`ui.sidebar_width`.",
+          "properties": {
+            "width": {
+              "default": null,
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "type": "object"
+        },
         "SplitDirection": {
           "enum": [
             "right",
@@ -7262,6 +7278,22 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/PopupOpenParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "session_pane.set_width",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/SessionPaneSetWidthParams"
             }
           },
           "required": [
@@ -12010,7 +12042,7 @@
               "type": "string"
             },
             "width": {
-              "description": "Expanded width, from `ui.sidebar_width` clamped by the sidebar bounds.",
+              "description": "Expanded width: the one `session_pane.set_width` set, else `ui.sidebar_width`,\nclamped by the sidebar bounds.",
               "format": "uint16",
               "maximum": 65535,
               "minimum": 0,

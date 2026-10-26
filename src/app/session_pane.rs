@@ -24,6 +24,8 @@ pub(crate) struct SessionPaneConfig {
     /// Expanded width, already clamped by the sidebar bounds.
     pub width: u16,
     pub collapsed_width: u16,
+    /// The sidebar bounds, as (min, max), which also clamp a width set by a client.
+    pub width_bounds: (u16, u16),
 }
 
 impl SessionPaneConfig {
@@ -37,6 +39,7 @@ impl SessionPaneConfig {
             argv: config.ui.sidebar.pane_argv().map(<[String]>::to_vec),
             width: config.ui.sidebar_width.clamp(min, max),
             collapsed_width: config.ui.sidebar.pane_collapsed_width(),
+            width_bounds: (min, max),
         }
     }
 }
@@ -83,6 +86,9 @@ pub(crate) struct SessionPaneState {
     pub status: SessionPaneStatus,
     /// Shared keyboard focus: while set, every client sends its keys to the program.
     pub focused: bool,
+    /// Expanded width a client set by dragging, which outlives config reloads and
+    /// server restarts; `None` follows `config.width`.
+    pub width_override: Option<u16>,
     /// Size the program was last given, as (cols, rows).
     pub size: (u16, u16),
     pub quick_failures: u32,
@@ -101,6 +107,7 @@ impl Default for SessionPaneState {
             process: None,
             status: SessionPaneStatus::Off,
             focused: false,
+            width_override: None,
             quick_failures: 0,
             restarts: 0,
             restart_at: None,
@@ -129,6 +136,13 @@ impl SessionPaneState {
 
     pub(crate) fn pane_id(&self) -> Option<PaneId> {
         self.process.as_ref().map(|process| process.pane_id)
+    }
+
+    /// The expanded width every client gives the pane.
+    pub(crate) fn width(&self) -> u16 {
+        let (min, max) = self.config.width_bounds;
+        self.width_override
+            .map_or(self.config.width, |width| width.clamp(min, max))
     }
 
     /// Records a failure and plans the next start. `ran_for` is `None` when the
@@ -314,11 +328,12 @@ impl App {
     /// Applies a reloaded config. A changed argv restarts the program, a removed one
     /// stops it, and a reload of any kind gives a failed program another try.
     pub(crate) fn apply_session_pane_config(&mut self, config: SessionPaneConfig) -> bool {
+        let previous_width = self.state.session_pane.width();
         let previous = std::mem::replace(&mut self.state.session_pane.config, config);
         let current = &self.state.session_pane.config;
         let argv_changed = previous.argv != current.argv;
-        let width_changed =
-            previous.width != current.width || previous.collapsed_width != current.collapsed_width;
+        let width_changed = previous_width != self.state.session_pane.width()
+            || previous.collapsed_width != current.collapsed_width;
         let retry_failed = self.state.session_pane.status == SessionPaneStatus::Failed;
         if !argv_changed && !retry_failed {
             return width_changed;
@@ -338,6 +353,25 @@ impl App {
             self.render_dirty.request_generic();
             self.render_notify.notify_one();
         }
+        true
+    }
+
+    /// Sets the expanded width every client gives the pane, or with `None` goes back
+    /// to the configured one. Returns whether the width changed.
+    pub(crate) fn set_session_pane_width(&mut self, width: Option<u16>) -> bool {
+        let (min, max) = self.state.session_pane.config.width_bounds;
+        let width = width.map(|width| width.clamp(min, max));
+        if self.state.session_pane.width_override == width {
+            return false;
+        }
+        let previous = self.state.session_pane.width();
+        self.state.session_pane.width_override = width;
+        self.state.session_dirty = true;
+        if previous == self.state.session_pane.width() {
+            return false;
+        }
+        self.render_dirty.request_generic();
+        self.render_notify.notify_one();
         true
     }
 
@@ -411,7 +445,7 @@ impl App {
             focused: pane.focused,
             cols: pane.size.0,
             rows: pane.size.1,
-            width: pane.config.width,
+            width: pane.width(),
             collapsed_width: pane.config.collapsed_width,
             restarts: pane.restarts,
         }
@@ -485,6 +519,7 @@ mod tests {
                 argv: Some(vec!["prog".into()]),
                 width: 26,
                 collapsed_width: 8,
+                width_bounds: (18, 36),
             },
             ..SessionPaneState::default()
         }
@@ -547,6 +582,7 @@ mod tests {
                 argv: Some(vec!["herdr-sidebar".into(), "--x".into()]),
                 width: 40,
                 collapsed_width: 6,
+                width_bounds: (18, 40),
             }
         );
         assert!(config.collect_diagnostics().is_empty());
@@ -577,6 +613,32 @@ mod tests {
     }
 
     #[test]
+    fn a_set_width_is_clamped_survives_reloads_and_resets() {
+        let mut app = test_app();
+        assert_eq!(app.state.session_pane.width(), 26);
+        assert!(app.set_session_pane_width(Some(30)));
+        assert!(app.state.session_dirty);
+        assert_eq!(app.state.session_pane.width(), 30);
+        assert!(!app.set_session_pane_width(Some(30)));
+
+        assert!(app.set_session_pane_width(Some(200)));
+        assert_eq!(app.state.session_pane.width_override, Some(36));
+        assert!(app.set_session_pane_width(Some(0)));
+        assert_eq!(app.state.session_pane.width(), 18);
+
+        // A reload keeps the set width but clamps it by the new bounds.
+        app.set_session_pane_width(Some(34));
+        let config: crate::config::Config =
+            toml::from_str("[ui]\nsidebar_width = 24\nsidebar_max_width = 32\n").expect("config");
+        assert!(app.apply_session_pane_config(SessionPaneConfig::from_config(&config)));
+        assert_eq!(app.state.session_pane.width(), 32);
+        assert_eq!(app.session_pane_info().width, 32);
+
+        assert!(app.set_session_pane_width(None));
+        assert_eq!(app.state.session_pane.width(), 24);
+    }
+
+    #[test]
     fn focus_needs_a_running_program() {
         let mut app = test_app();
         assert!(!app.set_session_pane_focus(true));
@@ -594,6 +656,7 @@ mod tests {
             argv: Some(vec!["/bin/sh".into(), "-c".into(), "exit 3".into()]),
             width: 26,
             collapsed_width: 8,
+            width_bounds: (18, 36),
         });
         assert_eq!(app.state.session_pane.status, SessionPaneStatus::Running);
         let pane_id = app.state.session_pane.pane_id().expect("running pane");

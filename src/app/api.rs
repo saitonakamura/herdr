@@ -1298,6 +1298,15 @@ impl App {
                 self.set_session_pane_focus(false);
                 return responses::encode_success(request.id, ResponseResult::Ok {});
             }
+            Method::SessionPaneSetWidth(params) => {
+                self.set_session_pane_width(params.width);
+                return responses::encode_success(
+                    request.id,
+                    ResponseResult::SessionPane {
+                        session_pane: self.session_pane_info(),
+                    },
+                );
+            }
             Method::PopupOpen(params) => return self.handle_popup_open(request.id, params),
             Method::PopupClose(_) => {
                 return if self.close_popup_pane() {

@@ -164,6 +164,7 @@ operations::define_operations! {
     SessionPaneFocus(EmptyParams) => "session_pane.focus", true, true;
     SessionPaneUnfocus(EmptyParams) => "session_pane.unfocus", true, true;
     PopupOpen(PopupOpenParams) => "popup.open", true, false;
+    SessionPaneSetWidth(SessionPaneSetWidthParams) => "session_pane.set_width", true, true;
 }
 
 #[cfg(test)]

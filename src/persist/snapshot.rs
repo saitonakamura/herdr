@@ -31,6 +31,9 @@ pub struct SessionSnapshot {
         skip_serializing_if = "crate::app::messages::MessageStore::is_empty"
     )]
     pub messages: crate::app::messages::MessageStore,
+    /// Expanded session pane width a client set by dragging (fork-only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_pane_width: Option<u16>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -226,6 +229,8 @@ struct RawSessionSnapshot {
     collapsed_space_keys: std::collections::HashSet<String>,
     #[serde(default)]
     messages: crate::app::messages::MessageStore,
+    #[serde(default)]
+    session_pane_width: Option<u16>,
 }
 
 fn migrate_snapshot(raw: RawSessionSnapshot) -> Result<SessionSnapshot, String> {
@@ -242,6 +247,7 @@ fn migrate_snapshot(raw: RawSessionSnapshot) -> Result<SessionSnapshot, String> 
         sidebar_section_split: raw.sidebar_section_split,
         collapsed_space_keys: raw.collapsed_space_keys,
         messages: raw.messages,
+        session_pane_width: raw.session_pane_width,
     })
 }
 
@@ -314,6 +320,7 @@ pub fn capture(
         sidebar_section_split: None,
         collapsed_space_keys: std::collections::HashSet::new(),
         messages: Default::default(),
+        session_pane_width: None,
     }
 }
 
@@ -458,9 +465,11 @@ pub(super) fn layout_fingerprint(snapshot: &SessionSnapshot) -> Option<String> {
     let mut collapsed: Vec<_> = snapshot.collapsed_space_keys.iter().collect();
     collapsed.sort_unstable();
     value["collapsed_space_keys"] = serde_json::to_value(collapsed).ok()?;
-    // Messages are not layout; a message arriving must not orphan saved pane history.
+    // Messages and the session pane width are not layout; neither may orphan saved
+    // pane history.
     if let Some(object) = value.as_object_mut() {
         object.remove("messages");
+        object.remove("session_pane_width");
     }
     let bytes = serde_json::to_vec(&value).ok()?;
     Some(format!("{:x}", Sha256::digest(bytes)))
@@ -735,6 +744,28 @@ mod tests {
     }
 
     #[test]
+    fn session_pane_width_round_trips_and_leaves_the_layout_fingerprint_alone() {
+        let mut snapshot = parse_snapshot(include_str!(
+            "../../tests/fixtures/session/current-herdr-session.json"
+        ))
+        .unwrap();
+        assert_eq!(snapshot.session_pane_width, None);
+        let unset = layout_fingerprint(&snapshot).unwrap();
+        assert!(!serde_json::to_string(&snapshot)
+            .unwrap()
+            .contains("session_pane_width"));
+
+        snapshot.session_pane_width = Some(31);
+        let restored = parse_snapshot(&serde_json::to_string(&snapshot).unwrap()).unwrap();
+
+        assert_eq!(restored.session_pane_width, Some(31));
+        assert_eq!(
+            layout_fingerprint(&restored).as_deref(),
+            Some(unset.as_str())
+        );
+    }
+
+    #[test]
     fn round_trip_empty_session() {
         let snap = SessionSnapshot {
             version: SNAPSHOT_VERSION,
@@ -745,6 +776,7 @@ mod tests {
             sidebar_section_split: Some(0.5),
             collapsed_space_keys: std::collections::HashSet::new(),
             messages: Default::default(),
+            session_pane_width: None,
         };
         let json = serde_json::to_string(&snap).unwrap();
         let restored = parse_snapshot(&json).unwrap();
@@ -855,6 +887,7 @@ mod tests {
             sidebar_section_split: Some(0.5),
             collapsed_space_keys: std::collections::HashSet::new(),
             messages: Default::default(),
+            session_pane_width: None,
             version: SNAPSHOT_VERSION,
         };
 
@@ -1686,6 +1719,7 @@ mod tests {
             sidebar_section_split: Some(0.5),
             collapsed_space_keys: std::collections::HashSet::new(),
             messages: Default::default(),
+            session_pane_width: None,
         };
 
         let json = serde_json::to_string(&snap).unwrap();

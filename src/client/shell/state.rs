@@ -193,6 +193,7 @@ pub(super) struct ClientTabPress {
 
 pub(super) enum ClientChromeDrag {
     SidebarWidth,
+    SessionPaneWidth,
     SidebarSection,
     WorkspaceScrollbar {
         grab_row_offset: u16,
@@ -665,6 +666,7 @@ pub(super) enum PendingEndpointKind {
     PaneLinkResolve {
         target: super::link_hover::LinkHoverTarget,
     },
+    SessionPaneWidth,
     PaneLinkActivate {
         pane_id: String,
         inner_rect: Rect,
@@ -882,6 +884,9 @@ pub(crate) struct ClientShellState {
     pub(super) popup_terminal_id: Option<String>,
     /// Last session pane slot size reported to the endpoint.
     pub(super) session_pane_slot_sent: Option<(u16, u16)>,
+    /// Expanded session pane width drawn while a drag or its request is in flight;
+    /// the endpoint's next update replaces it.
+    pub(super) session_pane_width_preview: Option<u16>,
     pub(super) sidebar_collapsed: bool,
     pub(super) sidebar_collapsed_manual: bool,
     pub(super) sidebar_width: u16,
@@ -1061,6 +1066,7 @@ impl ClientShellState {
             },
             popup_terminal_id: None,
             session_pane_slot_sent: None,
+            session_pane_width_preview: None,
             sidebar_collapsed,
             sidebar_collapsed_manual: preferences.sidebar_collapsed.is_some(),
             sidebar_width,

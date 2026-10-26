@@ -75,7 +75,7 @@ impl RenderPipeline {
     }
 
     fn with_session_pane(mut self) -> Self {
-        let width = self.app.state.session_pane.config.width;
+        let width = self.app.state.session_pane.width();
         self.app
             .install_test_session_pane(TerminalRuntime::test_with_screen_bytes(width, ROWS, b""));
         self.session_pane_redraws = Some(0);
@@ -90,7 +90,7 @@ impl RenderPipeline {
             return (Duration::ZERO, Duration::ZERO);
         };
         *redraws += 1;
-        let width = usize::from(self.app.state.session_pane.config.width);
+        let width = usize::from(self.app.state.session_pane.width());
         let frame: String = (0..ROWS)
             .map(|row| {
                 format!(

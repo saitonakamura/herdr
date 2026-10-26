@@ -266,6 +266,10 @@ mod tests {
             actual.remove("session_pane.unfocus").as_deref(),
             Some("ca81b98048a384cccc88e08b74ae7b4ad720e6909cf59887904ba74bedb00ff0")
         );
+        assert_eq!(
+            actual.remove("session_pane.set_width").as_deref(),
+            Some("81b8e1b783d15735a3ba1fe6507a780a7e77c68791bae1bd641db81e548a4f9c")
+        );
 
         assert_eq!(
             actual, expected,

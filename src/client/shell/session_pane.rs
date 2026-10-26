@@ -4,6 +4,8 @@
 use super::*;
 use crate::protocol::session_pane::{SessionPaneSlot, SessionPaneUpdate, SessionPaneView};
 
+const SET_WIDTH_METHOD: &str = "session_pane.set_width";
+
 impl ClientShellState {
     /// The session pane this shell draws, if any.
     pub(super) fn session_pane_view(&self) -> Option<&SessionPaneView> {
@@ -12,8 +14,100 @@ impl ClientShellState {
 
     /// Expanded and collapsed widths of the session pane, for the layout.
     pub(super) fn session_pane_widths(&self) -> Option<(u16, u16)> {
-        self.session_pane_view()
-            .map(|view| (view.width.max(1), view.collapsed_width.max(1)))
+        self.session_pane_view().map(|view| {
+            let expanded = self.session_pane_width_preview.unwrap_or(view.width);
+            (expanded.max(1), view.collapsed_width.max(1))
+        })
+    }
+
+    /// Whether the endpoint lets the divider set the pane's width. A server without
+    /// the method keeps the divider still and shows no notice.
+    pub(super) fn session_pane_resizable(&self) -> bool {
+        self.session_pane_view().is_some()
+            && self
+                .endpoints
+                .iter()
+                .find(|endpoint| endpoint.endpoint_id == self.active_endpoint_id)
+                .and_then(|endpoint| endpoint.methods.as_ref())
+                .is_some_and(|methods| methods.iter().any(|method| method == SET_WIDTH_METHOD))
+    }
+
+    /// Starts a divider drag, or on a double-click goes back to the configured width.
+    pub(super) fn press_session_pane_divider(
+        &mut self,
+        column: u16,
+        double_click: bool,
+        outcome: &mut ClientShellInput,
+    ) {
+        if double_click {
+            self.preview_session_pane_width(self.config.sidebar_width, outcome);
+            self.push_endpoint_method_with_kind(
+                crate::api::schema::Method::SessionPaneSetWidth(
+                    crate::api::schema::SessionPaneSetWidthParams { width: None },
+                ),
+                PendingEndpointKind::SessionPaneWidth,
+                outcome,
+            );
+        } else {
+            self.chrome_drag = Some(ClientChromeDrag::SessionPaneWidth);
+            self.drag_session_pane_divider(column, outcome);
+        }
+    }
+
+    pub(super) fn drag_session_pane_divider(
+        &mut self,
+        column: u16,
+        outcome: &mut ClientShellInput,
+    ) {
+        self.preview_session_pane_width(column.saturating_add(1), outcome);
+    }
+
+    /// Asks the endpoint for the dragged width, which every client then follows.
+    pub(super) fn release_session_pane_divider(&mut self, outcome: &mut ClientShellInput) {
+        let Some(width) = self.session_pane_width_preview else {
+            return;
+        };
+        if self
+            .session_pane_view()
+            .is_some_and(|view| view.width == width)
+        {
+            self.session_pane_width_preview = None;
+            return;
+        }
+        self.push_endpoint_method_with_kind(
+            crate::api::schema::Method::SessionPaneSetWidth(
+                crate::api::schema::SessionPaneSetWidthParams { width: Some(width) },
+            ),
+            PendingEndpointKind::SessionPaneWidth,
+            outcome,
+        );
+    }
+
+    fn preview_session_pane_width(&mut self, width: u16, outcome: &mut ClientShellInput) {
+        let (min, max) = crate::config::validated_sidebar_bounds(
+            self.config.sidebar_min_width,
+            self.config.sidebar_max_width,
+        )
+        .unwrap_or((18, 36));
+        let width = width.clamp(min, max);
+        let Some((current, _)) = self.session_pane_widths() else {
+            return;
+        };
+        self.session_pane_width_preview = Some(width);
+        if current != width {
+            self.invalidate_pane_surface();
+            outcome.repaint = true;
+            outcome.resize = true;
+        }
+    }
+
+    /// A drag or its request still owns the width, so updates must not replace it.
+    fn session_pane_width_held(&self) -> bool {
+        matches!(self.chrome_drag, Some(ClientChromeDrag::SessionPaneWidth))
+            || self
+                .pending_requests
+                .values()
+                .any(|pending| matches!(pending.kind, PendingEndpointKind::SessionPaneWidth))
     }
 
     /// Whether the session pane holds keyboard focus and this shell shows it.
@@ -76,6 +170,7 @@ impl ClientShellState {
         endpoint.session_pane_origin = None;
         if endpoint.endpoint_id == self.active_endpoint_id {
             self.session_pane_slot_sent = None;
+            self.session_pane_width_preview = None;
         }
     }
 
@@ -90,6 +185,11 @@ impl ClientShellState {
     ) -> (bool, bool) {
         let previous_size = self.surface_size(cols, rows);
         let active = endpoint_id == &self.active_endpoint_id;
+        // Once no drag or request holds it, the endpoint's width replaces the preview.
+        let preview_done = active
+            && update.pane.is_some()
+            && self.session_pane_width_preview.is_some()
+            && !self.session_pane_width_held();
         let Some(endpoint) = self
             .endpoints
             .iter_mut()
@@ -105,10 +205,13 @@ impl ClientShellState {
                 self.session_pane_slot_sent = None;
             }
         }
-        if endpoint.session_pane == update.pane {
+        if endpoint.session_pane == update.pane && !preview_done {
             return (false, false);
         }
         endpoint.session_pane = update.pane;
+        if preview_done || self.session_pane_view().is_none() {
+            self.session_pane_width_preview = None;
+        }
         // Only a new size makes the endpoint send a new surface to replace a stale one.
         let resized = self.surface_size(cols, rows) != previous_size;
         if resized {
@@ -124,7 +227,7 @@ impl ClientShellState {
         rows: u16,
     ) -> Option<crate::protocol::ClientMessage> {
         self.session_pane_view()?;
-        let slot = self.layout(cols, rows).sidebar;
+        let slot = session_pane_slot(self.layout(cols, rows).sidebar, self.sidebar_collapsed);
         let size = (slot.width, slot.height);
         if self.session_pane_slot_sent == Some(size) {
             return None;
@@ -136,6 +239,27 @@ impl ClientShellState {
         })
         .ok()
     }
+}
+
+/// The part of the sidebar slot the pane gets. Expanded, the last column is the
+/// divider, as in the native sidebar.
+pub(super) fn session_pane_slot(sidebar: Rect, collapsed: bool) -> Rect {
+    if collapsed || sidebar.width < 2 {
+        return sidebar;
+    }
+    Rect {
+        width: sidebar.width - 1,
+        ..sidebar
+    }
+}
+
+/// The divider column beside an expanded session pane, if it has one.
+pub(super) fn session_pane_divider(sidebar: Rect, collapsed: bool) -> Rect {
+    let slot = session_pane_slot(sidebar, collapsed);
+    if slot == sidebar {
+        return Rect::default();
+    }
+    Rect::new(slot.right(), sidebar.y, 1, sidebar.height)
 }
 
 /// The session pane a shell with these endpoints draws, if any.

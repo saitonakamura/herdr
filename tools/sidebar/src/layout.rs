@@ -180,16 +180,23 @@ fn header_line(
     let arrow = if header.collapsed { "▸" } else { "▾" };
     let toggle = Target::ToggleSection(header.workspace_id.clone());
     let focus = Target::FocusWorkspace(header.workspace_id.clone());
-    let bold = Style::default().add_modifier(Modifier::BOLD);
+    let label_style = if header.focused {
+        Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+    } else {
+        Style::default()
+    };
     if narrow {
         return Line {
             spans: vec![
                 Span {
                     text: arrow.into(),
-                    style: bold,
+                    style: Style::default(),
                     target: Some(toggle),
                 },
-                span(cut(&header.label, (width as usize).saturating_sub(1)), bold),
+                span(
+                    cut(&header.label, (width as usize).saturating_sub(1)),
+                    label_style,
+                ),
             ],
             key,
             target: Some(focus),
@@ -207,15 +214,10 @@ fn header_line(
         })
         .collect();
     let counts_width: usize = counts.iter().map(|s| s.text.width()).sum();
-    let label_style = if header.focused {
-        bold.add_modifier(Modifier::UNDERLINED)
-    } else {
-        bold
-    };
     let mut spans = vec![
         Span {
             text: format!("{arrow} "),
-            style: bold,
+            style: Style::default(),
             target: Some(toggle),
         },
         span(header.label.clone(), label_style),
@@ -256,6 +258,20 @@ fn guides_text(agent: &AgentItem) -> String {
     out
 }
 
+// only the focused row is bold: underline alone is too faint to find
+fn name_style(agent: &AgentItem) -> Style {
+    let style = if agent.failed {
+        Style::default().fg(Color::Red)
+    } else {
+        Style::default()
+    };
+    if agent.focused {
+        style.add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+    } else {
+        style
+    }
+}
+
 fn agent_lines(agent: &AgentItem, width: u16, config: &Config, key: String) -> Vec<Line> {
     let width = width as usize;
     let muted = fg(Some(config.muted));
@@ -274,13 +290,7 @@ fn agent_lines(agent: &AgentItem, width: u16, config: &Config, key: String) -> V
     }
     let lead_width: usize = lead.iter().map(|s| s.text.width()).sum();
 
-    let name_style = if agent.failed {
-        Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
-    } else if agent.focused {
-        Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
-    } else {
-        Style::default().add_modifier(Modifier::BOLD)
-    };
+    let name_style = name_style(agent);
 
     // (token, span); `name` is always kept and cut last.
     let mut tokens: Vec<(&str, Span)> = Vec::new();
@@ -452,11 +462,7 @@ fn narrow_agent_line(agent: &AgentItem, width: u16, config: &Config, key: String
     let state = config.glyphs.get(agent.meaning);
     let indent = " ".repeat(agent.depth);
     let room = (width as usize).saturating_sub(indent.width() + state.text.width());
-    let style = if agent.failed {
-        Style::default().fg(Color::Red)
-    } else {
-        Style::default()
-    };
+    let style = name_style(agent);
     let name: String = {
         let mut out = String::new();
         let mut used = 0;
@@ -558,6 +564,46 @@ mod tests {
         };
         assert_eq!(root(40), 2);
         assert_eq!(root(16), 1);
+    }
+
+    #[test]
+    fn only_the_focused_workspace_and_agent_are_bold() {
+        let mut snapshot = snapshot();
+        snapshot.workspaces[0].focused = true;
+        for pane in &mut snapshot.panes {
+            pane.focused = pane.pane_id == "w1:p3";
+        }
+        let extras = Extras::default();
+        let items = build(&Inputs {
+            snapshot: &snapshot,
+            extras: &extras,
+            ui: &UiState::default(),
+            search: None,
+        });
+        let focused: Vec<String> = items
+            .iter()
+            .filter(|item| match item {
+                Item::Header(h) => h.focused,
+                Item::Agent(a) => a.focused,
+                _ => false,
+            })
+            .map(Item::key)
+            .collect();
+        assert_eq!(focused, ["ws:w1", "pane:w1:p3"]);
+        for width in [10, 40] {
+            let mut bold: Vec<String> = lines(&items, width, &unicode())
+                .into_iter()
+                .filter(|l| {
+                    l.spans
+                        .iter()
+                        .any(|s| s.style.add_modifier.contains(Modifier::BOLD))
+                })
+                .map(|l| l.key)
+                .collect();
+            // a wide agent row spans two lines under one key
+            bold.dedup();
+            assert_eq!(bold, focused, "width {width}");
+        }
     }
 
     #[test]

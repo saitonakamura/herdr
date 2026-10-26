@@ -4070,6 +4070,58 @@ fn client_shell_host_theme_follows_foreground_client() {
 }
 
 #[test]
+fn client_shell_flip_background_before_report_keeps_the_explicit_appearance() {
+    let mut server = test_headless_server();
+    server.clients.insert(
+        1,
+        ClientConnection::new(
+            (80, 24),
+            crate::kitty_graphics::HostCellSize::default(),
+            1,
+            RenderEncoding::SemanticFrame,
+            None,
+        ),
+    );
+    server.foreground_client_id = Some(1);
+    let background = |r, g, b| ServerEvent::ClientShellHostTheme {
+        client_id: 1,
+        update: protocol::ClientHostThemeUpdate::DefaultColor {
+            kind: protocol::ClientHostDefaultColorKind::Background,
+            color: protocol::ClientHostColor { r, g, b },
+        },
+    };
+    let appearance = |appearance| ServerEvent::ClientShellHostTheme {
+        client_id: 1,
+        update: protocol::ClientHostThemeUpdate::Appearance(appearance),
+    };
+    server.handle_server_event(appearance(protocol::ClientHostAppearance::Dark));
+    server.handle_server_event(background(26, 27, 38));
+
+    // A flip to light: the client sends the new background first, then the report.
+    assert!(server.handle_server_event(background(225, 226, 231)));
+    assert_eq!(
+        server.app.state.host_terminal_theme.background,
+        Some(crate::terminal_theme::RgbColor {
+            r: 225,
+            g: 226,
+            b: 231
+        })
+    );
+    assert_eq!(
+        server.app.state.host_terminal_appearance,
+        Some(crate::terminal_theme::HostAppearance::Dark)
+    );
+    assert!(server.app.state.host_terminal_appearance_explicit);
+
+    server.handle_server_event(appearance(protocol::ClientHostAppearance::Light));
+    assert_eq!(
+        server.app.state.host_terminal_appearance,
+        Some(crate::terminal_theme::HostAppearance::Light)
+    );
+    assert!(server.app.state.host_terminal_appearance_explicit);
+}
+
+#[test]
 fn terminal_clients_store_known_cell_geometry_independently_of_pixel_mouse() {
     let mut server = test_headless_server();
 

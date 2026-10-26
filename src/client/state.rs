@@ -182,6 +182,24 @@ impl ClientState {
         self.host_theme_updates.push(update.clone());
     }
 
+    /// The retained updates in replay order: colours before the appearance, so panes that
+    /// re-query their colours on the appearance report are answered with the replayed ones.
+    pub(super) fn host_theme_replay(
+        &self,
+    ) -> impl Iterator<Item = &crate::protocol::ClientHostThemeUpdate> {
+        let is_appearance = |update: &&crate::protocol::ClientHostThemeUpdate| {
+            matches!(
+                update,
+                crate::protocol::ClientHostThemeUpdate::Appearance(_)
+            )
+        };
+        let colors = self
+            .host_theme_updates
+            .iter()
+            .filter(move |u| !is_appearance(u));
+        colors.chain(self.host_theme_updates.iter().filter(is_appearance))
+    }
+
     /// Replay the retained physical-host baseline only after an endpoint owns the committed
     /// presentation. The endpoint transport preserves this order ahead of the resync control.
     pub(super) fn replay_host_theme(
@@ -189,7 +207,7 @@ impl ClientState {
         endpoints: &mut endpoint::EndpointRegistry,
         endpoint_id: &endpoint::ClientEndpointId,
     ) {
-        for update in &self.host_theme_updates {
+        for update in self.host_theme_replay() {
             let _ = endpoints.send_to(
                 endpoint_id,
                 &crate::protocol::ClientMessage::ClientShellHostTheme {

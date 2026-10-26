@@ -4,6 +4,9 @@ pub(super) const MIN_TAB_WIDTH: u16 = 8;
 pub(super) const NEW_TAB_WIDTH: u16 = 3;
 pub(super) const WORKSPACE_HEADER_ROWS: u16 = 2;
 const ENDPOINT_ERROR_TIMEOUT_SECS: u64 = 5;
+// Hosts answer the background query within ~50ms; past this the report goes out alone.
+pub(super) const HELD_HOST_APPEARANCE_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_millis(250);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ClientShellKeybindingSource {
@@ -963,6 +966,10 @@ pub(crate) struct ClientShellState {
     pub(super) pending_input_source_changes: Vec<bool>,
     pub(super) host_appearance: Option<crate::terminal_theme::HostAppearance>,
     pub(super) host_appearance_explicit: bool,
+    /// An appearance report not yet sent to the server, with its send-anyway deadline. Panes
+    /// re-query their colours on the report, so it follows the host's new background.
+    pub(super) held_host_appearance:
+        Option<(crate::protocol::ClientHostAppearance, std::time::Instant)>,
     pub(super) host_background: Option<crate::terminal_theme::RgbColor>,
     pub(super) local_config_diagnostic: Option<String>,
     pub(super) config_diagnostic: Option<String>,
@@ -1132,6 +1139,7 @@ impl ClientShellState {
             pending_input_source_changes: Vec::new(),
             host_appearance: None,
             host_appearance_explicit: false,
+            held_host_appearance: None,
             host_background: None,
             config_diagnostic: local_config_diagnostic.clone(),
             local_config_diagnostic,
@@ -1890,11 +1898,28 @@ impl ClientShellState {
         false
     }
 
+    /// Send a held appearance report whose host never answered the background query.
+    pub(crate) fn tick_held_host_appearance(
+        &mut self,
+        now: std::time::Instant,
+        requests: &mut Vec<ClientMessage>,
+    ) {
+        if let Some((appearance, _)) = self
+            .held_host_appearance
+            .take_if(|(_, deadline)| now >= *deadline)
+        {
+            requests.push(ClientMessage::ClientShellHostTheme {
+                update: crate::protocol::ClientHostThemeUpdate::Appearance(appearance),
+            });
+        }
+    }
+
     pub(crate) fn timer_delay(&self, now: std::time::Instant) -> std::time::Duration {
         let default = std::time::Duration::from_millis(100);
         self.selection_autoscroll_deadline
             .into_iter()
             .chain(self.selection_repaint_deadline)
+            .chain(self.held_host_appearance.map(|(_, deadline)| deadline))
             .min()
             .map(|deadline| deadline.saturating_duration_since(now).min(default))
             .unwrap_or(default)

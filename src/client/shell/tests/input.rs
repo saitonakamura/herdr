@@ -44,14 +44,7 @@ fn host_appearance_prefers_explicit_reports_over_background_inference() {
     )]);
     assert!(explicit.repaint);
     assert!(explicit.query_host_theme);
-    assert!(matches!(
-        explicit.requests.as_slice(),
-        [ClientMessage::ClientShellHostTheme {
-            update: crate::protocol::ClientHostThemeUpdate::Appearance(
-                crate::protocol::ClientHostAppearance::Dark
-            )
-        }]
-    ));
+    assert!(explicit.requests.is_empty());
     assert_eq!(
         state.host_appearance,
         Some(crate::terminal_theme::HostAppearance::Dark)
@@ -68,12 +61,112 @@ fn host_appearance_prefers_explicit_reports_over_background_inference() {
         },
     }]);
     assert!(!ignored.repaint);
-    assert_eq!(ignored.requests.len(), 1);
+    // The background releases the held report after it, and the report still wins.
+    assert!(matches!(
+        ignored.requests.as_slice(),
+        [
+            ClientMessage::ClientShellHostTheme {
+                update: crate::protocol::ClientHostThemeUpdate::DefaultColor {
+                    kind: crate::protocol::ClientHostDefaultColorKind::Background,
+                    ..
+                }
+            },
+            ClientMessage::ClientShellHostTheme {
+                update: crate::protocol::ClientHostThemeUpdate::Appearance(
+                    crate::protocol::ClientHostAppearance::Dark
+                )
+            }
+        ]
+    ));
     assert_eq!(
         state.host_appearance,
         Some(crate::terminal_theme::HostAppearance::Dark)
     );
     assert_eq!(state.config.palette, dark);
+}
+
+fn host_theme_kinds(requests: &[ClientMessage]) -> Vec<&'static str> {
+    use crate::protocol::{
+        ClientHostAppearance, ClientHostDefaultColorKind, ClientHostThemeUpdate,
+    };
+    requests
+        .iter()
+        .map(|request| match request {
+            ClientMessage::ClientShellHostTheme { update } => match update {
+                ClientHostThemeUpdate::DefaultColor {
+                    kind: ClientHostDefaultColorKind::Foreground,
+                    ..
+                } => "fg",
+                ClientHostThemeUpdate::DefaultColor {
+                    kind: ClientHostDefaultColorKind::Background,
+                    ..
+                } => "bg",
+                ClientHostThemeUpdate::PaletteColors(_) => "palette",
+                ClientHostThemeUpdate::Appearance(ClientHostAppearance::Dark) => "dark",
+                ClientHostThemeUpdate::Appearance(ClientHostAppearance::Light) => "light",
+            },
+            _ => "other",
+        })
+        .collect()
+}
+
+#[test]
+fn host_appearance_report_follows_the_background_reply() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+
+    let report = state.handle_input_bytes(b"\x1b[?997;2n");
+    assert!(report.query_host_theme);
+    assert!(host_theme_kinds(&report.requests).is_empty());
+
+    let replies = state.handle_input_bytes(
+        b"\x1b]10;rgb:3737/6060/bfbf\x1b\\\x1b]11;rgb:e1e1/e2e2/e7e7\x1b\\\x1b]4;0;rgb:0000/0000/0000\x1b\\",
+    );
+    assert_eq!(
+        host_theme_kinds(&replies.requests),
+        ["fg", "bg", "light", "palette"]
+    );
+    assert!(state.held_host_appearance.is_none());
+
+    let later = state.handle_input_bytes(b"\x1b]11;rgb:e1e1/e2e2/e7e7\x1b\\");
+    assert_eq!(host_theme_kinds(&later.requests), ["bg"]);
+}
+
+#[test]
+fn host_appearance_report_and_reply_in_one_read_keep_the_order() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+
+    let outcome = state.handle_input_bytes(b"\x1b[?997;1n\x1b]11;rgb:1a1a/1b1b/2626\x1b\\");
+
+    assert_eq!(host_theme_kinds(&outcome.requests), ["bg", "dark"]);
+}
+
+#[test]
+fn held_host_appearance_is_sent_alone_after_the_timeout() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let before = std::time::Instant::now();
+    state.handle_input_bytes(b"\x1b[?997;1n");
+    let (_, deadline) = state.held_host_appearance.expect("report is held");
+    assert!(deadline >= before + super::state::HELD_HOST_APPEARANCE_TIMEOUT);
+    assert!(
+        state.timer_delay(deadline - std::time::Duration::from_millis(30))
+            <= std::time::Duration::from_millis(30)
+    );
+
+    let mut requests = Vec::new();
+    state.tick_held_host_appearance(
+        deadline - std::time::Duration::from_millis(1),
+        &mut requests,
+    );
+    assert!(requests.is_empty());
+
+    // A second report while held keeps the first deadline and sends the newest side.
+    state.handle_input_bytes(b"\x1b[?997;2n");
+    state.tick_held_host_appearance(deadline, &mut requests);
+    assert_eq!(host_theme_kinds(&requests), ["light"]);
+    assert!(state.held_host_appearance.is_none());
+
+    let late = state.handle_input_bytes(b"\x1b]11;rgb:e1e1/e2e2/e7e7\x1b\\");
+    assert_eq!(host_theme_kinds(&late.requests), ["bg"]);
 }
 
 #[test]

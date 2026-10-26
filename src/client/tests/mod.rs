@@ -961,3 +961,33 @@ fn terminal_control_scroll_command_maps_to_attach_scroll() {
     assert_eq!(direction, AttachScrollDirection::Up);
     assert_eq!(lines, 3);
 }
+
+#[test]
+fn host_theme_replay_sends_colours_before_the_appearance() {
+    use crate::protocol::{
+        ClientHostAppearance, ClientHostColor, ClientHostDefaultColorKind, ClientHostThemeUpdate,
+    };
+
+    let color = |kind| ClientHostThemeUpdate::DefaultColor {
+        kind,
+        color: ClientHostColor { r: 1, g: 2, b: 3 },
+    };
+    let mut state = ClientState::test_new();
+    state.record_host_theme_update(&color(ClientHostDefaultColorKind::Background));
+    state.record_host_theme_update(&ClientHostThemeUpdate::Appearance(
+        ClientHostAppearance::Light,
+    ));
+    // A later re-query, a resize say, retains a background recorded after the appearance.
+    state.record_host_theme_update(&color(ClientHostDefaultColorKind::Background));
+    state.record_host_theme_update(&color(ClientHostDefaultColorKind::Foreground));
+
+    let replay = state.host_theme_replay().cloned().collect::<Vec<_>>();
+    assert_eq!(
+        replay,
+        [
+            color(ClientHostDefaultColorKind::Background),
+            color(ClientHostDefaultColorKind::Foreground),
+            ClientHostThemeUpdate::Appearance(ClientHostAppearance::Light),
+        ]
+    );
+}

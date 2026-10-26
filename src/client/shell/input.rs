@@ -91,6 +91,40 @@ fn push_host_theme_update(
 }
 
 impl ClientShellState {
+    /// Hold an appearance report until the host's background reply has been queued after it,
+    /// so a pane re-querying `OSC 11` on the report is answered with the new colour.
+    fn queue_host_theme_update(
+        &mut self,
+        update: crate::protocol::ClientHostThemeUpdate,
+        requests: &mut Vec<ClientMessage>,
+    ) {
+        use crate::protocol::{ClientHostDefaultColorKind, ClientHostThemeUpdate};
+
+        if let ClientHostThemeUpdate::Appearance(appearance) = update {
+            let deadline = self.held_host_appearance.map_or_else(
+                || std::time::Instant::now() + super::state::HELD_HOST_APPEARANCE_TIMEOUT,
+                |(_, deadline)| deadline,
+            );
+            self.held_host_appearance = Some((appearance, deadline));
+            return;
+        }
+        let releases_appearance = matches!(
+            update,
+            ClientHostThemeUpdate::DefaultColor {
+                kind: ClientHostDefaultColorKind::Background,
+                ..
+            }
+        );
+        push_host_theme_update(requests, update);
+        if releases_appearance {
+            if let Some((appearance, _)) = self.held_host_appearance.take() {
+                requests.push(ClientMessage::ClientShellHostTheme {
+                    update: ClientHostThemeUpdate::Appearance(appearance),
+                });
+            }
+        }
+    }
+
     pub(crate) fn host_keyboard_report_all_requested(&self) -> bool {
         matches!(
             self.mode,
@@ -238,7 +272,7 @@ impl ClientShellState {
                 continue;
             }
             if let Some(update) = host_theme_update(&event) {
-                push_host_theme_update(&mut outcome.requests, update);
+                self.queue_host_theme_update(update, &mut outcome.requests);
             }
             match event {
                 RawInputEvent::Key(key) => {

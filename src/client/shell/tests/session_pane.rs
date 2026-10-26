@@ -110,6 +110,11 @@ fn session_pane_replaces_the_native_sidebar_and_disables_its_divider() {
     assert_eq!(hit.rect, Rect::new(0, 0, 19, 20));
     assert_eq!(state.hits.sidebar_divider, Rect::default());
     assert_eq!(frame.cells[19].symbol, "│");
+    // drawn in the pane-split colour, which no theme sets to its background
+    assert_eq!(
+        frame.cells[19].fg,
+        crate::protocol::color_to_u32(state.config.palette.overlay0)
+    );
     assert!(state.hits.workspaces.is_empty());
     // Unfocused, the cursor stays the focused pane's.
     assert_ne!(

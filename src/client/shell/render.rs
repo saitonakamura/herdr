@@ -30,10 +30,11 @@ pub(in crate::client::shell) fn render_sidebar_background(
 
 fn render_session_pane_divider(buffer: &mut Buffer, area: Rect, palette: &Palette) {
     // No background: the program and the panes on either side keep their own.
+    // overlay0 like pane splits: several themes set surface_dim to their background.
     for y in area.y..area.bottom() {
         if let Some(cell) = buffer.cell_mut((area.x, y)) {
             cell.set_symbol("│");
-            cell.set_style(Style::default().fg(palette.surface_dim));
+            cell.set_style(Style::default().fg(palette.overlay0));
         }
     }
 }

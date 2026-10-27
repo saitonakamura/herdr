@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-batched-delivery
 title: Deliver a recipient's message backlog as one block at idle
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee: saitonakamura
-claimed_by:
+claimed_by: macos/w1:p19/5cd44401-169b-4d9e-9046-9a04b6182059
 ---
 
 ## Question

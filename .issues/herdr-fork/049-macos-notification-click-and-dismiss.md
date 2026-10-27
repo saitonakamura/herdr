@@ -63,3 +63,29 @@ dismissal.
 ## Parent
 
 [000-map](./000-map.md)
+
+## Resolution
+
+Draft until [PR #37](https://github.com/saitonakamura/herdr/pull/37) merges.
+
+- **Helper: terminal-notifier 3.x**, through `-execute`, not a waiting process.
+  Tested on macOS 26.6 with 3.1.0. macOS hands a click to whichever
+  terminal-notifier instance is running, and that instance acts on it as its own
+  (no identity check in `AppDelegate.m`), so one waiting helper per notification
+  routes clicks to the wrong one. A body click with `-activate` never reaches
+  stdout either. `-execute` rides in the notification's `userInfo`, so the
+  clicked notification's own command runs: it sends the group to
+  `$TMPDIR/herdr-notify-<pid>.sock`, which the client that posted listens on.
+  `-group` replaces, `-remove` clears, and `-activate` still raises kitty when the
+  client is gone. alerter is only in its author's tap and has the same routing.
+- **Click** reuses the Windows target and `activate_system_notification`, now
+  built on every platform.
+- **Dismiss**: the client removes a notification when the pane's tab is seen
+  with the outer terminal focused, when the agent leaves blocked/done, or when
+  the pane or its server is gone. Live-verified in a throwaway session for click,
+  blocked→working, done→seen and pane close.
+- **Permission**: on the primary mac terminal-notifier never prompted; it exited 3
+  until allowed in System Settings. That is in the dotfiles `docs/setup/herdr.md`.
+- **Dotfiles**: branch `herdr-fork/049-mac-notify` (Brewfile, `config.toml`
+  comment, `docs/setup/herdr.md`, tickets 011 primary — installed during this
+  ticket — and 012 music).

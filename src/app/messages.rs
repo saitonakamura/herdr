@@ -125,10 +125,12 @@ impl MessageStore {
             .collect()
     }
 
-    pub(crate) fn oldest_pending_for(&self, to: &AgentId) -> Option<&Message> {
+    /// The recipient's pending messages, oldest first.
+    pub(crate) fn pending_for(&self, to: &AgentId) -> Vec<&Message> {
         self.messages
             .iter()
-            .find(|message| message.is_pending() && &message.to == to)
+            .filter(|message| message.is_pending() && &message.to == to)
+            .collect()
     }
 
     pub(crate) fn mark_delivered(&mut self, id: u64, at_ms: u64) -> Option<&Message> {
@@ -191,29 +193,94 @@ pub(crate) enum WithdrawError {
     Delivered,
 }
 
-/// The one line typed into the recipient's pane.
-pub(crate) fn delivery_line(message: &Message) -> String {
+/// Past this many pending messages, a delivery is one line pointing at the list.
+pub(crate) const DELIVERY_BLOCK_LIMIT: usize = 5;
+
+/// The lines typed into the recipient's pane for its pending messages, oldest first: one line
+/// each, under a header when there are several, or past `DELIVERY_BLOCK_LIMIT` a single pointer.
+pub(crate) fn delivery_block(messages: &[&Message], to: &AgentId, now_ms: u64) -> Vec<String> {
+    match messages {
+        [] => Vec::new(),
+        [message] => vec![delivery_line(message, now_ms)],
+        _ if messages.len() > DELIVERY_BLOCK_LIMIT => vec![pointer_line(messages, to, now_ms)],
+        _ => std::iter::once(format!(
+            "[herdr] {} messages, oldest first:",
+            messages.len()
+        ))
+        .chain(
+            messages
+                .iter()
+                .map(|message| delivery_line(message, now_ms)),
+        )
+        .collect(),
+    }
+}
+
+/// One message's line: sender, summary, kind, queue age and where the rest is.
+fn delivery_line(message: &Message, now_ms: u64) -> String {
     const SUMMARY_LIMIT: usize = 240;
-    let summary = message
-        .summary
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
+    let summary = one_line(&message.summary);
     let summary = if summary.chars().count() > SUMMARY_LIMIT {
         let cut: String = summary.chars().take(SUMMARY_LIMIT - 1).collect();
         format!("{}…", cut.trim_end())
     } else {
         summary
     };
-    let from = message
-        .from_name
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
+    let kind = match (message.kind, message.reply_to) {
+        (MessageKind::Reply, Some(reply_to)) => format!("reply to {reply_to}"),
+        (MessageKind::Reply, None) => "reply".to_owned(),
+        (MessageKind::Report, _) => "report".to_owned(),
+        (MessageKind::Tell, _) => "tell".to_owned(),
+    };
     format!(
-        "[from {from}] {summary} (herdr message show {})",
+        "[from {}] {summary} ({kind}, {}, herdr message show {})",
+        one_line(&message.from_name),
+        age(message.sent_at_ms, now_ms),
         message.id
     )
+}
+
+fn pointer_line(messages: &[&Message], to: &AgentId, now_ms: u64) -> String {
+    const NAMED_SENDERS: usize = 4;
+    let mut senders: Vec<String> = Vec::new();
+    for message in messages {
+        let name = one_line(&message.from_name);
+        if !senders.contains(&name) {
+            senders.push(name);
+        }
+    }
+    let mut from = senders
+        .iter()
+        .take(NAMED_SENDERS)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(", ");
+    if senders.len() > NAMED_SENDERS {
+        from.push_str(&format!(" and {} more", senders.len() - NAMED_SENDERS));
+    }
+    let oldest = messages
+        .first()
+        .map_or(now_ms, |message| message.sent_at_ms);
+    format!(
+        "[herdr] {} messages from {from}, the oldest sent {}: `loom inbox` lists them, or `herdr message list --to {to}`",
+        messages.len(),
+        age(oldest, now_ms)
+    )
+}
+
+fn one_line(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// How long a message has waited, in the units loom's footer uses.
+fn age(sent_at_ms: u64, now_ms: u64) -> String {
+    let minutes = now_ms.saturating_sub(sent_at_ms) / 60_000;
+    match minutes {
+        0 => "just now".to_owned(),
+        1..60 => format!("{minutes}m ago"),
+        60..2880 => format!("{}h ago", minutes / 60),
+        _ => format!("{}d ago", minutes / 1440),
+    }
 }
 
 #[cfg(test)]
@@ -250,12 +317,15 @@ mod tests {
         );
 
         let to = agent("2222bbbb");
-        assert_eq!(store.oldest_pending_for(&to).unwrap().id, first);
+        let ids = |store: &MessageStore| -> Vec<u64> {
+            store.pending_for(&to).iter().map(|m| m.id).collect()
+        };
+        assert_eq!(ids(&store), vec![first, second]);
         store.mark_delivered(first, 20);
-        assert_eq!(store.oldest_pending_for(&to).unwrap().id, second);
+        assert_eq!(ids(&store), vec![second]);
         assert_eq!(store.get(first).unwrap().delivered_at_ms, Some(20));
         store.mark_delivered(second, 30);
-        assert!(store.oldest_pending_for(&to).is_none());
+        assert!(ids(&store).is_empty());
         assert!(store.has_pending(), "the other recipient still waits");
     }
 
@@ -320,15 +390,67 @@ mod tests {
         let mut store = MessageStore::default();
         let id = store.push(new("2222bbbb", "done:\n  tests\tpass")).id;
         assert_eq!(
-            delivery_line(store.get(id).unwrap()),
-            format!("[from worker] done: tests pass (herdr message show {id})")
+            delivery_line(store.get(id).unwrap(), 10),
+            format!("[from worker] done: tests pass (report, just now, herdr message show {id})")
         );
 
         let long = "x".repeat(400);
         let id = store.push(new("2222bbbb", &long)).id;
-        let line = delivery_line(store.get(id).unwrap());
-        assert!(line.ends_with(&format!("… (herdr message show {id})")));
+        let line = delivery_line(store.get(id).unwrap(), 10);
+        assert!(line.ends_with(&format!("… (report, just now, herdr message show {id})")));
         assert!(line.chars().count() < 300);
+    }
+
+    #[test]
+    fn each_line_names_the_kind_and_how_long_the_message_waited() {
+        const MINUTE: u64 = 60_000;
+        let mut store = MessageStore::default();
+        let mut tell = new("2222bbbb", "heads up");
+        tell.kind = MessageKind::Tell;
+        let tell = store.push(tell).id;
+        let mut reply = new("2222bbbb", "yes");
+        reply.kind = MessageKind::Reply;
+        reply.reply_to = Some(tell);
+        let reply = store.push(reply).id;
+        let line = |id, waited| delivery_line(store.get(id).unwrap(), 10 + waited);
+
+        assert!(line(tell, 59_999).ends_with("(tell, just now, herdr message show 1)"));
+        assert!(line(tell, 12 * MINUTE).contains("(tell, 12m ago,"));
+        assert!(line(tell, 47 * 60 * MINUTE).contains("(tell, 47h ago,"));
+        assert!(line(tell, 3 * 1440 * MINUTE).contains("(tell, 3d ago,"));
+        assert!(line(reply, 0).contains(&format!("(reply to {tell}, just now,")));
+    }
+
+    #[test]
+    fn a_backlog_is_one_block_and_past_the_limit_one_pointer() {
+        let to = agent("2222bbbb");
+        let mut store = MessageStore::default();
+        for (index, from) in ["a", "b", "a", "c", "d", "e"].into_iter().enumerate() {
+            let mut message = new("2222bbbb", &format!("m{index}"));
+            message.from_name = from.into();
+            message.sent_at_ms = index as u64;
+            store.push(message);
+        }
+        let pending = store.pending_for(&to);
+        let at = 2 * 60 * 60_000;
+
+        assert!(delivery_block(&[], &to, at).is_empty());
+        assert_eq!(
+            delivery_block(&pending[..1], &to, at),
+            vec!["[from a] m0 (report, 2h ago, herdr message show 1)"]
+        );
+        let block = delivery_block(&pending[..DELIVERY_BLOCK_LIMIT], &to, at);
+        assert_eq!(block.len(), DELIVERY_BLOCK_LIMIT + 1);
+        assert_eq!(block[0], "[herdr] 5 messages, oldest first:");
+        assert!(block[1].starts_with("[from a] m0 "));
+        assert!(block[5].starts_with("[from d] m4 "));
+        assert_eq!(
+            delivery_block(&pending, &to, at),
+            vec![
+                "[herdr] 6 messages from a, b, c, d and 1 more, the oldest sent 2h ago: \
+                 `loom inbox` lists them, or `herdr message list --to 2222bbbb`"
+            ]
+        );
     }
 
     #[test]

@@ -899,7 +899,7 @@
             },
             {
               "const": "delivered",
-              "description": "Its line was typed into the recipient's pane.",
+              "description": "Typed into the recipient's pane, on its own line or counted in a pointer to the list.",
               "type": "string"
             }
           ]
@@ -9054,7 +9054,7 @@
             },
             {
               "const": "delivered",
-              "description": "Its line was typed into the recipient's pane.",
+              "description": "Typed into the recipient's pane, on its own line or counted in a pointer to the list.",
               "type": "string"
             }
           ]

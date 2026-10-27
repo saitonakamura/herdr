@@ -350,6 +350,11 @@ fn run(requests: mpsc::Receiver<Request>, ready: mpsc::SyncSender<io::Result<usi
     }
 }
 
+/// Windows keeps delivered toasts until the user clears them.
+pub(crate) fn remove_desktop_notification(_key: &str) -> io::Result<()> {
+    Ok(())
+}
+
 pub(crate) fn show_actionable_desktop_notification(
     title: &str,
     body: Option<&str>,

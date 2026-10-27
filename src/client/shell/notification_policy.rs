@@ -169,6 +169,7 @@ impl ClientShellState {
 
         let pending = std::mem::take(&mut self.pending_notifications);
         let mut effects = Vec::new();
+        self.dismiss_handled_system_notifications(now, &mut effects);
         for pending in pending {
             if pending.deadline > now {
                 self.pending_notifications.push(pending);
@@ -229,7 +230,6 @@ impl ClientShellState {
                     });
                 }
                 crate::config::ToastDelivery::System if !suppress_external => {
-                    #[cfg(windows)]
                     let target = pending.event.pane_id.as_ref().and_then(|pane_id| {
                         self.endpoint_boot_id(&pending.endpoint_id).map(|boot_id| {
                             ClientSystemNotificationTarget {
@@ -239,10 +239,17 @@ impl ClientShellState {
                             }
                         })
                     });
+                    if let Some(target) = target.clone() {
+                        self.record_shown_system_notification(
+                            target,
+                            &pending.event,
+                            now,
+                            &mut effects,
+                        );
+                    }
                     effects.push(ClientShellNotificationEffect::System {
                         title: pending.event.title,
                         body: pending.event.body,
-                        #[cfg(windows)]
                         target,
                     });
                 }
@@ -252,7 +259,122 @@ impl ClientShellState {
         (effects, repaint)
     }
 
-    #[cfg(windows)]
+    fn record_shown_system_notification(
+        &mut self,
+        target: ClientSystemNotificationTarget,
+        event: &SemanticNotification,
+        now: std::time::Instant,
+        effects: &mut Vec<ClientShellNotificationEffect>,
+    ) {
+        // The same target replaces its notification natively; only an older boot's needs removing.
+        self.shown_system_notifications.retain(|shown| {
+            if shown.target.endpoint_id != target.endpoint_id
+                || shown.target.pane_id != target.pane_id
+            {
+                return true;
+            }
+            if shown.target != target {
+                effects.push(ClientShellNotificationEffect::DismissSystem {
+                    target: shown.target.clone(),
+                });
+            }
+            false
+        });
+        self.shown_system_notifications
+            .push(ClientShownSystemNotification {
+                target,
+                kind: event.kind,
+                workspace_id: event.workspace_id.clone(),
+                tab_id: event.tab_id.clone(),
+                shown_at: now,
+                confirmed: false,
+            });
+    }
+
+    /// Removes shown system notifications once their cause is handled: the pane was seen, the
+    /// agent left the state that notified, or the pane or its server is gone.
+    fn dismiss_handled_system_notifications(
+        &mut self,
+        now: std::time::Instant,
+        effects: &mut Vec<ClientShellNotificationEffect>,
+    ) {
+        if self.shown_system_notifications.is_empty() {
+            return;
+        }
+        let mut shown = std::mem::take(&mut self.shown_system_notifications);
+        shown.retain_mut(|shown| {
+            if self.system_notification_handled(shown, now) {
+                effects.push(ClientShellNotificationEffect::DismissSystem {
+                    target: shown.target.clone(),
+                });
+                return false;
+            }
+            true
+        });
+        self.shown_system_notifications = shown;
+    }
+
+    fn system_notification_handled(
+        &self,
+        shown: &mut ClientShownSystemNotification,
+        now: std::time::Instant,
+    ) -> bool {
+        let Some(endpoint) = self
+            .endpoints
+            .iter()
+            .find(|endpoint| endpoint.endpoint_id == shown.target.endpoint_id)
+        else {
+            return true;
+        };
+        // No snapshot is no evidence: a reconnect to the same boot keeps the notification.
+        let Some(snapshot) = endpoint.snapshot.as_deref() else {
+            return false;
+        };
+        if snapshot.boot_id != shown.target.boot_id
+            || !snapshot
+                .panes
+                .iter()
+                .any(|pane| pane.pane_id == shown.target.pane_id)
+        {
+            return true;
+        }
+        let event = SemanticNotification {
+            kind: shown.kind,
+            title: String::new(),
+            body: None,
+            sound: None,
+            agent: None,
+            workspace_id: shown.workspace_id.clone(),
+            tab_id: shown.tab_id.clone(),
+            pane_id: Some(shown.target.pane_id.clone()),
+            position: None,
+        };
+        if self.outer_focused != Some(false)
+            && self.notification_target_is_active(&shown.target.endpoint_id, &event)
+        {
+            return true;
+        }
+        let notified_status = match shown.kind {
+            SemanticNotificationKind::NeedsAttention => crate::api::schema::AgentStatus::Blocked,
+            SemanticNotificationKind::Finished => crate::api::schema::AgentStatus::Done,
+            SemanticNotificationKind::UpdateInstalled | SemanticNotificationKind::Custom => {
+                return false;
+            }
+        };
+        let status = snapshot
+            .agents
+            .iter()
+            .find(|agent| agent.pane_id == shown.target.pane_id)
+            .map(|agent| agent.agent_status);
+        if status == Some(notified_status) {
+            shown.confirmed = true;
+            return false;
+        }
+        // The event can precede the snapshot that shows its state; give that snapshot a moment.
+        shown.confirmed
+            || now.saturating_duration_since(shown.shown_at) >= COMPLETION_EVIDENCE_GRACE
+    }
+
     pub(crate) fn notification_target_is_current(
         &self,
         endpoint_id: &ClientEndpointId,
@@ -273,7 +395,6 @@ impl ClientShellState {
                 })
     }
 
-    #[cfg(windows)]
     pub(crate) fn activate_system_notification(
         &mut self,
         target: ClientSystemNotificationTarget,

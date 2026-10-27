@@ -452,7 +452,6 @@ impl ClientShellState {
         &mut self,
         target: ClientEndpointFocusTarget,
     ) -> Vec<ClientShellAction> {
-        #[cfg(windows)]
         if !self.notification_target_is_current(&self.active_endpoint_id, &target) {
             return Vec::new();
         }
@@ -468,7 +467,6 @@ impl ClientShellState {
             ClientEndpointFocusTarget::Pane(pane_id) => {
                 crate::api::schema::Method::PaneFocus(crate::api::schema::PaneTarget { pane_id })
             }
-            #[cfg(windows)]
             ClientEndpointFocusTarget::Notification { pane_id, .. } => {
                 crate::api::schema::Method::PaneFocus(crate::api::schema::PaneTarget { pane_id })
             }

@@ -496,7 +496,7 @@ position = "bottom-right"
 
 选择 `herdr` 可使用应用内 toast，选择 `terminal` 可使用适合 SSH 场景的外层终端通知，选择 `system` 可使用本地操作系统通知服务，选择 `off` 可禁用弹出通知。Herdr 会抑制活动标签页的弹出通知。在[配置参考](/docs/config-reference/)中搜索 `ui.toast`，可查看位置、延迟行为和剪贴板反馈设置。
 
-在 macOS 上，`system` 会先尝试 `terminal-notifier`；如果它不可用或执行失败，则回退到 `/usr/bin/osascript`。该回退方式会在通知中心显示为 Script Editor，并且无法激活承载 Herdr 的终端。可运行 `brew install terminal-notifier` 安装 `terminal-notifier`。如果 Herdr 检测到受支持的终端，点击通知时它可以激活该终端应用。也可以选择 `terminal`，让受支持的外层终端负责发送通知。
+在 macOS 上，如果已安装 `terminal-notifier`（`brew install terminal-notifier`，3.0 或更高版本），`system` 会使用它。点击通知会在显示该通知的 Herdr 客户端中选中来源窗格，并将检测到的终端应用切到前台。通知的起因被处理后，Herdr 会移除该通知：你查看了该窗格所在的标签页、代理离开了触发通知的状态，或窗格已关闭。同一窗格的新通知会替换旧通知。点击无法选中已关闭客户端或已重启服务器中的窗格。没有 `terminal-notifier` 或其执行失败时，Herdr 回退到 `/usr/bin/osascript`：通知显示为 Script Editor，点击无效，并会一直留在通知中心。也可以选择 `terminal`，让受支持的外层终端负责发送通知。
 
 Windows 的 `system` 通知会保留在通知中心。点击通知会在运行中的 Herdr 客户端选择来源窗格,并在 Windows 能识别对应窗口时将终端置于前台。点击不能重新打开已关闭的客户端,也不能选择已重启服务器中的窗格。Windows Terminal 可以将所属窗口置于前台,但无法可靠地切换到另一个外层终端标签页。
 

@@ -734,17 +734,30 @@ pub(crate) enum ClientShellNotificationEffect {
     System {
         title: String,
         body: Option<String>,
-        #[cfg(windows)]
         target: Option<ClientSystemNotificationTarget>,
+    },
+    /// Removes a shown system notification whose cause was handled.
+    DismissSystem {
+        target: ClientSystemNotificationTarget,
     },
 }
 
-#[cfg(windows)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ClientSystemNotificationTarget {
     pub(crate) endpoint_id: ClientEndpointId,
     pub(crate) boot_id: String,
     pub(crate) pane_id: String,
+}
+
+/// A targeted system notification this client showed and may still dismiss.
+pub(super) struct ClientShownSystemNotification {
+    pub(super) target: ClientSystemNotificationTarget,
+    pub(super) kind: SemanticNotificationKind,
+    pub(super) workspace_id: Option<String>,
+    pub(super) tab_id: Option<String>,
+    pub(super) shown_at: std::time::Instant,
+    /// The snapshot has shown the state that notified at least once.
+    pub(super) confirmed: bool,
 }
 
 pub(super) struct ClientPendingNotification {
@@ -964,6 +977,7 @@ pub(crate) struct ClientShellState {
     pub(super) pending_notifications: Vec<ClientPendingNotification>,
     pub(super) visible_notification: Option<ClientVisibleNotification>,
     pub(super) queued_notifications: VecDeque<ClientVisibleNotification>,
+    pub(super) shown_system_notifications: Vec<ClientShownSystemNotification>,
     pub(super) endpoint_notice_seen: HashSet<ClientEndpointNoticeKey>,
     pub(super) visible_endpoint_notice: Option<ClientVisibleEndpointNotice>,
     pub(super) outer_focused: Option<bool>,
@@ -1138,6 +1152,7 @@ impl ClientShellState {
             pending_notifications: Vec::new(),
             visible_notification: None,
             queued_notifications: VecDeque::new(),
+            shown_system_notifications: Vec::new(),
             endpoint_notice_seen: HashSet::new(),
             visible_endpoint_notice: None,
             outer_focused: None,

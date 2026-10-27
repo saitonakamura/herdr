@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-macos-notification-click-and-dismiss
 title: macOS system notifications focus their pane on click and go away once handled
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee:
-claimed_by:
+claimed_by: macos/w1:p16/559651f7-b169-4e70-9c0a-761596c0063b
 ---
 
 ## Question

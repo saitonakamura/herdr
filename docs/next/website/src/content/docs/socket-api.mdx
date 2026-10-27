@@ -859,7 +859,7 @@ an authoritative read; a delayed payload may predate their latest snapshot.
 Message event subscriptions include `message.queued` and `message.delivered`.
 Both carry the `message`, with its `message_id`, `kind`, `state`, sender,
 `to_agent_id`, `summary` and optional `body`. `message.delivered` fires once the
-message's line was typed into the recipient's pane.
+message was typed into the recipient's pane, once for each message of a block.
 
 Worktree event subscriptions include `worktree.created`, `worktree.opened`, and `worktree.removed`. Worktree events describe Git checkout lifecycle. `worktree.created` includes the `workspace` holding the new tab and the created `worktree`, whose `open_tab_id` names the tab. `worktree.opened` includes the tab's `workspace`, opened `worktree`, and `already_open`. `worktree.removed` includes the `workspace_id`, removed `worktree`, and `forced`.
 

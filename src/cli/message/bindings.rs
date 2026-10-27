@@ -130,7 +130,7 @@ pub(crate) fn command() -> Command {
                 )
                 .group(ArgGroup::new("sender").args(["from", "user"]))
                 .override_usage("herdr message send <TO> <SUMMARY> [--kind report|reply|tell] [--body TEXT|--body-file PATH] [--from TARGET|--user] [--reply-to MESSAGE_ID]")
-                .after_help("TO and --from are agent ids, agent names or pane ids. The message waits until the recipient is idle, or blocked on a question with an empty composer, and is then typed into its pane as one line: [from <name>] <summary> (herdr message show <id>). Pending messages go oldest first, one per state change."),
+                .after_help("TO and --from are agent ids, agent names or pane ids. The message waits until the recipient is idle, or blocked on a question with an empty composer, and is then typed into its pane as one line: [from <name>] <summary> (<kind>, <age>, herdr message show <id>). Everything pending goes in one block, oldest first, at most one block per state change; past 5 messages the block is one line pointing at the list."),
         )
         .subcommand(leaf("list", MessageListProjection::arguments(), "List messages, oldest first"))
         .subcommand(

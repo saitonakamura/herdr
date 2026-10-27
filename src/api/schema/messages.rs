@@ -21,7 +21,7 @@ pub enum MessageKind {
 pub enum MessageState {
     /// Waiting for the recipient to be idle, or blocked on a question with an empty composer.
     Pending,
-    /// Its line was typed into the recipient's pane.
+    /// Typed into the recipient's pane, on its own line or counted in a pointer to the list.
     Delivered,
 }
 

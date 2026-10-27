@@ -7,7 +7,7 @@ use crate::api::schema::{
     MessageTarget, ResponseResult,
 };
 use crate::app::agent_identity::AgentParentError;
-use crate::app::messages::{delivery_line, NewMessage, WithdrawError};
+use crate::app::messages::{delivery_block, NewMessage, WithdrawError};
 use crate::app::App;
 use crate::detect::{AgentState, BlockedReason};
 use crate::terminal::{AgentId, TerminalId};
@@ -163,7 +163,7 @@ impl App {
         }
     }
 
-    /// Delivers what is due, at most one message per recipient per state change.
+    /// Delivers what is due, at most one block per recipient per state change.
     pub(crate) fn deliver_pending_messages(&mut self) {
         self.state.message_delivery_due = false;
         if !self.state.messages.has_pending() {
@@ -175,8 +175,8 @@ impl App {
         }
     }
 
-    /// Types the recipient's oldest pending message into its pane when it can take it: idle with
-    /// no draft in its composer, or blocked on a question with an empty composer.
+    /// Types all of the recipient's pending messages into its pane as one block when it can take
+    /// it: idle with no draft in its composer, or blocked on a question with an empty composer.
     fn try_deliver_message_to(&mut self, recipient: &AgentId) {
         let Some(terminal_id) = self.terminal_with_agent_id(recipient) else {
             return;
@@ -192,42 +192,53 @@ impl App {
         if self.state.message_delivery_attempts.get(recipient) == Some(&state_change_seq) {
             return;
         }
-        let Some(message) = self.state.messages.oldest_pending_for(recipient) else {
+        let now = now_ms();
+        let pending = self.state.messages.pending_for(recipient);
+        if pending.is_empty() {
             return;
-        };
-        let (message_id, line) = (message.id, delivery_line(message));
+        }
+        let message_ids: Vec<u64> = pending.iter().map(|message| message.id).collect();
+        let lines = delivery_block(&pending, recipient, now);
         self.state
             .message_delivery_attempts
             .insert(recipient.clone(), state_change_seq);
-        let Some(expected_agent) = self.message_delivery_agent(ws_idx, pane_id, &terminal_id)
+        let Some((expected_agent, bracketed_paste)) =
+            self.message_delivery_agent(ws_idx, pane_id, &terminal_id)
         else {
             return;
         };
-        match self.queue_agent_submission(ws_idx, pane_id, expected_agent, &line, None) {
+        // Unbracketed, a newline is Enter and would submit the block one line at a time.
+        let block = lines.join(if bracketed_paste { "\n" } else { " " });
+        match self.queue_agent_submission(ws_idx, pane_id, expected_agent, &block, None) {
             Ok(_completion) => {}
             Err(AgentSubmissionError::NotFound) => return,
             Err(AgentSubmissionError::Failed(err)) => {
-                tracing::warn!(message_id, err = %err, "message delivery failed");
+                tracing::warn!(?message_ids, err = %err, "message delivery failed");
                 return;
             }
         }
-        if let Some(message) = self.state.messages.mark_delivered(message_id, now_ms()) {
-            let message = message.info();
-            self.messages_changed();
-            self.emit_event(EventEnvelope {
-                event: EventKind::MessageDelivered,
-                data: EventData::MessageDelivered { message },
-            });
+        // The block went in whole, so its messages are delivered together. A withdraw runs on this
+        // same loop: before now it removed its message from the block, after now it is refused.
+        for message_id in message_ids {
+            if let Some(message) = self.state.messages.mark_delivered(message_id, now) {
+                let message = message.info();
+                self.emit_event(EventEnvelope {
+                    event: EventKind::MessageDelivered,
+                    data: EventData::MessageDelivered { message },
+                });
+            }
         }
+        self.messages_changed();
     }
 
-    /// The agent to type into, when the pane can take a message now.
+    /// The agent to type into, and whether its pane takes a bracketed paste, when it can take
+    /// messages now.
     fn message_delivery_agent(
         &self,
         ws_idx: usize,
         pane_id: crate::layout::PaneId,
         terminal_id: &TerminalId,
-    ) -> Option<crate::detect::Agent> {
+    ) -> Option<(crate::detect::Agent, bool)> {
         let terminal = self.state.terminals.get(terminal_id)?;
         let agent = terminal.effective_known_agent()?;
         if terminal.managed_agent_launch_pending() {
@@ -255,7 +266,7 @@ impl App {
         match crate::detect::composer::composer_state(&screen.text) {
             crate::detect::composer::Composer::Draft => None,
             crate::detect::composer::Composer::Missing if needs_empty_composer => None,
-            _ => Some(agent),
+            _ => Some((agent, runtime.bracketed_paste_enabled())),
         }
     }
 
@@ -473,7 +484,7 @@ mod tests {
         assert_eq!(message["kind"], "report");
         assert_eq!(
             typed_line(&mut typed).await,
-            "[from worker] done: tests pass (herdr message show 1)"
+            "[from worker] done: tests pass (report, just now, herdr message show 1)"
         );
         let kinds: Vec<EventKind> = f
             .events
@@ -490,33 +501,131 @@ mod tests {
         assert_eq!(shown["result"]["message"]["body"], "the details");
     }
 
+    fn id_of(sent: &serde_json::Value) -> u64 {
+        sent["result"]["message"]["message_id"].as_u64().unwrap()
+    }
+
+    fn delivered_ids(events: &crate::api::EventHub) -> Vec<u64> {
+        events
+            .events_after(0)
+            .into_iter()
+            .filter_map(|(_, event)| match event.data {
+                EventData::MessageDelivered { message } => Some(message.message_id),
+                _ => None,
+            })
+            .collect()
+    }
+
     #[tokio::test]
-    async fn a_busy_agent_gets_its_messages_oldest_first_one_per_state_change() {
+    async fn a_busy_agent_gets_its_backlog_as_one_block_at_the_next_state_change() {
         let mut f = fixture();
         f.agent(f.worker, Agent::Claude, AgentState::Working, "worker");
         f.change_state(f.lead, AgentState::Working);
         let mut typed = f.runtime(f.lead, EMPTY);
 
-        let first = f.send(f.lead, "first")["result"]["message"]["message_id"]
-            .as_u64()
-            .unwrap();
-        let second = f.send(f.lead, "second")["result"]["message"]["message_id"]
-            .as_u64()
-            .unwrap();
+        let first = id_of(&f.send(f.lead, "first"));
+        let second = id_of(&f.send(f.lead, "second"));
         assert_eq!(f.state_of(first), "pending");
         assert!(typed.try_recv().is_err(), "nothing typed while it works");
 
         f.change_state(f.lead, AgentState::Idle);
-        assert!(typed_line(&mut typed).await.contains("first"));
+        assert_eq!(
+            typed_line(&mut typed).await,
+            "[herdr] 2 messages, oldest first: \
+             [from worker] first (report, just now, herdr message show 1) \
+             [from worker] second (report, just now, herdr message show 2)",
+            "one submission; unbracketed, so joined on one line"
+        );
         assert_eq!(f.state_of(first), "delivered");
-        assert_eq!(f.state_of(second), "pending", "one line per state change");
-        f.app.deliver_pending_messages();
-        assert_eq!(f.state_of(second), "pending", "still the same state change");
+        assert_eq!(f.state_of(second), "delivered");
+        assert_eq!(delivered_ids(&f.events), vec![first, second]);
 
+        let third = id_of(&f.send(f.lead, "third"));
+        assert_eq!(f.state_of(third), "pending", "still the same state change");
+        assert!(typed.try_recv().is_err());
         f.change_state(f.lead, AgentState::Working);
         f.change_state(f.lead, AgentState::Idle);
-        assert!(typed_line(&mut typed).await.contains("second"));
-        assert_eq!(f.state_of(second), "delivered");
+        assert_eq!(
+            typed_line(&mut typed).await,
+            "[from worker] third (report, just now, herdr message show 3)"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_pane_with_bracketed_paste_gets_the_block_a_line_per_message() {
+        let mut f = fixture();
+        f.agent(f.worker, Agent::Claude, AgentState::Working, "worker");
+        f.change_state(f.lead, AgentState::Working);
+        let mut typed = f.runtime(f.lead, &format!("\x1b[?2004h{EMPTY}"));
+        f.send(f.lead, "first");
+        f.send(f.lead, "second");
+
+        f.change_state(f.lead, AgentState::Idle);
+
+        assert_eq!(
+            typed_line(&mut typed).await,
+            "\x1b[200~[herdr] 2 messages, oldest first:\n\
+             [from worker] first (report, just now, herdr message show 1)\n\
+             [from worker] second (report, just now, herdr message show 2)\x1b[201~"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_withdraw_takes_its_message_out_of_the_block_or_is_refused_after_it() {
+        let mut f = fixture();
+        f.agent(f.worker, Agent::Claude, AgentState::Working, "worker");
+        f.change_state(f.lead, AgentState::Working);
+        let mut typed = f.runtime(f.lead, EMPTY);
+        let kept = id_of(&f.send(f.lead, "kept"));
+        let withdrawn = id_of(&f.send(f.lead, "withdrawn"));
+        let late = id_of(&f.send(f.lead, "late"));
+
+        let taken = f.call(Method::MessageWithdraw(MessageTarget {
+            message_id: withdrawn,
+        }));
+        assert_eq!(taken["result"]["message"]["summary"], "withdrawn");
+        f.change_state(f.lead, AgentState::Idle);
+
+        let block = typed_line(&mut typed).await;
+        assert!(block.starts_with("[herdr] 2 messages"), "{block}");
+        assert!(block.contains("kept") && block.contains("late"), "{block}");
+        assert!(!block.contains("withdrawn"), "{block}");
+        let refused = f.call(Method::MessageWithdraw(MessageTarget { message_id: late }));
+        assert_eq!(refused["error"]["code"], "message_delivered");
+        assert_eq!(delivered_ids(&f.events), vec![kept, late]);
+    }
+
+    #[tokio::test]
+    async fn past_the_limit_the_backlog_is_one_pointer_line_and_all_of_it_is_delivered() {
+        let mut f = fixture();
+        f.agent(f.worker, Agent::Claude, AgentState::Working, "worker");
+        f.change_state(f.lead, AgentState::Working);
+        let mut typed = f.runtime(f.lead, EMPTY);
+        let ids: Vec<u64> = (0..=crate::app::messages::DELIVERY_BLOCK_LIMIT)
+            .map(|index| id_of(&f.send(f.lead, &format!("m{index}"))))
+            .collect();
+        f.send_from(f.lead, "from the user", None);
+
+        f.change_state(f.lead, AgentState::Idle);
+
+        let to = f.call(Method::MessageGet(MessageTarget { message_id: ids[0] }))["result"]
+            ["message"]["to_agent_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert_eq!(
+            typed_line(&mut typed).await,
+            format!(
+                "[herdr] 7 messages from worker, user, the oldest sent just now: \
+                 `loom inbox` lists them, or `herdr message list --to {to}`"
+            )
+        );
+        let pending = f.call(Method::MessageList(MessageListParams {
+            pending: true,
+            ..Default::default()
+        }));
+        assert_eq!(pending["result"]["messages"], serde_json::json!([]));
+        assert_eq!(delivered_ids(&f.events).len(), 7);
     }
 
     #[tokio::test]

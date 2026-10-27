@@ -23,6 +23,8 @@ In short:
 - Bounded extensions (2), then escalation one level up.
 - An API to declare, list, extend and cancel waits. The `awaiting` status comes from a live declared wait, on top of today's sentinel (fork 028).
 
+Design for the first PR: [assets/050-waits-design.md](./assets/050-waits-design.md).
+
 Fork notes:
 - Too big for one PR. Split it: records + API + persistence + deadline firing first, then node monitors, then readers, then run supervision and the graph.
 - The server loop is already deadline-driven (`src/app/runtime.rs`). Keep each tick O(waits due), not O(waits).

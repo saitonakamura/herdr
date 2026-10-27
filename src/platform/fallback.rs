@@ -277,3 +277,21 @@ pub fn read_clipboard_image() -> Option<ClipboardImage> {
 pub fn show_desktop_notification(_title: &str, _body: Option<&str>) -> std::io::Result<bool> {
     Ok(false)
 }
+
+/// Unsupported platform stub.
+pub(crate) fn show_actionable_desktop_notification(
+    _title: &str,
+    _body: Option<&str>,
+    _key: String,
+    _callback: super::NotificationCallback,
+) -> std::io::Result<bool> {
+    Ok(false)
+}
+
+/// Unsupported platform stub.
+pub(crate) fn remove_desktop_notification(_key: &str) -> std::io::Result<()> {
+    Ok(())
+}
+
+/// Unsupported platform stub.
+pub(crate) fn foreground_desktop_notification_host() {}

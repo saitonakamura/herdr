@@ -282,3 +282,4 @@ mod mouse_selection;
 mod popup_focus_projection;
 mod session_pane;
 mod startup_overlays;
+mod system_notifications;

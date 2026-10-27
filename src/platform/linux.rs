@@ -973,6 +973,22 @@ pub fn show_desktop_notification(title: &str, body: Option<&str>) -> std::io::Re
     show_desktop_notification_with_command(title, body, |program| Command::new(program))
 }
 
+/// libnotify's helper cannot report clicks, so a targeted notification is a plain one.
+pub(crate) fn show_actionable_desktop_notification(
+    title: &str,
+    body: Option<&str>,
+    _key: String,
+    _callback: super::NotificationCallback,
+) -> std::io::Result<bool> {
+    show_desktop_notification(title, body)
+}
+
+pub(crate) fn remove_desktop_notification(_key: &str) -> std::io::Result<()> {
+    Ok(())
+}
+
+pub(crate) fn foreground_desktop_notification_host() {}
+
 fn show_desktop_notification_with_command(
     title: &str,
     body: Option<&str>,

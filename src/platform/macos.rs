@@ -30,6 +30,11 @@ mod shutdown;
 pub(crate) use shutdown::monitor_host_shutdown;
 mod power;
 pub(crate) use power::monitor_host_power;
+mod notifications;
+pub(crate) use notifications::{
+    foreground_desktop_notification_host, remove_desktop_notification,
+    show_actionable_desktop_notification,
+};
 
 #[cfg(test)]
 mod config_file_tests;

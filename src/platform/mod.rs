@@ -338,6 +338,9 @@ pub fn launch_server_daemon_command(command: &mut std::process::Command) -> std:
     command.spawn().map(|child| child.id())
 }
 
+/// Runs when the user clicks an actionable desktop notification.
+pub(crate) type NotificationCallback = std::sync::Arc<dyn Fn() + Send + Sync>;
+
 #[cfg(not(target_os = "macos"))]
 pub(crate) fn prepare_server_process(_handoff_import: bool) -> std::io::Result<bool> {
     Ok(false)

@@ -52,7 +52,7 @@ fn show_untargeted_system_notification(title: &str, body: Option<&str>) -> io::R
 pub(super) fn handle_shell_notification_effects(
     effects: Vec<shell::ClientShellNotificationEffect>,
     sound_config: &crate::config::SoundConfig,
-    #[cfg(windows)] event_tx: &tokio::sync::mpsc::Sender<super::events::ClientLoopEvent>,
+    event_tx: &tokio::sync::mpsc::Sender<super::events::ClientLoopEvent>,
 ) {
     for effect in effects {
         match effect {
@@ -71,22 +71,32 @@ pub(super) fn handle_shell_notification_effects(
             shell::ClientShellNotificationEffect::System {
                 title,
                 body,
-                #[cfg(windows)]
                 target,
             } => {
-                #[cfg(windows)]
-                let result = show_system_notification(&title, body.as_deref(), target, event_tx);
-                #[cfg(not(windows))]
-                let result = crate::platform::show_desktop_notification(&title, body.as_deref());
-                if let Err(err) = result {
+                if let Err(err) =
+                    show_system_notification(&title, body.as_deref(), target, event_tx)
+                {
                     warn!(err = %err, "failed to emit system notification");
+                }
+            }
+            shell::ClientShellNotificationEffect::DismissSystem { target } => {
+                if let Err(err) = dismiss_system_notification(&target) {
+                    warn!(err = %err, "failed to dismiss system notification");
                 }
             }
         }
     }
 }
 
-#[cfg(windows)]
+fn system_notification_key(target: &shell::ClientSystemNotificationTarget) -> io::Result<String> {
+    serde_json::to_string(&(
+        &target.endpoint_id.storage_key(),
+        &target.boot_id,
+        &target.pane_id,
+    ))
+    .map_err(io::Error::other)
+}
+
 fn show_system_notification(
     title: &str,
     body: Option<&str>,
@@ -96,35 +106,40 @@ fn show_system_notification(
     let Some(target) = target else {
         return show_untargeted_system_notification(title, body);
     };
-    let key = serde_json::to_string(&(
-        &target.endpoint_id.storage_key(),
-        &target.boot_id,
-        &target.pane_id,
-    ))
-    .map_err(io::Error::other)?;
+    let key = system_notification_key(&target)?;
     let event_tx = event_tx.clone();
     let runtime = tokio::runtime::Handle::current();
-    let title = title.to_owned();
-    let body = body.map(str::to_owned);
-    queue_system_notification(move || {
-        crate::platform::show_actionable_desktop_notification(
-            &title,
-            body.as_deref(),
-            key,
-            std::sync::Arc::new(move || {
-                let event_tx = event_tx.clone();
-                let target = target.clone();
-                // Never block a native callback: WinRT can dispatch it while Show is awaited.
-                runtime.spawn(async move {
-                    let _ = event_tx
-                        .send(super::events::ClientLoopEvent::NotificationActivated(
-                            target,
-                        ))
-                        .await;
-                });
-            }),
-        )
-    })
+    let callback: crate::platform::NotificationCallback = std::sync::Arc::new(move || {
+        let event_tx = event_tx.clone();
+        let target = target.clone();
+        // Never block a native callback: WinRT can dispatch it while Show is awaited.
+        runtime.spawn(async move {
+            let _ = event_tx
+                .send(super::events::ClientLoopEvent::NotificationActivated(
+                    target,
+                ))
+                .await;
+        });
+    });
+    #[cfg(windows)]
+    {
+        let title = title.to_owned();
+        let body = body.map(str::to_owned);
+        queue_system_notification(move || {
+            crate::platform::show_actionable_desktop_notification(
+                &title,
+                body.as_deref(),
+                key,
+                callback,
+            )
+        })
+    }
+    #[cfg(not(windows))]
+    crate::platform::show_actionable_desktop_notification(title, body, key, callback)
+}
+
+fn dismiss_system_notification(target: &shell::ClientSystemNotificationTarget) -> io::Result<()> {
+    crate::platform::remove_desktop_notification(&system_notification_key(target)?)
 }
 
 pub(super) fn handle_notify(

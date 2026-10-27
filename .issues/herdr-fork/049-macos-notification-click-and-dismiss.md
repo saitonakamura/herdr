@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-macos-notification-click-and-dismiss
 title: macOS system notifications focus their pane on click and go away once handled
-status: in-progress
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee:
-claimed_by: macos/w1:p16/559651f7-b169-4e70-9c0a-761596c0063b
+claimed_by:
 ---
 
 ## Question
@@ -66,7 +66,7 @@ dismissal.
 
 ## Resolution
 
-Draft until [PR #37](https://github.com/saitonakamura/herdr/pull/37) merges.
+Merged 2026-10-27: [PR #37](https://github.com/saitonakamura/herdr/pull/37) as `e020481e`; dotfiles `dddfda6` adds terminal-notifier to the Brewfile (on-box tickets herdr-fork/011 primary, 012 music).
 
 - **Helper: terminal-notifier 3.x**, through `-execute`, not a waiting process.
   Tested on macOS 26.6 with 3.1.0. macOS hands a click to whichever

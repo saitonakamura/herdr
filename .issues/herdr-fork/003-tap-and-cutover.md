@@ -1,14 +1,14 @@
 ---
 id: herdr-fork-tap-and-cutover
 title: Homebrew tap, Windows install, and the per-box cutover
-status: in-progress
+status: open
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
   - herdr-fork-ci-releases
 assignee:
-claimed_by: fedora/w2:pH/3e88b947-4f7f-44d7-b67f-b0f613eb59d1
+claimed_by: fedora/3e88b947-4f7f-44d7-b67f-b0f613eb59d1
 ---
 
 ## Question

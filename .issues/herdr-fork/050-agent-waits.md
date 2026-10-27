@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-agent-waits
 title: Agent waits with persisted deadlines, node monitors, reader hooks and run supervision
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee: saitonakamura
-claimed_by:
+claimed_by: macos/w6:p1/1c20d1ee-126a-481b-8c9c-86fa895c2f11
 ---
 
 ## Question

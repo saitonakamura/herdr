@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-test-plugin-process-leak
 title: Test harness leaks plugin processes
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee: saitonakamura
-claimed_by:
+claimed_by: claude-cloud-trial (dotfiles root 504cf489)
 ---
 
 ## Question

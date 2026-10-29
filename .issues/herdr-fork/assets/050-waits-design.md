@@ -167,4 +167,6 @@ Where the build settled something this document left open, or departed from it:
   `wait`, to keep the old agent-status wait out after it moved under `agent`. The
   fork narrows that assertion to "the top-level `wait` has no `--until` agent
   status and has `declare`", which still guards the regression it was written for.
+  The Linux-only `tests/cli/surface.rs` check that `herdr wait output …` is refused
+  now expects clap's `unrecognized subcommand 'output'` instead of `unknown command: wait`.
 - **`time` gains its `parsing` feature** for RFC 3339 deadlines. No new crate.

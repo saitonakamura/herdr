@@ -355,7 +355,8 @@ fn removed_wait_and_agent_send_commands_are_rejected() {
         .output()
         .unwrap();
     assert_eq!(wait.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&wait.stderr).contains("unknown command: wait"));
+    // The fork's top-level `wait` is agent waits (wait.*); the old output wait is still refused.
+    assert!(String::from_utf8_lossy(&wait.stderr).contains("unrecognized subcommand 'output'"));
     let help = Command::new(env!("CARGO_BIN_EXE_herdr"))
         .arg("--help")
         .output()

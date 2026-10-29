@@ -201,6 +201,11 @@ pub enum AppEvent {
         segment_index: usize,
         result: Result<Option<String>, String>,
     },
+    /// A plugin reader finished reading a wait's source.
+    WaitReadFinished {
+        wait_id: u64,
+        outcome: crate::app::wait_readers::ReadOutcome,
+    },
     /// A plugin action or event command finished.
     PluginCommandFinished {
         log_id: String,

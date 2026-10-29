@@ -1234,6 +1234,83 @@ command = ["awk", "-F", "\t", " {print $1} "]
         let _ = std::fs::remove_dir_all(root);
     }
 
+    fn reader_manifest(
+        root: &std::path::Path,
+        readers: &str,
+    ) -> Result<InstalledPluginInfo, (&'static str, String)> {
+        write_manifest_content(
+            root,
+            &format!(
+                r#"
+id = "example.readers"
+name = "Readers"
+version = "0.1.0"
+min_herdr_version = "0.7.0"
+platforms = ["linux", "macos"]
+{readers}
+"#
+            ),
+        );
+        load_plugin_manifest(&root.display().to_string(), true)
+    }
+
+    #[test]
+    fn plugin_manifest_declares_readers_by_kind_with_an_interval() {
+        let root = unique_temp_path("plugin-readers");
+        let plugin = reader_manifest(
+            &root,
+            r#"
+[[readers]]
+kind = "pr"
+interval = "5m"
+command = ["homebase", "read", "--json"]
+
+[[readers]]
+kind = "ci"
+interval = "90s"
+command = ["homebase", "read", "--json"]
+"#,
+        )
+        .expect("readers parse");
+        let kinds: Vec<(&str, u64)> = plugin
+            .readers
+            .iter()
+            .map(|reader| (reader.kind.as_str(), reader.interval_ms))
+            .collect();
+        assert_eq!(kinds, [("ci", 90_000), ("pr", 300_000)]);
+        assert_eq!(plugin.readers[1].command, ["homebase", "read", "--json"]);
+
+        for (name, readers, code) in [
+            ("reserved", r#"kind = "node""#, "invalid_plugin_reader"),
+            ("upper", r#"kind = "MR""#, "invalid_plugin_reader"),
+            ("empty", r#"kind = """#, "invalid_plugin_reader"),
+        ] {
+            let result = reader_manifest(
+                &root,
+                &format!("[[readers]]\n{readers}\ninterval = \"5m\"\ncommand = [\"read\"]\n"),
+            );
+            assert!(matches!(result, Err((found, _)) if found == code), "{name}");
+        }
+        for interval in ["5s", "2d", "soon", ""] {
+            let result = reader_manifest(
+                &root,
+                &format!(
+                    "[[readers]]\nkind = \"mr\"\ninterval = \"{interval}\"\ncommand = [\"read\"]\n"
+                ),
+            );
+            assert!(
+                matches!(result, Err(("invalid_plugin_reader", _))),
+                "interval {interval:?}"
+            );
+        }
+        let twice = reader_manifest(
+            &root,
+            "[[readers]]\nkind = \"mr\"\ninterval = \"5m\"\ncommand = [\"a\"]\n\n[[readers]]\nkind = \"mr\"\ninterval = \"5m\"\ncommand = [\"b\"]\n",
+        );
+        assert!(matches!(twice, Err(("duplicate_plugin_reader_kind", _))));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     #[test]
     fn plugin_manifest_rejects_empty_command_elements() {
         for (name, command) in [("array", "[]"), ("element", r#"["echo", ""]"#)] {

@@ -71,6 +71,9 @@ pub struct InstalledPluginInfo {
     pub panes: Vec<PluginManifestPane>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub link_handlers: Vec<PluginManifestLinkHandler>,
+    /// Commands that read a wait source's state, one per `on` kind.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub readers: Vec<PluginManifestReader>,
     #[serde(default)]
     pub source: PluginSourceInfo,
     /// Warnings collected at link time or on registry load (e.g. unknown event names,
@@ -271,6 +274,18 @@ pub struct PluginManifestEventHook {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub platforms: Option<Vec<PluginPlatform>>,
     pub command: Vec<String>,
+}
+
+/// A command herdr runs at an interval to read the state of each live wait on `kind`. It gets
+/// `<kind>:<target>` as its last argument and prints `{ok, state, error}` as JSON; exit 1 is a
+/// failed read and exit 2 a source it cannot read.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PluginManifestReader {
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub platforms: Option<Vec<PluginPlatform>>,
+    pub command: Vec<String>,
+    pub interval_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

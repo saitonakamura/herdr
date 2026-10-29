@@ -873,7 +873,10 @@ reports `awaiting` where it would report `idle` or `done`. `wait.declare` and `w
 time in milliseconds, or `deadline_in_ms`, from now. Agent info carries
 `live_waits` and, while a fire to the user is unanswered, `wait_needs_user`
 with its `wait_id` and `reason`. Servers with waits advertise `agent_waits` and
-the `on` source kinds they accept as `wait_sources`. A message a wait sent
+the `on` source kinds they read themselves as `wait_sources`. Servers that take
+plugin readers also advertise `wait_readers`, and `plugin.list` shows each
+plugin's `readers` with their `kind`, `command` and `interval_ms`. A reader wait
+carries `last_state`, `last_ok_at_ms`, `errors` and `last_error`. A message a wait sent
 carries its `wait_id`.
 
 Worktree event subscriptions include `worktree.created`, `worktree.opened`, and `worktree.removed`. Worktree events describe Git checkout lifecycle. `worktree.created` includes the `workspace` holding the new tab and the created `worktree`, whose `open_tab_id` names the tab. `worktree.opened` includes the tab's `workspace`, opened `worktree`, and `already_open`. `worktree.removed` includes the `workspace_id`, removed `worktree`, and `forced`.

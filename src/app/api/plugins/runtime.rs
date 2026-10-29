@@ -250,6 +250,93 @@ impl App {
         }
     }
 
+    /// The reader for a wait source kind: the first enabled plugin, by id, that declares one
+    /// for this platform.
+    pub(in crate::app) fn wait_reader_for(
+        &self,
+        kind: &str,
+    ) -> Option<(
+        InstalledPluginInfo,
+        crate::api::schema::PluginManifestReader,
+    )> {
+        let mut plugins: Vec<&InstalledPluginInfo> = self
+            .state
+            .installed_plugins
+            .values()
+            .filter(|plugin| plugin.enabled && plugin_manifest_available(plugin))
+            .collect();
+        plugins.sort_by(|left, right| left.plugin_id.cmp(&right.plugin_id));
+        plugins.into_iter().find_map(|plugin| {
+            plugin
+                .readers
+                .iter()
+                .find(|reader| {
+                    reader.kind == kind
+                        && ensure_platform_supported(
+                            effective_platforms(&reader.platforms, &plugin.platforms),
+                            "reader",
+                        )
+                        .is_ok()
+                })
+                .map(|reader| (plugin.clone(), reader.clone()))
+        })
+    }
+
+    /// Starts one read of a wait's source off the main loop; its outcome comes back as
+    /// `WaitReadFinished`.
+    pub(in crate::app) fn start_wait_read(
+        &mut self,
+        wait_id: u64,
+        plugin: &InstalledPluginInfo,
+        reader: &crate::api::schema::PluginManifestReader,
+        source: &str,
+    ) {
+        let mut args: Vec<String> = reader.command.iter().skip(1).cloned().collect();
+        args.push(source.to_owned());
+        let Some(program) = reader.command.first().cloned() else {
+            return;
+        };
+        let mut env = super::env::plugin_path_env(plugin);
+        env.extend([
+            (
+                crate::api::SOCKET_PATH_ENV_VAR.to_string(),
+                crate::api::socket_path().display().to_string(),
+            ),
+            ("HERDR_ENV".to_string(), "1".to_string()),
+            ("HERDR_PLUGIN_ID".to_string(), plugin.plugin_id.clone()),
+            ("HERDR_WAIT_ID".to_string(), wait_id.to_string()),
+        ]);
+        if let Ok(current_exe) = crate::platform::launch_executable() {
+            env.push((
+                "HERDR_BIN_PATH".to_string(),
+                current_exe.display().to_string(),
+            ));
+        }
+        let request = crate::app::wait_readers::ReadRequest {
+            program,
+            args,
+            cwd: std::path::PathBuf::from(&plugin.plugin_root),
+            env,
+            timeout: crate::app::wait_readers::READ_TIMEOUT,
+        };
+        #[cfg(test)]
+        {
+            let mut argv = vec![request.program.clone()];
+            argv.extend(request.args.iter().cloned());
+            self.wait_reads.started_for_test.push((wait_id, argv));
+        }
+        #[cfg(not(test))]
+        {
+            let event_tx = self.event_tx.clone();
+            tokio::spawn(async move {
+                let outcome = crate::app::wait_readers::run_read(request).await;
+                let _ = event_tx
+                    .send(crate::events::AppEvent::WaitReadFinished { wait_id, outcome })
+                    .await;
+            });
+        }
+    }
+
     fn push_plugin_command_log(&mut self, log: PluginCommandLogInfo) {
         self.state.plugin_command_logs.push(log);
         if self.state.plugin_command_logs.len() > PLUGIN_COMMAND_LOG_LIMIT {

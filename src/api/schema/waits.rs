@@ -162,9 +162,15 @@ pub struct WaitInfo {
     /// The last time a reader reached the source.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_ok_at_ms: Option<u64>,
+    /// The state the last successful read found.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_state: Option<String>,
     /// Reader errors in a row.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub errors: u32,
+    /// What the last failed read said, while errors run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
 }
 
 /// A wait of this agent's fired to the user, who has not dealt with it yet.

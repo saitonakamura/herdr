@@ -84,4 +84,7 @@ pub struct ServerCapabilities {
     /// The `on` source kinds `wait.declare` accepts; empty means deadlines only.
     #[serde(default)]
     pub wait_sources: Vec<String>,
+    /// Plugins can add wait source kinds with `[[readers]]`; `plugin.list` shows which.
+    #[serde(default)]
+    pub wait_readers: bool,
 }

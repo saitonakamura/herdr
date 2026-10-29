@@ -20,6 +20,8 @@ pub(crate) const LIVE_LIMIT: usize = 1024;
 pub(crate) const FINISHED_HISTORY_LIMIT: usize = 500;
 /// The source kind of a wait on another agent; its target is that agent's id.
 pub(crate) const NODE_SOURCE: &str = "node";
+/// Kinds herdr keeps for itself; a plugin reader cannot claim them.
+pub(crate) const RESERVED_SOURCES: &[&str] = &[NODE_SOURCE, "run"];
 /// What a node wait waits for when `until` is left out.
 pub(crate) const NODE_UNTIL_DEFAULT: TaskStatus = TaskStatus::Complete;
 
@@ -144,8 +146,12 @@ pub(crate) struct Wait {
     pub needs_user: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_ok_at_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_state: Option<String>,
     #[serde(default, skip_serializing_if = "is_zero")]
     pub errors: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
 }
 
 impl Wait {
@@ -198,7 +204,9 @@ impl Wait {
             fired,
             needs_user: self.needs_user,
             last_ok_at_ms: self.last_ok_at_ms,
+            last_state: self.last_state.clone(),
             errors: self.errors,
+            last_error: self.last_error.clone(),
         }
     }
 
@@ -407,7 +415,9 @@ impl WaitStore {
             state: WaitState::Live,
             needs_user: false,
             last_ok_at_ms: None,
+            last_state: None,
             errors: 0,
+            last_error: None,
         };
         self.index.add(&wait);
         self.records.waits.push(wait);
@@ -479,6 +489,31 @@ impl WaitStore {
         });
         self.evict_finished();
         self.get(id)
+    }
+
+    /// Records a reader's answer on a live wait; returns the errors now in a row.
+    pub(crate) fn record_read(
+        &mut self,
+        id: u64,
+        at_ms: u64,
+        read: Result<String, String>,
+    ) -> Option<u32> {
+        if !self.get(id)?.is_live() {
+            return None;
+        }
+        self.modify(id, |wait| match read {
+            Ok(state) => {
+                wait.last_ok_at_ms = Some(at_ms);
+                wait.last_state = Some(state);
+                wait.errors = 0;
+                wait.last_error = None;
+            }
+            Err(error) => {
+                wait.errors = wait.errors.saturating_add(1);
+                wait.last_error = Some(error);
+            }
+        });
+        self.get(id).map(|wait| wait.errors)
     }
 
     /// Marks a live wait satisfied: its source reached the state it waited for.
@@ -637,6 +672,22 @@ impl WaitStore {
             "only a fired wait can need the user"
         );
     }
+}
+
+/// `90s`, `30m`, `2h`, `1d` or `250ms`, in milliseconds.
+pub(crate) fn parse_duration_ms(value: &str) -> Option<u64> {
+    let unit_at = value.find(|ch: char| !ch.is_ascii_digit())?;
+    let (count, unit) = value.split_at(unit_at);
+    let count: u64 = count.parse().ok()?;
+    let unit_ms = match unit {
+        "ms" => 1,
+        "s" => 1_000,
+        "m" => 60_000,
+        "h" => 3_600_000,
+        "d" => 86_400_000,
+        _ => return None,
+    };
+    count.checked_mul(unit_ms)
 }
 
 /// Unix epoch ms now; deadlines are kept in wall-clock time so they survive a restart.

@@ -737,6 +737,7 @@ fn success_response_round_trips() {
                 agent_annotations: false,
                 agent_waits: false,
                 wait_sources: Vec::new(),
+                wait_readers: false,
             }),
         },
     };
@@ -1055,6 +1056,12 @@ fn plugin_link_list_unlink_round_trip() {
             pattern: "^https://github.com/[^/]+/[^/]+/(issues|pull)/[0-9]+$".into(),
             action: "bootstrap".into(),
             platforms: None,
+        }],
+        readers: vec![PluginManifestReader {
+            kind: "pr".into(),
+            platforms: None,
+            command: vec!["homebase".into(), "read".into(), "--json".into()],
+            interval_ms: 300_000,
         }],
         source: Default::default(),
         warnings: vec![],

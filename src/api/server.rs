@@ -87,6 +87,7 @@ fn default_capabilities() -> Option<ServerCapabilities> {
             .iter()
             .map(|kind| (*kind).to_owned())
             .collect(),
+        wait_readers: true,
     })
 }
 
@@ -1428,6 +1429,7 @@ mod tests {
                 agent_annotations: false,
                 agent_waits: false,
                 wait_sources: Vec::new(),
+                wait_readers: false,
             }),
             None,
             None,

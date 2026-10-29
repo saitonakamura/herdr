@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install a fork build (herdr and herdr-sidebar) for the dogfood side session, at
+# Install a fork build (herdr, herdr-sidebar and loom-rust) for the dogfood side session, at
 # its own prefix. Never touches the Homebrew herdr or any running server: each
 # binary is copied in and renamed over the old one, so a running side server
 # keeps its old inode.
@@ -33,29 +33,32 @@ stage() { # path name: copy in beside the old one and check it runs
   cp "$1" "$prefix/bin/$2.new"
   chmod 755 "$prefix/bin/$2.new"
   "$prefix/bin/$2.new" --version >/dev/null || {
-    rm -f "$prefix/bin/herdr.new" "$prefix/bin/herdr-sidebar.new"
+    rm -f "$prefix/bin/herdr.new" "$prefix/bin/herdr-sidebar.new" "$prefix/bin/loom-rust.new"
     die "the new $2 does not run"
   }
 }
 
-install_binary() { # herdr-path herdr-sidebar-path-or-empty source-description
+install_binary() { # herdr-path sidebar-path-or-empty source-description loom-path-or-empty
   mkdir -p "$prefix/bin"
-  # both are checked before either is renamed in, so a bad one leaves no half install
+  # Check every staged binary before replacing any installed one.
   stage "$1" herdr
   # the sidebar program (ADR 0006); releases before it have none
   [ -z "$2" ] || stage "$2" herdr-sidebar
+  [ -z "$4" ] || stage "$4" loom-rust
   # renamed over the old ones, so a running server and sidebar pane keep their inodes
   mv -f "$prefix/bin/herdr.new" "$prefix/bin/herdr"
   [ -z "$2" ] || mv -f "$prefix/bin/herdr-sidebar.new" "$prefix/bin/herdr-sidebar"
+  [ -z "$4" ] || mv -f "$prefix/bin/loom-rust.new" "$prefix/bin/loom-rust"
   printf '%s\ninstalled %s\n' "$3" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$prefix/SOURCE"
   status
 }
 
 cmd_release() {
-  local tag="${1:-}" asset sidebar patterns names
+  local tag="${1:-}" asset sidebar loom patterns names
   [ -n "$tag" ] || tag=$(gh release list -R "$repo_slug" --limit 1 --json tagName -q '.[0].tagName')
   asset=$(asset_name)
   sidebar=${asset/herdr-/herdr-sidebar-}
+  loom=${asset/herdr-/loom-rust-}
   patterns=(-p "$asset" -p SHA256SUMS)
   # releases before herdr-fork 030 ship no sidebar; rolling back to one keeps the installed sidebar
   names=$(gh release view "$tag" -R "$repo_slug" --json assets -q '.assets[].name') || die "no release $tag"
@@ -65,11 +68,17 @@ cmd_release() {
     echo "dogfood: release $tag has no $sidebar; leaving herdr-sidebar as it is" >&2
     sidebar=
   fi
+  if grep -qx "$loom" <<<"$names"; then
+    patterns+=(-p "$loom")
+  else
+    echo "dogfood: release $tag has no $loom; leaving loom-rust as it is" >&2
+    loom=
+  fi
   tmp=$(mktemp -d)
   trap 'rm -rf "$tmp"' EXIT
   gh release download "$tag" -R "$repo_slug" -D "$tmp" "${patterns[@]}"
   (cd "$tmp" && sha256sum --check --ignore-missing --strict SHA256SUMS) || die "checksum mismatch for $asset${sidebar:+ or $sidebar}"
-  install_binary "$tmp/$asset" "${sidebar:+$tmp/$sidebar}" "release $tag ($asset)"
+  install_binary "$tmp/$asset" "${sidebar:+$tmp/$sidebar}" "release $tag ($asset)" "${loom:+$tmp/$loom}"
 }
 
 # a PR number resolves to its head branch; anything else is taken as a branch name
@@ -98,7 +107,7 @@ cmd_build() {
     git -C "$build_wt" merge -q --no-ff --no-commit "${refs[@]}" || die "the branches do not merge cleanly onto master"
   fi
   (cd "$build_wt" && cargo build --release --locked)
-  install_binary "$build_wt/target/release/herdr" "$build_wt/target/release/herdr-sidebar" "$desc"
+  install_binary "$build_wt/target/release/herdr" "$build_wt/target/release/herdr-sidebar" "$desc" "$build_wt/target/release/loom-rust"
 }
 
 status() {
@@ -106,6 +115,9 @@ status() {
   echo "$prefix/bin/herdr: $("$prefix/bin/herdr" --version)"
   if [ -x "$prefix/bin/herdr-sidebar" ]; then
     echo "$prefix/bin/herdr-sidebar: $("$prefix/bin/herdr-sidebar" --version)"
+  fi
+  if [ -x "$prefix/bin/loom-rust" ]; then
+    echo "$prefix/bin/loom-rust: $("$prefix/bin/loom-rust" --version)"
   fi
   cat "$prefix/SOURCE" 2>/dev/null || true
 }

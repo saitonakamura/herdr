@@ -1,7 +1,7 @@
 ---
 id: herdr-fork-agent-waits
 title: Agent waits with persisted deadlines, node monitors, reader hooks and run supervision
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map

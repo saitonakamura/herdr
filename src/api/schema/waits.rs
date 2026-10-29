@@ -64,9 +64,12 @@ cli_params! {
         /// Required, unless `rearm` names a wait to inherit it from.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub then: Option<WaitDecider> => Field::new(None).input(bindings::then()),
+        /// What it watches. `node` watches another agent, named by agent id, agent name or pane
+        /// id: reaching `until` satisfies the wait, and any other terminal task status or a close fires it.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub on: Option<WaitSourceInfo> => Field::new(None).input(bindings::on()),
-        /// The source state that satisfies the wait, interpreted per source kind.
+        /// The source state that satisfies the wait, interpreted per source kind. A `node` wait takes
+        /// a task status: `complete` (the default), `failed`, `closed`, `needs_parent` or `needs_user`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub until: Option<String> => Field::new(None).input(bindings::until()),
         /// A fired wait of the same waiter to re-arm: the new wait inherits its extensions and `then`.

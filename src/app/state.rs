@@ -1185,6 +1185,18 @@ impl AppState {
 
     pub fn assert_invariants_for_test(&self) {
         self.waits.assert_invariants_for_test();
+        for terminal in self.terminals.values() {
+            let declared = terminal
+                .agent_id
+                .as_ref()
+                .is_some_and(|agent_id| self.waits.live_count(agent_id) > 0);
+            assert_eq!(
+                terminal.declared_wait(),
+                declared,
+                "terminal {} awaiting-from-a-wait drifted from the wait store",
+                terminal.id.as_str()
+            );
+        }
         if self.workspaces.is_empty() {
             assert!(
                 self.active.is_none(),

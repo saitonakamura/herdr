@@ -170,3 +170,44 @@ Where the build settled something this document left open, or departed from it:
   The Linux-only `tests/cli/surface.rs` check that `herdr wait output …` is refused
   now expects clap's `unrecognized subcommand 'output'` instead of `unknown command: wait`.
 - **`time` gains its `parsing` feature** for RFC 3339 deadlines. No new crate.
+
+## Changes made while building PR2 (2026-10-29)
+
+PR2 adds `node` to `wait_sources`, and `awaiting` derived from a live wait. The design
+above said only "fires on its terminal task status or on close"; this is how the build
+settled it:
+
+- **The node is kept by agent id.** `on.target` may name an agent id, an agent name or a
+  pane id; declare resolves it once and stores the id, so a rename or a move changes
+  nothing. herdr keeps no record of closed agents, so a well-formed agent id that names no
+  agent counts as a node that has closed. An agent cannot wait on itself.
+- **`until` is a task status**: `complete` (the default), `failed`, `closed`,
+  `needs_parent` or `needs_user`. `starting`, `running` and anything else are refused with
+  `invalid_wait`. loom's `done` is herdr's `complete`, which loom already translates.
+- **Reaching `until` satisfies the wait and tells the waiter**, whatever `then` says: the
+  decider is for a wait that did not end well, and satisfaction is the waiter's own news. It
+  is a `tell` from `herdr wait`, `wait <id> satisfied: <reason>: <summary>`, with `wait_id`,
+  and `wait.finished` carries the satisfied wait.
+- **Any other end fires the wait to its decider**: a terminal status that is not `until`
+  (`complete` or `failed`) as `node <id> reported <status>`, a close as `node <id> closed`.
+  A `needs_*` status that is not `until` leaves it live. The deadline, extensions and
+  escalation apply to node waits unchanged.
+- **A wait settles at declare** when its node has already closed or already reports a status
+  that settles it. The `wait.declare` response then carries the settled state, after a
+  `wait.declared` event.
+- **Both messages restate what was awaited and read the node again** (080's "fresh read"):
+  the body names the node and its task status now, or `closed`.
+- **Cost.** The store indexes live node waits by node, so a status report touches only the
+  waits on that agent. Closes ride the identity sync, which already runs when an agent goes
+  away and after a load or handoff; it visits the watched nodes, not every wait. When the
+  waiter and its node go together, the waiter's cancel runs first, so nobody is told.
+- **`awaiting` from a wait is a flag on the terminal**, set from the store whenever a
+  waiter's waits change and re-derived by the identity sync after a load or handoff. While
+  it is set, the effective state turns `idle` into `awaiting`. `working` and `blocked`
+  outrank it, and a pane with no agent state stays `unknown`. `AppState`'s invariants check
+  the flag against the store.
+- **A wait-driven `awaiting` ending is not a completion**, unlike the sentinel's (028): no
+  done sound or toast, and the pane does not turn `done`. The wait's own message or
+  `wait_needs_user` is the news; a completion on top would ping for every fire, just before
+  the message wakes the agent.
+

@@ -71,6 +71,8 @@ impl App {
             self.schedule_session_save();
         }
         self.cancel_waits_of_gone_agents(&live);
+        self.settle_waits_on_gone_nodes(&live);
+        self.sync_declared_waits();
         if changed.is_empty() {
             return;
         }

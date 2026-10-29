@@ -305,7 +305,7 @@ impl App {
             .and_then(|terminal| terminal.agent_id.clone()))
     }
 
-    fn agent_display_name(&self, agent_id: &AgentId) -> String {
+    pub(super) fn agent_display_name(&self, agent_id: &AgentId) -> String {
         self.terminal_with_agent_id(agent_id)
             .and_then(|terminal_id| self.state.terminals.get(&terminal_id))
             .and_then(|terminal| terminal.agent_name.clone())

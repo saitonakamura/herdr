@@ -2,20 +2,21 @@
 
 use super::responses::{encode_error, encode_error_body, encode_success};
 use crate::api::schema::{
-    EventData, EventEnvelope, EventKind, MessageKind, ResponseResult, WaitCancelParams,
+    EventData, EventEnvelope, EventKind, MessageKind, ResponseResult, TaskStatus, WaitCancelParams,
     WaitDecider, WaitDeclareParams, WaitExtendParams, WaitInfo, WaitListParams, WaitListState,
     WaitTarget,
 };
 use crate::app::messages::NewMessage;
 use crate::app::waits::{
-    epoch_now_ms, ChangeError, DeclareError, NewWait, Wait, WaitRecipient, WaitSource, WaitState,
-    LIVE_LIMIT, LIVE_PER_WAITER_LIMIT, MAX_EXTENSIONS,
+    epoch_now_ms, node_outcome, node_until, task_status_name, ChangeError, DeclareError, NewWait,
+    NodeOutcome, Wait, WaitRecipient, WaitSource, WaitState, LIVE_LIMIT, LIVE_PER_WAITER_LIMIT,
+    MAX_EXTENSIONS, NODE_SOURCE,
 };
 use crate::app::App;
 use crate::terminal::AgentId;
 
 /// Source kinds `wait.declare` accepts in `on`; advertised as `wait_sources`.
-pub(crate) const WAIT_SOURCES: &[&str] = &[];
+pub(crate) const WAIT_SOURCES: &[&str] = &[NODE_SOURCE];
 
 /// The sender name a fired wait's message carries.
 const WAIT_SENDER: &str = "herdr wait";
@@ -54,13 +55,39 @@ impl App {
             Ok(agent_id) => agent_id,
             Err(err) => return encode_error_body(id, self.agent_parent_error_body(err)),
         };
+        let (on, until) = match params.on {
+            Some(on) if on.kind == NODE_SOURCE => {
+                let Some(until) = node_until(params.until.as_deref()) else {
+                    return invalid_wait(
+                        id,
+                        "a node wait's until is a task status: complete, failed, closed, needs_parent or needs_user",
+                    );
+                };
+                let node = match self.node_agent_id(&on.target) {
+                    Ok(node) => node,
+                    Err(err) => return encode_error_body(id, self.agent_parent_error_body(err)),
+                };
+                if node == waiter {
+                    return invalid_wait(id, "an agent cannot wait on itself");
+                }
+                let on = WaitSource {
+                    kind: on.kind,
+                    target: node.to_string(),
+                };
+                (Some(on), Some(task_status_name(until).to_owned()))
+            }
+            on => (
+                on.map(|on| WaitSource {
+                    kind: on.kind,
+                    target: on.target,
+                }),
+                params.until,
+            ),
+        };
         let declared = self.state.waits.declare(NewWait {
             waiter: waiter.clone(),
-            on: params.on.map(|on| WaitSource {
-                kind: on.kind,
-                target: on.target,
-            }),
-            until: params.until,
+            on,
+            until,
             summary,
             deadline_at_ms,
             then: params.then,
@@ -71,12 +98,29 @@ impl App {
             Ok(wait) => wait.info(),
             Err(err) => return declare_error(id, err, params.rearm, &waiter),
         };
+        let wait_id = wait.wait_id;
         self.waits_changed(&waiter);
         self.emit_event(EventEnvelope {
             event: EventKind::WaitDeclared,
-            data: EventData::WaitDeclared { wait: wait.clone() },
+            data: EventData::WaitDeclared { wait },
         });
-        encode_success(id, ResponseResult::WaitInfo { wait })
+        // A node that has closed, or already reached a state the wait cares about, settles it now.
+        self.settle_node_wait_now(wait_id);
+        match self.state.waits.get(wait_id) {
+            Some(wait) => encode_success(id, ResponseResult::WaitInfo { wait: wait.info() }),
+            None => wait_not_found(id, wait_id),
+        }
+    }
+
+    /// The node's agent id. An id that names no agent is a node that has closed.
+    fn node_agent_id(
+        &mut self,
+        target: &str,
+    ) -> Result<AgentId, crate::app::agent_identity::AgentParentError> {
+        match self.message_agent_id(target) {
+            Ok(node) => Ok(node),
+            Err(err) => AgentId::parse(target).ok_or(err),
+        }
     }
 
     pub(in crate::app) fn handle_wait_list(
@@ -180,8 +224,100 @@ impl App {
             return;
         }
         for wait_id in self.state.waits.due(now) {
-            self.fire_wait(wait_id, now);
+            let missed = self
+                .state
+                .waits
+                .get(wait_id)
+                .is_some_and(|wait| wait.deadline_at_ms < self.state.server_started_at_ms);
+            let reason = if missed {
+                "deadline passed while the server was down"
+            } else {
+                "deadline passed"
+            };
+            self.fire_wait(wait_id, now, reason.to_owned());
         }
+    }
+
+    /// A node's task status changed: settles the live waits on it that this concerns.
+    pub(in crate::app) fn node_task_status_changed(&mut self, node: &AgentId, status: TaskStatus) {
+        for wait_id in self.state.waits.live_on_node(node) {
+            self.settle_node_wait(wait_id, status);
+        }
+    }
+
+    /// Settles the live waits on nodes that are gone, as `closed`.
+    pub(in crate::app) fn settle_waits_on_gone_nodes(
+        &mut self,
+        live: &std::collections::HashSet<AgentId>,
+    ) {
+        for wait_id in self.state.waits.live_on_nodes_not_in(live) {
+            self.settle_node_wait(wait_id, TaskStatus::Closed);
+        }
+    }
+
+    fn settle_node_wait_now(&mut self, wait_id: u64) {
+        let Some(node) = self
+            .state
+            .waits
+            .get(wait_id)
+            .and_then(|wait| wait.on.as_ref()?.node())
+        else {
+            return;
+        };
+        let status = match self.terminal_with_agent_id(&node) {
+            Some(terminal_id) => self
+                .state
+                .terminals
+                .get(&terminal_id)
+                .and_then(|terminal| terminal.task_status),
+            None => Some(TaskStatus::Closed),
+        };
+        if let Some(status) = status {
+            self.settle_node_wait(wait_id, status);
+        }
+    }
+
+    fn settle_node_wait(&mut self, wait_id: u64, status: TaskStatus) {
+        let Some(wait) = self.state.waits.get(wait_id).filter(|wait| wait.is_live()) else {
+            return;
+        };
+        let Some(node) = wait.on.as_ref().and_then(WaitSource::node) else {
+            return;
+        };
+        let until =
+            node_until(wait.until.as_deref()).unwrap_or(crate::app::waits::NODE_UNTIL_DEFAULT);
+        match node_outcome(&node, until, status) {
+            Some(NodeOutcome::Satisfied(reason)) => {
+                self.satisfy_wait(wait_id, epoch_now_ms(), reason);
+            }
+            Some(NodeOutcome::Fired(reason)) => self.fire_wait(wait_id, epoch_now_ms(), reason),
+            None => {}
+        }
+    }
+
+    /// Marks a wait satisfied and tells its waiter, whatever its decider: this is the waiter's news.
+    fn satisfy_wait(&mut self, wait_id: u64, now: u64, reason: String) {
+        let Some(wait) = self.state.waits.satisfy(wait_id, now).cloned() else {
+            return;
+        };
+        tracing::info!(wait_id, reason, "wait satisfied");
+        let body = self.wait_satisfied_body(&wait);
+        self.queue_message(NewMessage {
+            kind: MessageKind::Tell,
+            from: None,
+            from_name: WAIT_SENDER.to_owned(),
+            to: wait.waiter.clone(),
+            summary: format!("wait {wait_id} satisfied: {reason}: {}", wait.summary),
+            body: Some(body),
+            reply_to: None,
+            sent_at_ms: now,
+            wait_id: Some(wait_id),
+        });
+        self.waits_changed(&wait.waiter);
+        self.emit_event(EventEnvelope {
+            event: EventKind::WaitFinished,
+            data: EventData::WaitFinished { wait: wait.info() },
+        });
     }
 
     /// The next deadline as an `Instant`, converted against the wall clock now.
@@ -192,14 +328,9 @@ impl App {
         now.checked_add(std::time::Duration::from_millis(wait))
     }
 
-    fn fire_wait(&mut self, wait_id: u64, now: u64) {
+    fn fire_wait(&mut self, wait_id: u64, now: u64, reason: String) {
         let Some(wait) = self.state.waits.get(wait_id).cloned() else {
             return;
-        };
-        let reason = if wait.deadline_at_ms < self.state.server_started_at_ms {
-            "deadline passed while the server was down"
-        } else {
-            "deadline passed"
         };
         let escalated = wait.extensions >= MAX_EXTENSIONS;
         let mut deciders = vec![wait.then];
@@ -213,13 +344,11 @@ impl App {
                 recipients.push(recipient);
             }
         }
-        let Some(fired) = self.state.waits.fire(
-            wait_id,
-            now,
-            reason.to_owned(),
-            recipients.clone(),
-            escalated,
-        ) else {
+        let Some(fired) =
+            self.state
+                .waits
+                .fire(wait_id, now, reason.clone(), recipients.clone(), escalated)
+        else {
             return;
         };
         let info = fired.info();
@@ -265,21 +394,15 @@ impl App {
     }
 
     fn wait_message_body(&self, wait: &Wait, escalated: bool) -> String {
-        let waiter = self
-            .terminal_with_agent_id(&wait.waiter)
-            .and_then(|terminal_id| self.state.terminals.get(&terminal_id))
-            .and_then(|terminal| terminal.agent_name.clone())
-            .map_or_else(
-                || wait.waiter.to_string(),
-                |name| format!("{name} ({})", wait.waiter),
-            );
         let then = match wait.then {
             WaitDecider::Waiter => "self",
             WaitDecider::Parent => "parent",
             WaitDecider::User => "user",
         };
         let mut body = format!(
-            "waiter: {waiter}\nthen: {then}\nextensions: {} of {MAX_EXTENSIONS}",
+            "waiter: {}\n{}then: {then}\nextensions: {} of {MAX_EXTENSIONS}",
+            self.agent_label(&wait.waiter),
+            self.wait_source_lines(wait),
             wait.extensions
         );
         if escalated {
@@ -290,6 +413,50 @@ impl App {
             wait.waiter, wait.id, wait.id
         ));
         body
+    }
+
+    fn wait_satisfied_body(&self, wait: &Wait) -> String {
+        format!(
+            "waiter: {}\n{}\nsee `herdr wait show {}`",
+            self.agent_label(&wait.waiter),
+            self.wait_source_lines(wait),
+            wait.id
+        )
+    }
+
+    /// What the wait watched, read again now: the node's name and where it stands.
+    fn wait_source_lines(&self, wait: &Wait) -> String {
+        let Some(on) = &wait.on else {
+            return String::new();
+        };
+        let Some(node) = on.node() else {
+            return format!("on: {}:{}\n", on.kind, on.target);
+        };
+        let until = wait.until.as_deref().unwrap_or_default();
+        let now = match self
+            .terminal_with_agent_id(&node)
+            .and_then(|terminal_id| self.state.terminals.get(&terminal_id))
+        {
+            Some(terminal) => terminal
+                .task_status
+                .map_or("no task status reported", task_status_name)
+                .to_owned(),
+            None => "closed".to_owned(),
+        };
+        format!(
+            "on: node {}, until {until}\nnode now: {now}\n",
+            self.agent_label(&node)
+        )
+    }
+
+    /// `name (id)`, or the id alone for an agent without a name or one that has closed.
+    fn agent_label(&self, agent_id: &AgentId) -> String {
+        let name = self.agent_display_name(agent_id);
+        if name == agent_id.to_string() {
+            name
+        } else {
+            format!("{name} ({agent_id})")
+        }
     }
 
     /// The waiter, its parent and the user may change a wait. A pane without an agent asks as
@@ -358,7 +525,8 @@ impl App {
         cleared
     }
 
-    /// Saves, and republishes the waiter's pane: its `live_waits` or `wait_needs_user` moved.
+    /// Saves, and republishes the waiter's pane: its `live_waits` or `wait_needs_user` moved, and
+    /// with them maybe whether it is awaiting.
     fn waits_changed(&mut self, waiter: &AgentId) {
         self.state.mark_session_dirty();
         self.schedule_session_save();
@@ -367,6 +535,47 @@ impl App {
             .and_then(|terminal_id| self.pane_for_terminal(&terminal_id))
         {
             self.emit_pane_updated(ws_idx, pane_id);
+            let declared = self.state.waits.live_count(waiter) > 0;
+            self.set_pane_declared_wait(pane_id, declared);
+        }
+    }
+
+    /// Brings every agent's awaiting-from-a-wait in line with the store, after a load or handoff.
+    pub(in crate::app) fn sync_declared_waits(&mut self) {
+        let stale: Vec<crate::terminal::TerminalId> = self
+            .state
+            .terminals
+            .values()
+            .filter(|terminal| {
+                let declared = terminal
+                    .agent_id
+                    .as_ref()
+                    .is_some_and(|agent_id| self.state.waits.live_count(agent_id) > 0);
+                terminal.declared_wait() != declared
+            })
+            .map(|terminal| terminal.id.clone())
+            .collect();
+        for terminal_id in stale {
+            let declared = self
+                .state
+                .terminals
+                .get(&terminal_id)
+                .and_then(|terminal| terminal.agent_id.as_ref())
+                .is_some_and(|agent_id| self.state.waits.live_count(agent_id) > 0);
+            match self.pane_for_terminal(&terminal_id) {
+                Some((_, pane_id)) => self.set_pane_declared_wait(pane_id, declared),
+                None => {
+                    if let Some(terminal) = self.state.terminals.get_mut(&terminal_id) {
+                        terminal.set_declared_wait(declared, std::time::Instant::now());
+                    }
+                }
+            }
+        }
+    }
+
+    fn set_pane_declared_wait(&mut self, pane_id: crate::layout::PaneId, declared: bool) {
+        if let Some(update) = self.state.set_declared_wait(pane_id, declared) {
+            self.emit_pane_state_update(&update);
         }
     }
 }
@@ -465,8 +674,8 @@ fn wait_not_found(id: String, wait_id: u64) -> String {
 #[cfg(test)]
 mod tests {
     use crate::api::schema::{
-        EventData, EventKind, MessageKind, MessageSendParams, Method, PaneTarget, Request,
-        TaskStatus, WaitCancelParams, WaitDecider, WaitDeclareParams, WaitExtendParams,
+        AgentStatus, EventData, EventKind, MessageKind, MessageSendParams, Method, PaneTarget,
+        Request, TaskStatus, WaitCancelParams, WaitDecider, WaitDeclareParams, WaitExtendParams,
         WaitSourceInfo,
     };
     use crate::app::waits::{epoch_now_ms, NewWait, WaitRecipient, WaitState};
@@ -599,6 +808,57 @@ mod tests {
                 WaitState::Fired { to, escalated, .. } => (to.clone(), *escalated),
                 state => panic!("wait {id} has not fired: {state:?}"),
             }
+        }
+
+        /// Declares a wait of `waiter` on the agent in `node`, through the API.
+        fn declare_on(
+            &mut self,
+            waiter: PaneId,
+            node: &str,
+            until: Option<&str>,
+            then: WaitDecider,
+        ) -> serde_json::Value {
+            let waiter = self.public(waiter);
+            self.call(Method::WaitDeclare(WaitDeclareParams {
+                waiter,
+                summary: "the worker's brief".into(),
+                deadline_at_ms: None,
+                deadline_in_ms: Some(LATER),
+                then: Some(then),
+                on: Some(WaitSourceInfo {
+                    kind: "node".into(),
+                    target: node.into(),
+                }),
+                until: until.map(str::to_owned),
+                rearm: None,
+            }))
+        }
+
+        fn report(&mut self, pane: PaneId, status: TaskStatus) {
+            let target = self.public(pane);
+            self.app
+                .set_agent_task_status(&target, status)
+                .ok()
+                .unwrap();
+        }
+
+        fn state(&self, id: u64) -> WaitState {
+            self.app.state.waits.get(id).unwrap().state.clone()
+        }
+
+        fn agent_state(&mut self, pane: PaneId) -> AgentState {
+            self.terminal(pane).state
+        }
+
+        fn agent_statuses(&self) -> Vec<AgentStatus> {
+            self.events
+                .events_after(0)
+                .into_iter()
+                .filter_map(|(_, event)| match event.data {
+                    EventData::PaneAgentStatusChanged { agent_status, .. } => Some(agent_status),
+                    _ => None,
+                })
+                .collect()
         }
 
         fn event_kinds(&self) -> Vec<EventKind> {
@@ -935,7 +1195,7 @@ mod tests {
     }
 
     #[test]
-    fn declare_refuses_what_pr1_cannot_keep() {
+    fn declare_refuses_what_it_cannot_keep() {
         let mut f = fixture();
         let waiter = f.public(f.worker);
         let declare = |change: &dyn Fn(&mut WaitDeclareParams)| {
@@ -956,8 +1216,8 @@ mod tests {
             (
                 &(|p: &mut WaitDeclareParams| {
                     p.on = Some(WaitSourceInfo {
-                        kind: "node".into(),
-                        target: "1234abcd".into(),
+                        kind: "mr".into(),
+                        target: "herdr!12".into(),
                     })
                 }) as &dyn Fn(&mut WaitDeclareParams),
                 "wait_source_unsupported",
@@ -1056,5 +1316,225 @@ mod tests {
             .unwrap();
         assert_eq!(declared.summary, "CI on !12");
         assert_eq!(declared.waiter_agent_id, f.id(f.worker).to_string());
+    }
+
+    #[test]
+    fn a_node_reaching_until_satisfies_the_wait_and_tells_the_waiter() {
+        let mut f = fixture();
+        let (worker, lead) = (f.id(f.worker), f.id(f.lead));
+        let declared = f.declare_on(f.lead, &f.public(f.worker), None, WaitDecider::Parent);
+        let wait = &declared["result"]["wait"];
+        assert_eq!(wait["state"], "live", "{declared}");
+        assert_eq!(
+            wait["on"]["target"],
+            worker.to_string(),
+            "the node is kept by agent id"
+        );
+        assert_eq!(wait["until"], "complete", "until defaults to complete");
+        let id = wait["wait_id"].as_u64().unwrap();
+
+        f.report(f.worker, TaskStatus::Running);
+        f.report(f.worker, TaskStatus::NeedsParent);
+        assert_eq!(f.state(id), WaitState::Live);
+        f.report(f.worker, TaskStatus::Complete);
+
+        assert!(matches!(f.state(id), WaitState::Satisfied { .. }));
+        assert_eq!(
+            f.messages(),
+            vec![(
+                lead,
+                format!("wait {id} satisfied: node {worker} reported complete: the worker's brief"),
+                Some(id)
+            )],
+            "the waiter is told, not its decider"
+        );
+        let body = f
+            .app
+            .state
+            .messages
+            .iter()
+            .next()
+            .unwrap()
+            .body
+            .clone()
+            .unwrap();
+        assert!(body.contains("node now: complete"), "{body}");
+        assert_eq!(
+            f.event_kinds(),
+            vec![
+                EventKind::WaitDeclared,
+                EventKind::MessageQueued,
+                EventKind::WaitFinished
+            ]
+        );
+        f.app.state.assert_invariants_for_test();
+    }
+
+    #[test]
+    fn a_node_that_ends_another_way_fires_the_wait_to_its_decider() {
+        let mut f = fixture();
+        f.make_lead_parent();
+        let lead = f.id(f.lead);
+        let declared = f.declare_on(f.worker, &f.public(f.lead), None, WaitDecider::Parent);
+        let id = declared["result"]["wait"]["wait_id"].as_u64().unwrap();
+
+        f.report(f.lead, TaskStatus::Failed);
+
+        assert_eq!(
+            f.fired_to(id),
+            (vec![WaitRecipient::Agent(lead.clone())], false)
+        );
+        assert_eq!(
+            f.messages()[0].1,
+            format!("wait {id} fired: node {lead} reported failed: the worker's brief")
+        );
+        f.app.state.assert_invariants_for_test();
+    }
+
+    #[test]
+    fn a_node_that_closes_fires_its_waits_and_satisfies_a_wait_for_the_close() {
+        let mut f = fixture();
+        let worker = f.id(f.worker);
+        let node = f.public(f.worker);
+        let done = f.declare_on(f.lead, &node, Some("complete"), WaitDecider::Waiter)["result"]
+            ["wait"]["wait_id"]
+            .as_u64()
+            .unwrap();
+        let closed = f.declare_on(f.lead, &node, Some("closed"), WaitDecider::Waiter)["result"]
+            ["wait"]["wait_id"]
+            .as_u64()
+            .unwrap();
+
+        let closing = f.call(Method::PaneClose(PaneTarget { pane_id: node }));
+        assert_eq!(closing["result"]["type"], "ok", "{closing}");
+        f.app.sync_agent_identities();
+
+        assert!(matches!(
+            f.state(done),
+            WaitState::Fired { ref reason, .. } if *reason == format!("node {worker} closed")
+        ));
+        assert!(matches!(f.state(closed), WaitState::Satisfied { .. }));
+        let summaries: Vec<String> = f
+            .messages()
+            .into_iter()
+            .map(|(_, summary, _)| summary)
+            .collect();
+        assert_eq!(
+            summaries,
+            vec![
+                format!("wait {done} fired: node {worker} closed: the worker's brief"),
+                format!("wait {closed} satisfied: node {worker} closed: the worker's brief"),
+            ]
+        );
+        f.app.state.assert_invariants_for_test();
+    }
+
+    #[test]
+    fn a_wait_on_a_node_that_is_gone_or_already_there_settles_at_once() {
+        let mut f = fixture();
+        let gone = f.declare_on(f.lead, "9abcdef0", None, WaitDecider::Waiter);
+        assert_eq!(gone["result"]["wait"]["state"], "fired", "{gone}");
+        assert_eq!(
+            gone["result"]["wait"]["fired"]["reason"],
+            "node 9abcdef0 closed"
+        );
+
+        f.report(f.worker, TaskStatus::Complete);
+        let there = f.declare_on(f.lead, &f.public(f.worker), None, WaitDecider::Waiter);
+        assert_eq!(there["result"]["wait"]["state"], "satisfied", "{there}");
+        assert_eq!(f.messages().len(), 2);
+        assert_eq!(f.app.agent_info(0, f.lead).unwrap().live_waits, None);
+        f.app.state.assert_invariants_for_test();
+    }
+
+    #[test]
+    fn a_node_wait_refuses_itself_an_unknown_until_and_an_unknown_name() {
+        let mut f = fixture();
+        let worker = f.public(f.worker);
+        let itself = f.declare_on(f.worker, &worker, None, WaitDecider::Waiter);
+        assert_eq!(itself["error"]["code"], "invalid_wait", "{itself}");
+        let merged = f.declare_on(f.lead, &worker, Some("merged"), WaitDecider::Waiter);
+        assert_eq!(merged["error"]["code"], "invalid_wait", "{merged}");
+        let nobody = f.declare_on(f.lead, "nobody", None, WaitDecider::Waiter);
+        assert!(nobody["error"]["code"].is_string(), "{nobody}");
+        assert!(f.app.state.waits.is_empty());
+    }
+
+    #[test]
+    fn a_live_wait_turns_an_idle_turn_into_awaiting_and_its_end_is_quiet() {
+        let mut f = fixture();
+        f.declare(Some(WaitDecider::Waiter));
+        assert_eq!(
+            f.agent_state(f.worker),
+            AgentState::Working,
+            "working outranks a wait"
+        );
+
+        f.terminal(f.worker)
+            .set_detected_state(Some(Agent::Claude), AgentState::Idle);
+        assert_eq!(f.agent_state(f.worker), AgentState::Awaiting);
+        f.app.state.assert_invariants_for_test();
+
+        let id = f.app.state.waits.iter().next().unwrap().id;
+        f.app.state.waits.set_deadline_for_test(id, 1);
+        f.app.fire_due_waits();
+
+        assert_eq!(f.agent_state(f.worker), AgentState::Idle);
+        assert_eq!(
+            f.app.agent_info(0, f.worker).unwrap().agent_status,
+            AgentStatus::Idle,
+            "the fire is the news, so the wait's end is no completion"
+        );
+        assert!(!f
+            .app
+            .state
+            .pending_agent_notifications
+            .contains_key(&f.worker));
+        f.app.state.assert_invariants_for_test();
+    }
+
+    #[test]
+    fn an_idle_agent_that_declares_a_wait_is_awaiting_until_it_ends() {
+        let mut f = fixture();
+        f.terminal(f.worker)
+            .set_detected_state(Some(Agent::Claude), AgentState::Idle);
+        let declared = f.declare(Some(WaitDecider::Waiter));
+        let id = declared["result"]["wait"]["wait_id"].as_u64().unwrap();
+        assert_eq!(f.agent_state(f.worker), AgentState::Awaiting);
+        assert_eq!(f.agent_statuses(), vec![AgentStatus::Awaiting]);
+
+        let cancelled = f.call(Method::WaitCancel(WaitCancelParams {
+            wait_id: id,
+            by: None,
+        }));
+        assert_eq!(
+            cancelled["result"]["wait"]["state"], "cancelled",
+            "{cancelled}"
+        );
+        assert_eq!(f.agent_state(f.worker), AgentState::Idle);
+        assert_eq!(
+            f.agent_statuses(),
+            vec![AgentStatus::Awaiting, AgentStatus::Idle]
+        );
+        f.app.state.assert_invariants_for_test();
+    }
+
+    #[test]
+    fn awaiting_from_a_wait_comes_back_after_a_load() {
+        let mut before = fixture();
+        before.declare(Some(WaitDecider::Waiter));
+        let saved = serde_json::to_string(&before.app.state.waits).unwrap();
+
+        let mut f = fixture();
+        let worker = before.id(before.worker);
+        f.terminal(f.worker).agent_id = Some(worker);
+        f.terminal(f.worker)
+            .set_detected_state(Some(Agent::Claude), AgentState::Idle);
+        f.app.state.waits = serde_json::from_str(&saved).unwrap();
+        f.app.state.agent_identities_dirty = true;
+        f.app.sync_agent_identities();
+
+        assert_eq!(f.agent_state(f.worker), AgentState::Awaiting);
+        f.app.state.assert_invariants_for_test();
     }
 }

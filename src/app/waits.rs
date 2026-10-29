@@ -7,7 +7,8 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 
 use crate::api::schema::{
-    WaitDecider, WaitFiredInfo, WaitInfo, WaitNeedsUserInfo, WaitSourceInfo, WaitState as ApiState,
+    TaskStatus, WaitDecider, WaitFiredInfo, WaitInfo, WaitNeedsUserInfo, WaitSourceInfo,
+    WaitState as ApiState,
 };
 use crate::terminal::AgentId;
 
@@ -17,11 +18,81 @@ pub(crate) const LIVE_PER_WAITER_LIMIT: u32 = 32;
 pub(crate) const LIVE_LIMIT: usize = 1024;
 /// Finished waits kept for `wait list`; live ones are never evicted.
 pub(crate) const FINISHED_HISTORY_LIMIT: usize = 500;
+/// The source kind of a wait on another agent; its target is that agent's id.
+pub(crate) const NODE_SOURCE: &str = "node";
+/// What a node wait waits for when `until` is left out.
+pub(crate) const NODE_UNTIL_DEFAULT: TaskStatus = TaskStatus::Complete;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct WaitSource {
     pub kind: String,
     pub target: String,
+}
+
+impl WaitSource {
+    /// The agent a node wait watches.
+    pub(crate) fn node(&self) -> Option<AgentId> {
+        (self.kind == NODE_SOURCE)
+            .then(|| AgentId::parse(&self.target))
+            .flatten()
+    }
+}
+
+/// What a node's new task status (or its close, as `closed`) does to a wait on it, with the reason.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum NodeOutcome {
+    Satisfied(String),
+    Fired(String),
+}
+
+/// The task statuses a node wait may wait for: a terminal one, or a call for help.
+pub(crate) fn node_until(until: Option<&str>) -> Option<TaskStatus> {
+    let Some(until) = until else {
+        return Some(NODE_UNTIL_DEFAULT);
+    };
+    let status: TaskStatus =
+        serde_json::from_value(serde_json::Value::String(until.into())).ok()?;
+    matches!(
+        status,
+        TaskStatus::Complete
+            | TaskStatus::Failed
+            | TaskStatus::Closed
+            | TaskStatus::NeedsParent
+            | TaskStatus::NeedsUser
+    )
+    .then_some(status)
+}
+
+/// Reaching `until` satisfies the wait; ending any other way fires it; anything else waits on.
+pub(crate) fn node_outcome(
+    node: &AgentId,
+    until: TaskStatus,
+    status: TaskStatus,
+) -> Option<NodeOutcome> {
+    let reason = match status {
+        TaskStatus::Closed => format!("node {node} closed"),
+        status => format!("node {node} reported {}", task_status_name(status)),
+    };
+    if status == until {
+        return Some(NodeOutcome::Satisfied(reason));
+    }
+    matches!(
+        status,
+        TaskStatus::Closed | TaskStatus::Complete | TaskStatus::Failed
+    )
+    .then_some(NodeOutcome::Fired(reason))
+}
+
+pub(crate) fn task_status_name(status: TaskStatus) -> &'static str {
+    match status {
+        TaskStatus::Starting => "starting",
+        TaskStatus::Running => "running",
+        TaskStatus::NeedsParent => "needs_parent",
+        TaskStatus::NeedsUser => "needs_user",
+        TaskStatus::Complete => "complete",
+        TaskStatus::Failed => "failed",
+        TaskStatus::Closed => "closed",
+    }
 }
 
 /// Who a fire went to.
@@ -191,6 +262,8 @@ struct WaitIndex {
     deadlines: BTreeSet<(u64, u64)>,
     live_per_waiter: HashMap<AgentId, u32>,
     needs_user_per_waiter: HashMap<AgentId, u32>,
+    /// Live node waits by the agent they watch, so a status change touches only its own.
+    live_on_node: HashMap<AgentId, BTreeSet<u64>>,
 }
 
 impl WaitIndex {
@@ -198,6 +271,9 @@ impl WaitIndex {
         if wait.is_live() {
             self.deadlines.insert((wait.deadline_at_ms, wait.id));
             *self.live_per_waiter.entry(wait.waiter.clone()).or_default() += 1;
+            if let Some(node) = wait.on.as_ref().and_then(WaitSource::node) {
+                self.live_on_node.entry(node).or_default().insert(wait.id);
+            }
         }
         if wait.needs_user {
             *self
@@ -211,6 +287,14 @@ impl WaitIndex {
         if wait.is_live() {
             self.deadlines.remove(&(wait.deadline_at_ms, wait.id));
             decrement(&mut self.live_per_waiter, &wait.waiter);
+            if let Some(node) = wait.on.as_ref().and_then(WaitSource::node) {
+                if let Some(ids) = self.live_on_node.get_mut(&node) {
+                    ids.remove(&wait.id);
+                    if ids.is_empty() {
+                        self.live_on_node.remove(&node);
+                    }
+                }
+            }
         }
         if wait.needs_user {
             decrement(&mut self.needs_user_per_waiter, &wait.waiter);
@@ -395,6 +479,38 @@ impl WaitStore {
         });
         self.evict_finished();
         self.get(id)
+    }
+
+    /// Marks a live wait satisfied: its source reached the state it waited for.
+    pub(crate) fn satisfy(&mut self, id: u64, at_ms: u64) -> Option<&Wait> {
+        if !self.get(id)?.is_live() {
+            return None;
+        }
+        self.modify(id, |wait| wait.state = WaitState::Satisfied { at_ms });
+        self.evict_finished();
+        self.get(id)
+    }
+
+    /// The live waits on `node`, oldest first.
+    pub(crate) fn live_on_node(&self, node: &AgentId) -> Vec<u64> {
+        self.index
+            .live_on_node
+            .get(node)
+            .map(|ids| ids.iter().copied().collect())
+            .unwrap_or_default()
+    }
+
+    /// The live node waits whose node is not in `live`, oldest first.
+    pub(crate) fn live_on_nodes_not_in(&self, live: &HashSet<AgentId>) -> Vec<u64> {
+        let mut ids: Vec<u64> = self
+            .index
+            .live_on_node
+            .iter()
+            .filter(|(node, _)| !live.contains(*node))
+            .flat_map(|(_, ids)| ids.iter().copied())
+            .collect();
+        ids.sort_unstable();
+        ids
     }
 
     /// Cancels the live waits of waiters that are gone, and drops what they needed from the user.
@@ -807,5 +923,93 @@ mod tests {
             serde_json::from_str::<WaitStore>("{}").unwrap(),
             WaitStore::default()
         );
+    }
+
+    fn on_node(waiter: &str, node: &str) -> NewWait {
+        let mut wait = new(waiter, 10);
+        wait.on = Some(WaitSource {
+            kind: NODE_SOURCE.into(),
+            target: node.into(),
+        });
+        wait.until = Some("complete".into());
+        wait
+    }
+
+    #[test]
+    fn the_node_index_holds_live_node_waits_only() {
+        let mut store = WaitStore::default();
+        let (node, other) = (agent("3333cccc"), agent("4444dddd"));
+        let satisfied = store.declare(on_node("1111aaaa", "3333cccc")).unwrap().id;
+        let fired = store.declare(on_node("2222bbbb", "3333cccc")).unwrap().id;
+        let elsewhere = store.declare(on_node("1111aaaa", "4444dddd")).unwrap().id;
+        store.declare(new("1111aaaa", 10)).unwrap();
+        assert_eq!(store.live_on_node(&node), vec![satisfied, fired]);
+
+        store.satisfy(satisfied, 30).unwrap();
+        fire(&mut store, fired);
+        assert!(store.live_on_node(&node).is_empty());
+        assert!(
+            store.satisfy(satisfied, 40).is_none(),
+            "a finished wait stays finished"
+        );
+        assert!(matches!(
+            store.get(satisfied).unwrap().state,
+            WaitState::Satisfied { at_ms: 30 }
+        ));
+        assert_eq!(
+            store.live_on_nodes_not_in(&HashSet::from([node.clone()])),
+            vec![elsewhere]
+        );
+        assert!(store
+            .live_on_nodes_not_in(&HashSet::from([node, other]))
+            .is_empty());
+        store.assert_invariants_for_test();
+    }
+
+    #[test]
+    fn a_node_wait_waits_for_a_terminal_status_or_a_call_for_help() {
+        assert_eq!(node_until(None), Some(TaskStatus::Complete));
+        for until in ["complete", "failed", "closed", "needs_parent", "needs_user"] {
+            assert!(node_until(Some(until)).is_some(), "{until}");
+        }
+        for until in ["running", "starting", "done", "merged", ""] {
+            assert_eq!(node_until(Some(until)), None, "{until}");
+        }
+    }
+
+    #[test]
+    fn reaching_until_satisfies_and_ending_otherwise_fires() {
+        let node = agent("3333cccc");
+        let outcome = |until, status| node_outcome(&node, until, status);
+        assert_eq!(
+            outcome(TaskStatus::Complete, TaskStatus::Complete),
+            Some(NodeOutcome::Satisfied(
+                "node 3333cccc reported complete".into()
+            ))
+        );
+        assert_eq!(
+            outcome(TaskStatus::Complete, TaskStatus::Failed),
+            Some(NodeOutcome::Fired("node 3333cccc reported failed".into()))
+        );
+        assert_eq!(
+            outcome(TaskStatus::Complete, TaskStatus::Closed),
+            Some(NodeOutcome::Fired("node 3333cccc closed".into()))
+        );
+        assert_eq!(
+            outcome(TaskStatus::Closed, TaskStatus::Closed),
+            Some(NodeOutcome::Satisfied("node 3333cccc closed".into()))
+        );
+        assert_eq!(
+            outcome(TaskStatus::NeedsParent, TaskStatus::Complete),
+            Some(NodeOutcome::Fired("node 3333cccc reported complete".into()))
+        );
+        for status in [
+            TaskStatus::Starting,
+            TaskStatus::Running,
+            TaskStatus::NeedsParent,
+            TaskStatus::NeedsUser,
+        ] {
+            assert_eq!(outcome(TaskStatus::Complete, status), None, "{status:?}");
+        }
     }
 }

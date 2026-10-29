@@ -63,11 +63,12 @@ pub(crate) fn on() -> Input<Option<WaitSourceInfo>> {
         });
         Ok(())
     })
-    .help("What it watches; `herdr status server --json` lists the kinds as wait_sources")
+    .help("What it watches, such as node:<agent>; `herdr status server --json` lists the kinds as wait_sources")
 }
 
 pub(crate) fn until() -> Input<Option<String>> {
-    optional_text("until", "STATE").help("The source state that satisfies it")
+    optional_text("until", "STATE")
+        .help("The source state that satisfies it; for node, a task status (default complete)")
 }
 
 pub(crate) fn rearm() -> Input<Option<u64>> {

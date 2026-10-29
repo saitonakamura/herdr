@@ -433,6 +433,10 @@ A wait is a deadline an agent declares on what it is waiting for, which Herdr ke
 
 `list` prints live waits oldest first; `--state` or `--all` selects others. An agent keeps at most 32 live waits and a session 1024. Herdr keeps live waits until they finish and the most recent 500 finished ones. When a waiter's pane closes its live waits are cancelled and nobody is told. `--on` and `--until` name a source to watch, such as another agent; a server lists the kinds it accepts as `wait_sources` in `herdr status server --json`, and refuses others with `wait_source_unsupported`. Waits persist with the session and survive a live handoff, and changes are published as `wait.declared`, `wait.fired` and `wait.finished` events.
 
+`--on node:<agent>` waits on another agent, named by agent ID, agent name or pane ID, until its task status reaches `--until`: `complete` (the default), `failed`, `closed`, `needs_parent` or `needs_user`. Reaching it satisfies the wait, and the waiter gets a `tell` from `herdr wait`, `wait <id> satisfied: <reason>: <summary>`, whoever `--then` names. Any other terminal status (`complete`, `failed`) or the agent's pane closing fires the wait to its decider instead, with the reason `node <id> reported <status>` or `node <id> closed`, and the deadline still applies. A wait on an agent that has already closed, or already reached `--until`, settles when it is declared. Both messages restate what was awaited and where the node stands now.
+
+While an agent has a live wait, an idle turn reads as `awaiting` rather than `idle` or `done`, and messages still reach it at once. The wait ending is not a completion: its message or flag is the news.
+
 ## Direct terminal attach
 
 ```bash

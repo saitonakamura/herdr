@@ -1613,6 +1613,18 @@ impl AppState {
         })
     }
 
+    /// Turns an idle turn into awaiting while the pane's agent has a live wait. A wait ending is
+    /// never a completion: its fire or satisfaction is the news, sent as a message or a flag.
+    pub(crate) fn set_declared_wait(
+        &mut self,
+        pane_id: PaneId,
+        declared: bool,
+    ) -> Option<PaneStateUpdate> {
+        self.update_terminal_state_with_completion_policy(pane_id, true, |terminal| {
+            terminal.set_declared_wait(declared, Instant::now())
+        })
+    }
+
     fn update_terminal_state<F>(&mut self, pane_id: PaneId, update: F) -> Option<PaneStateUpdate>
     where
         F: FnOnce(&mut crate::terminal::TerminalState) -> Option<TerminalStateMutation>,

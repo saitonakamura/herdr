@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-pi-sandbox-restore
 title: Sandboxed pi panes lose their agent across a server restart
-status: open
+status: in-progress
 labels:
   - wayfinder:research
 parent: herdr-fork-map
 blocked_by:
 assignee:
-claimed_by:
+claimed_by: macos/w1:p1C/cf45927f-48be-411e-b901-c5fc907ce3c3
 ---
 
 ## Question

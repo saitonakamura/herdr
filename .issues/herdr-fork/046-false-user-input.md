@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-false-user-input
 title: Last user input fires without the user typing
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee: saitonakamura
-claimed_by:
+claimed_by: macos/w1:p1E/01a1879b-9f57-72bc-87b0-7c140b1baf02
 ---
 
 ## Question

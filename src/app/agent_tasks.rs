@@ -18,22 +18,27 @@ impl App {
     ) -> Result<crate::api::schema::PaneInfo, AgentParentError> {
         let (ws_idx, pane_id, terminal_id) = self.resolve_agent_identity_target(target)?;
         let mut changed = self.assign_agent_identity(&terminal_id, None);
+        let mut status_changed = false;
         if let Some(terminal) = self.state.terminals.get_mut(&terminal_id) {
-            changed |= terminal.task_status != Some(status);
+            status_changed = terminal.task_status != Some(status);
             terminal.task_status = Some(status);
         }
-        if let Some(agent_id) = self
+        changed |= status_changed;
+        let agent_id = self
             .state
             .terminals
             .get(&terminal_id)
-            .and_then(|terminal| terminal.agent_id.clone())
-        {
-            changed |= self.clear_wait_needs_user(&agent_id);
+            .and_then(|terminal| terminal.agent_id.clone());
+        if let Some(agent_id) = &agent_id {
+            changed |= self.clear_wait_needs_user(agent_id);
         }
         if changed {
             self.state.mark_session_dirty();
             self.schedule_session_save();
             self.emit_pane_updated(ws_idx, pane_id);
+        }
+        if let Some(agent_id) = agent_id.filter(|_| status_changed) {
+            self.node_task_status_changed(&agent_id, status);
         }
         self.pane_info(ws_idx, pane_id).ok_or_else(|| {
             AgentParentError::Target(super::terminal_targets::TerminalTargetError::NotFound {

@@ -5414,7 +5414,8 @@
                 {
                   "type": "null"
                 }
-              ]
+              ],
+              "description": "What it watches. `node` watches another agent, named by agent id, agent name or pane\nid: reaching `until` satisfies the wait, and any other terminal task status or a close fires it."
             },
             "rearm": {
               "description": "A fired wait of the same waiter to re-arm: the new wait inherits its extensions and `then`.",
@@ -5441,7 +5442,7 @@
               "description": "Required, unless `rearm` names a wait to inherit it from."
             },
             "until": {
-              "description": "The source state that satisfies the wait, interpreted per source kind.",
+              "description": "The source state that satisfies the wait, interpreted per source kind. A `node` wait takes\na task status: `complete` (the default), `failed`, `closed`, `needs_parent` or `needs_user`.",
               "type": [
                 "string",
                 "null"

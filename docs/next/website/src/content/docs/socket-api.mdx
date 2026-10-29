@@ -866,8 +866,10 @@ Wait event subscriptions include `wait.declared`, `wait.fired` and
 `wait.finished`. Each carries the `wait`, with its `wait_id`,
 `waiter_agent_id`, `state`, `summary`, `deadline_at_ms`, `then`, `extensions`
 and, once it fired, `fired` with the `reason`, the agent IDs messaged (`user`
-for the user) and whether it `escalated`. `wait.finished` is a cancel, or a
-waiter closing. `wait.declare` and `wait.extend` take `deadline_at_ms`, a Unix
+for the user) and whether it `escalated`. `wait.finished` is a wait satisfied,
+a cancel, or a waiter closing. A `node` wait keeps its `on.target` as the
+watched agent's ID and its `until` as a task status. An agent with a live wait
+reports `awaiting` where it would report `idle` or `done`. `wait.declare` and `wait.extend` take `deadline_at_ms`, a Unix
 time in milliseconds, or `deadline_in_ms`, from now. Agent info carries
 `live_waits` and, while a fire to the user is unanswered, `wait_needs_user`
 with its `wait_id` and `reason`. Servers with waits advertise `agent_waits` and

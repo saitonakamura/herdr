@@ -215,6 +215,8 @@ pub struct TerminalState {
     pub restore_error: Option<String>,
     /// Repo facts for the checkout containing `cwd`, from the last Git refresh.
     pub repo: Option<crate::workspace::PaneRepo>,
+    /// The agent has a live declared wait, so an idle turn reads as awaiting; derived from the wait store.
+    declared_wait: bool,
 }
 
 impl TerminalState {
@@ -269,7 +271,38 @@ impl TerminalState {
             pending_agent_resume_plan: None,
             restore_error: None,
             repo: None,
+            declared_wait: false,
         }
+    }
+
+    pub(crate) fn declared_wait(&self) -> bool {
+        self.declared_wait
+    }
+
+    /// Sets whether the agent has a live declared wait, which turns an idle turn into awaiting.
+    pub(crate) fn set_declared_wait(
+        &mut self,
+        declared: bool,
+        now: Instant,
+    ) -> Option<TerminalStateMutation> {
+        if self.declared_wait == declared {
+            return None;
+        }
+        let previous_agent_label = self.effective_agent_label().map(str::to_string);
+        let previous_known_agent = self.effective_known_agent();
+        let previous_state = self.state;
+        let previous_presentation = self.effective_presentation_for_state_at(previous_state, now);
+        self.declared_wait = declared;
+        Some(TerminalStateMutation {
+            effective_state_change: self.recompute_effective_state(
+                previous_agent_label,
+                previous_known_agent,
+                previous_state,
+                previous_presentation,
+                now,
+            ),
+            ..TerminalStateMutation::default()
+        })
     }
 
     /// Stores refreshed repo facts; true when anything a reader can see changed.
@@ -2259,6 +2292,16 @@ impl TerminalState {
     }
 
     fn effective_state_and_blocked_reason(
+        &self,
+        now: Instant,
+    ) -> (AgentState, Option<BlockedReason>) {
+        match self.reported_effective_state_and_blocked_reason(now) {
+            (AgentState::Idle, reason) if self.declared_wait => (AgentState::Awaiting, reason),
+            reported => reported,
+        }
+    }
+
+    fn reported_effective_state_and_blocked_reason(
         &self,
         now: Instant,
     ) -> (AgentState, Option<BlockedReason>) {

@@ -7,7 +7,7 @@ labels:
 parent: herdr-fork-map
 blocked_by:
 assignee: saitonakamura
-claimed_by: macos/w6:p1/1c20d1ee-126a-481b-8c9c-86fa895c2f11
+claimed_by: macos/w1:p1B/20882d05-38fc-405c-8a42-17bbe55db2c6
 ---
 
 ## Question

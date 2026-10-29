@@ -53,6 +53,6 @@ host-pi dogfood run), finished in the cockpit.
 - **The 10-26 incident is not explained by this.** That pane was in the normal
   client shell, which already drops modifier-only keys before forwarding them
   (`src/client/shell/input.rs`, except into a popup pane). Its stamp came from a
-  key, text or paste event the client forwarded; which one was not captured. If
-  it shows again, record the pane's input with `RUST_LOG=herdr::server=debug` at
-  the time and reopen.
+  key, text or paste event the client forwarded; which one was not captured, and
+  no log records it today. If it shows again, reopen with a trace on the stamp
+  first, then reproduce.

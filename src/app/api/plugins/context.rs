@@ -212,6 +212,17 @@ impl App {
                     })
                     .unwrap_or_else(|| empty_plugin_context(correlation_id))
             }
+            EventData::WaitDeclared { wait }
+            | EventData::WaitFired { wait }
+            | EventData::WaitFinished { wait } => {
+                crate::terminal::AgentId::parse(&wait.waiter_agent_id)
+                    .and_then(|agent_id| self.terminal_with_agent_id(&agent_id))
+                    .and_then(|terminal_id| self.pane_for_terminal(&terminal_id))
+                    .map(|(ws_idx, pane_id)| {
+                        self.plugin_context_for_pane(ws_idx, pane_id, correlation_id)
+                    })
+                    .unwrap_or_else(|| empty_plugin_context(correlation_id))
+            }
         }
     }
 

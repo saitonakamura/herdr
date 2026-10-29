@@ -3364,6 +3364,8 @@ impl HeadlessServer {
             }
         }
 
+        self.app.fire_due_waits();
+
         if self.git_refresh_scheduled() {
             self.app.start_git_status_refresh_if_due(now);
         }

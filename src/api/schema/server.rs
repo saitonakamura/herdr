@@ -78,4 +78,10 @@ pub struct ServerCapabilities {
     /// Keeps annotations per agent (`agent.annotate`).
     #[serde(default)]
     pub agent_annotations: bool,
+    /// Keeps agent waits with deadlines (`wait.*`).
+    #[serde(default)]
+    pub agent_waits: bool,
+    /// The `on` source kinds `wait.declare` accepts; empty means deadlines only.
+    #[serde(default)]
+    pub wait_sources: Vec<String>,
 }

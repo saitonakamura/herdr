@@ -109,6 +109,7 @@ Raw socket method names use dot notation:
 | Layout | `layout.export`, `layout.apply`, `layout.set_split_ratio` |
 | Agent | `agent.list`, `agent.get`, `agent.read`, `agent.explain`, `agent.send_keys`, `agent.prompt`, `agent.wait`, `agent.rename`, `agent.set_parent`, `agent.set_args`, `agent.set_task_status`, `agent.close`, `agent.annotate`, `agent.focus`, `agent.start`, `agent.view.set`, `agent.view.clear` |
 | Message | `message.send`, `message.list`, `message.get`, `message.withdraw` |
+| Wait | `wait.declare`, `wait.list`, `wait.get`, `wait.extend`, `wait.cancel` |
 | Events | `events.subscribe`, `events.wait` |
 | Integrations | `integration.install`, `integration.uninstall` |
 | Plugins | `plugin.link`, `plugin.list`, `plugin.unlink`, `plugin.enable`, `plugin.disable`, `plugin.action.list`, `plugin.action.invoke`, `plugin.log.list`, `plugin.pane.open`, `plugin.pane.focus`, `plugin.pane.close` |
@@ -860,6 +861,18 @@ Message event subscriptions include `message.queued` and `message.delivered`.
 Both carry the `message`, with its `message_id`, `kind`, `state`, sender,
 `to_agent_id`, `summary` and optional `body`. `message.delivered` fires once the
 message was typed into the recipient's pane, once for each message of a block.
+
+Wait event subscriptions include `wait.declared`, `wait.fired` and
+`wait.finished`. Each carries the `wait`, with its `wait_id`,
+`waiter_agent_id`, `state`, `summary`, `deadline_at_ms`, `then`, `extensions`
+and, once it fired, `fired` with the `reason`, the agent IDs messaged (`user`
+for the user) and whether it `escalated`. `wait.finished` is a cancel, or a
+waiter closing. `wait.declare` and `wait.extend` take `deadline_at_ms`, a Unix
+time in milliseconds, or `deadline_in_ms`, from now. Agent info carries
+`live_waits` and, while a fire to the user is unanswered, `wait_needs_user`
+with its `wait_id` and `reason`. Servers with waits advertise `agent_waits` and
+the `on` source kinds they accept as `wait_sources`. A message a wait sent
+carries its `wait_id`.
 
 Worktree event subscriptions include `worktree.created`, `worktree.opened`, and `worktree.removed`. Worktree events describe Git checkout lifecycle. `worktree.created` includes the `workspace` holding the new tab and the created `worktree`, whose `open_tab_id` names the tab. `worktree.opened` includes the tab's `workspace`, opened `worktree`, and `already_open`. `worktree.removed` includes the `workspace_id`, removed `worktree`, and `forced`.
 

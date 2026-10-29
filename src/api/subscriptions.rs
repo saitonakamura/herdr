@@ -167,6 +167,9 @@ impl ActiveSubscription {
             Subscription::MessageDelivered {} => {
                 Ok(event_subscription(EventKind::MessageDelivered))
             }
+            Subscription::WaitDeclared {} => Ok(event_subscription(EventKind::WaitDeclared)),
+            Subscription::WaitFired {} => Ok(event_subscription(EventKind::WaitFired)),
+            Subscription::WaitFinished {} => Ok(event_subscription(EventKind::WaitFinished)),
             Subscription::PaneOutputMatched {
                 pane_id,
                 source,

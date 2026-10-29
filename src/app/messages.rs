@@ -28,6 +28,8 @@ pub(crate) struct Message {
     pub sent_at_ms: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delivered_at_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait_id: Option<u64>,
 }
 
 impl Message {
@@ -52,6 +54,7 @@ impl Message {
             reply_to: self.reply_to,
             sent_at_ms: self.sent_at_ms,
             delivered_at_ms: self.delivered_at_ms,
+            wait_id: self.wait_id,
         }
     }
 }
@@ -66,6 +69,7 @@ pub(crate) struct NewMessage {
     pub body: Option<String>,
     pub reply_to: Option<u64>,
     pub sent_at_ms: u64,
+    pub wait_id: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -100,6 +104,7 @@ impl MessageStore {
             reply_to: new.reply_to,
             sent_at_ms: new.sent_at_ms,
             delivered_at_ms: None,
+            wait_id: new.wait_id,
         });
         &self.messages[self.messages.len() - 1]
     }
@@ -301,6 +306,7 @@ mod tests {
             body: None,
             reply_to: None,
             sent_at_ms: 10,
+            wait_id: None,
         }
     }
 

@@ -14,6 +14,7 @@ pub mod response;
 pub mod server;
 pub mod session;
 pub mod tabs;
+pub mod waits;
 pub mod workspaces;
 pub mod worktrees;
 
@@ -30,6 +31,7 @@ pub use response::*;
 pub use server::*;
 pub use session::*;
 pub use tabs::*;
+pub use waits::*;
 pub use workspaces::*;
 pub use worktrees::*;
 
@@ -157,6 +159,11 @@ operations::define_operations! {
     MessageList(MessageListParams) => "message.list", false, false;
     MessageGet(MessageTarget) => "message.get", false, false;
     MessageWithdraw(MessageTarget) => "message.withdraw", false, false;
+    WaitDeclare(WaitDeclareParams) => "wait.declare", false, false;
+    WaitList(WaitListParams) => "wait.list", false, false;
+    WaitGet(WaitTarget) => "wait.get", false, false;
+    WaitExtend(WaitExtendParams) => "wait.extend", false, false;
+    WaitCancel(WaitCancelParams) => "wait.cancel", false, false;
     AgentSetTaskStatus(AgentSetTaskStatusParams) => "agent.set_task_status", false, false;
     AgentClose(AgentCloseParams) => "agent.close", true, false;
     AgentAnnotate(AgentAnnotateParams) => "agent.annotate", false, false;

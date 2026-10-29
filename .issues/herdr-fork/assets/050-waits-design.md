@@ -131,3 +131,40 @@ New methods; none of them changes an existing one.
    it once `MessageKind` gains a fallback.
 3. **A waiter that closes cancels its live waits silently.** A parent that needs
    to know when a child closes declares a wait on that child (PR2).
+
+## Changes made while building PR1 (2026-10-29)
+
+Where the build settled something this document left open, or departed from it:
+
+- **`deadline_in` is `deadline_in_ms`**, an integer of milliseconds. The CLI parses
+  `90s` / `30m` / `2h` / `1d` and RFC 3339 itself and sends one of the two fields,
+  so the server never parses durations. A deadline that is not in the future is
+  refused (`invalid_wait`), and so is `until` without `on`.
+- **`then` may be left out on a re-arm**, which inherits it. Giving a different one
+  is refused rather than silently ignored. Only a fired wait of the same waiter can
+  be re-armed.
+- **`extend` and `cancel` take an optional `by`**, the asker, and both allow only
+  the waiter, its current Parent or the user. Omitting `by`, or naming a pane with
+  no agent, asks as the user (that is a person at a shell). The CLI defaults `by`
+  to the calling pane, like `message send --from`, and `--user` overrides it.
+  The design said this only of `cancel`; giving `extend` the same rule keeps an
+  unrelated agent from spending another agent's extensions.
+- **A fire to the user sends no message**: herdr has no user inbox, so the
+  `wait_needs_user` flag is the whole fire, and `fired.to` records `user`.
+  `wait cancel` on a fired wait that still needs the user clears the flag and
+  leaves it `fired`. `wait_needs_user` shows the waiter's newest such wait.
+- **`wait.finished` also fires when a waiter's close cancels its waits.** Nobody
+  is messaged (decision 3), but an event reader still learns the wait ended.
+  `extend` publishes no `wait.*` event. Every change republishes the waiter's pane
+  (`pane.updated`), since `live_waits` or `wait_needs_user` moved.
+- **The missed-deadline reason is decided by comparison**: a deadline before the
+  moment this server built its state (`server_started_at_ms`, wall clock) passed
+  while it was down. A live handoff counts as down for the milliseconds it takes.
+- **Waits are not layout.** `layout_fingerprint` drops them as it drops messages,
+  or every declare would orphan the saved pane history.
+- **`herdr wait` is a top-level group**, mirroring `wait.*`. Upstream's
+  `spec_matches_refactored_agent_and_pane_commands` asserted there is no top-level
+  `wait`, to keep the old agent-status wait out after it moved under `agent`. The
+  fork narrows that assertion to "the top-level `wait` has no `--until` agent
+  status and has `declare`", which still guards the regression it was written for.
+- **`time` gains its `parsing` feature** for RFC 3339 deadlines. No new crate.

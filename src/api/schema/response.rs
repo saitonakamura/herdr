@@ -284,6 +284,12 @@ pub enum ResponseResult {
     MessageList {
         messages: Vec<super::messages::MessageInfo>,
     },
+    WaitInfo {
+        wait: super::waits::WaitInfo,
+    },
+    WaitList {
+        waits: Vec<super::waits::WaitInfo>,
+    },
     AgentsClosed {
         /// Deepest first, in the order they were (or would be) closed.
         agents: Vec<super::agents::ClosedAgentInfo>,

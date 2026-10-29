@@ -21,8 +21,8 @@ include = [
 ]
 
 [workspace]
-members = ["crates/ghostty-vt", "tools/sidebar"]
-default-members = [".", "crates/ghostty-vt", "tools/sidebar"]
+members = ["crates/ghostty-vt", "tools/sidebar", "tools/loom"]
+default-members = [".", "crates/ghostty-vt", "tools/sidebar", "tools/loom"]
 
 [dependencies]
 ghostty-vt = { path = "crates/ghostty-vt" }

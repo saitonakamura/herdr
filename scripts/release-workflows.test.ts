@@ -9,6 +9,26 @@ const preview = load("preview");
 const release = load("release");
 const adminGate = release.jobs["validate-release-source"].steps[0];
 
+describe("fork tool assets", () => {
+  test("ships loom beside herdr on all Unix targets, with checksums", () => {
+    const fork = load("fork-release");
+    const targets = fork.jobs.build.strategy.matrix.include;
+    const unix = targets.filter((target: any) => !target.name.endsWith(".zip"));
+    expect(unix).toHaveLength(4);
+    for (const target of unix) {
+      expect(target.loom).toBe(target.name.replace("herdr-", "loom-rust-"));
+    }
+    const packaging = fork.jobs.build.steps.find((step: any) => step.name === "Package artifact" && step.if === "runner.os != 'Windows'");
+    expect(packaging.run).toContain("/release/loom-rust ${{ matrix.loom }}");
+    const upload = fork.jobs.build.steps.find((step: any) => step.name === "Upload loom artifact");
+    expect(upload.if).toBe("runner.os != 'Windows'");
+    expect(upload.with.name).toBe("${{ matrix.loom }}");
+    const assemble = fork.jobs.release.steps.find((step: any) => step.name === "Assemble assets, notices and checksums");
+    for (const target of unix) expect(assemble.run).toContain(target.loom);
+    expect(assemble.run).toContain("sha256sum -- * > SHA256SUMS");
+  });
+});
+
 describe("official publishing workflow boundaries", () => {
   test("publishing is tag-only while normal PR CI remains enabled", () => {
     expect(preview.on).toEqual({ push: { tags: ["preview-*"] } });

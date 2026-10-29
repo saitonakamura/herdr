@@ -35,18 +35,22 @@ jobs:
             os: ubuntu-latest
             name: herdr-linux-x86_64
             sidebar: herdr-sidebar-linux-x86_64
+            loom: loom-rust-linux-x86_64
           - target: aarch64-unknown-linux-musl
             os: ubuntu-latest
             name: herdr-linux-aarch64
             sidebar: herdr-sidebar-linux-aarch64
+            loom: loom-rust-linux-aarch64
           - target: x86_64-apple-darwin
             os: macos-latest
             name: herdr-macos-x86_64
             sidebar: herdr-sidebar-macos-x86_64
+            loom: loom-rust-macos-x86_64
           - target: aarch64-apple-darwin
             os: macos-latest
             name: herdr-macos-aarch64
             sidebar: herdr-sidebar-macos-aarch64
+            loom: loom-rust-macos-aarch64
           - target: x86_64-pc-windows-msvc
             os: windows-2022
             name: herdr-windows-x86_64.zip
@@ -124,6 +128,7 @@ jobs:
           cp target/${{ matrix.target }}/release/herdr ${{ matrix.name }}
           # the sidebar program (ADR 0006) ships beside herdr on the unix targets
           cp target/${{ matrix.target }}/release/herdr-sidebar ${{ matrix.sidebar }}
+          cp target/${{ matrix.target }}/release/loom-rust ${{ matrix.loom }}
 
       - name: Package artifact
         if: runner.os == 'Windows'
@@ -159,6 +164,13 @@ jobs:
           name: ${{ matrix.sidebar }}
           path: ${{ matrix.sidebar }}
 
+      - name: Upload loom artifact
+        if: runner.os != 'Windows'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ${{ matrix.loom }}
+          path: ${{ matrix.loom }}
+
   release:
     needs: build
     if: github.repository == 'saitonakamura/herdr'
@@ -182,10 +194,11 @@ jobs:
           set -euo pipefail
           mkdir dist
           for name in herdr-linux-x86_64 herdr-linux-aarch64 herdr-macos-x86_64 herdr-macos-aarch64 herdr-windows-x86_64.zip \
-            herdr-sidebar-linux-x86_64 herdr-sidebar-linux-aarch64 herdr-sidebar-macos-x86_64 herdr-sidebar-macos-aarch64; do
+            herdr-sidebar-linux-x86_64 herdr-sidebar-linux-aarch64 herdr-sidebar-macos-x86_64 herdr-sidebar-macos-aarch64 \
+            loom-rust-linux-x86_64 loom-rust-linux-aarch64 loom-rust-macos-x86_64 loom-rust-macos-aarch64; do
             cp "artifacts/$name/$name" "dist/$name"
           done
-          chmod +x dist/herdr-linux-* dist/herdr-macos-* dist/herdr-sidebar-*
+          chmod +x dist/herdr-linux-* dist/herdr-macos-* dist/herdr-sidebar-* dist/loom-rust-*
           # Bare binaries cannot carry the license, so it ships beside them.
           cp LICENSE dist/LICENSE
           mkdir -p notices/THIRD-PARTY-NOTICES

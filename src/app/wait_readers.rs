@@ -18,6 +18,8 @@ pub(crate) const ORPHANED_LIVENESS_WINDOW: Duration = Duration::from_secs(15 * 6
 pub(crate) const MIN_READ_INTERVAL_MS: u64 = 10_000;
 pub(crate) const MAX_READ_INTERVAL_MS: u64 = 86_400_000;
 /// Output kept from a read; the answer is one short line.
+// Test builds run reads only in the unix test; elsewhere `start_wait_read` records them instead.
+#[cfg_attr(all(test, not(unix)), allow(dead_code))]
 const READ_OUTPUT_LIMIT: u64 = 64 * 1024;
 /// When a read could not start for want of a slot, try again this soon.
 const BUSY_RETRY: Duration = Duration::from_secs(5);
@@ -197,6 +199,7 @@ impl ReaderSchedule {
 }
 
 /// A read to run off the main loop: the reader's argv with `<kind>:<target>` last.
+#[cfg_attr(all(test, not(unix)), allow(dead_code))]
 pub(crate) struct ReadRequest {
     pub program: String,
     pub args: Vec<String>,
@@ -207,6 +210,7 @@ pub(crate) struct ReadRequest {
 
 /// Runs one read in its own process group (a kill-on-close job on Windows), so a timeout or a
 /// server going away takes the reader's descendants with it.
+#[cfg_attr(all(test, not(unix)), allow(dead_code))]
 pub(crate) async fn run_read(request: ReadRequest) -> ReadOutcome {
     let mut command = crate::plugin_command::command_for_argv_in_dir(
         &request.program,
@@ -246,6 +250,7 @@ pub(crate) async fn run_read(request: ReadRequest) -> ReadOutcome {
     }
 }
 
+#[cfg_attr(all(test, not(unix)), allow(dead_code))]
 async fn read_capped(pipe: Option<impl tokio::io::AsyncRead + Unpin>) -> String {
     use tokio::io::AsyncReadExt;
     let Some(pipe) = pipe else {

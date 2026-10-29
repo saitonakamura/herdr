@@ -1,8 +1,8 @@
 # 050 agent waits: design for the first PR
 
-Draft, 2026-10-27, by the herdr-fork cockpit (personal session). The spec is
+Drafted 2026-10-27 by the herdr-fork cockpit (personal session); the user settled the open points on 2026-10-29. The spec is
 [050](../050-agent-waits.md), which mirrors dotfiles loom 089. The semantics come
-from loom 080's resolution. Everything marked **open** is waiting on the user.
+from loom 080's resolution.
 
 ## PR split
 
@@ -60,10 +60,10 @@ struct WaitSource { kind: String, target: String }  // "node" + agent id, "mr" +
   delivery (051) and `--reply-to` work unchanged. The message is a `tell` from
   `None` with `from_name = "herdr wait"`, summary `wait <id> fired: <reason>: <summary>`,
   and a new optional `wait_id` on `MessageInfo`.
-  `MessageKind` gains no variant (**open 2**).
+  `MessageKind` gains no variant (decision 2).
 - **Resolving the decider happens at fire time**, not at declare time, so a
   Parent that changed since is honoured. `self` is the waiter. `parent` is the
-  waiter's Parent, or the user when it has none. `user` is **open 1**.
+  waiter's Parent, or the user when it has none. `user` sets a separate flag (decision 1).
 
 ## Extensions and escalation (080 Q2)
 
@@ -78,7 +78,7 @@ struct WaitSource { kind: String, target: String }  // "node" + agent id, "mr" +
 ## Lifecycle
 
 - **The waiter closes:** its live waits go to `cancelled` and nothing fires
-  (**open 3**).
+  (decision 3).
 - **The waiter's pane moves, `/clear`s, or survives a restart or live handoff:**
   its waits stay, because the waiter is an `AgentId`, which survives all of these (010).
 - **Cancelling:** `wait cancel <id>`, allowed for the waiter, its Parent or the user.
@@ -119,20 +119,15 @@ New methods; none of them changes an existing one.
 - A live smoke test on a throwaway session: declare a 5 s wait, see the message
   arrive, restart the server mid-wait and see it fire on load.
 
-## Open (the user decides)
+## Decisions (user, 2026-10-29)
 
-1. **What `then user` does when it fires.** 080 Q6 says "a `needs_user` flag with
-   its reason". The proposal: it does **not** overwrite the waiter's `task_status`,
-   which is the agent's own report (loom 078 shows what a stale `needs_user`
-   costs). The fired wait stays visible instead: agent info gains optional
-   `wait_needs_user: { wait_id, reason }`, the sidebar's questions section (047)
-   shows it, and it clears when the wait is cancelled or re-armed, or the agent
-   reports. The alternative: set `task_status = needs_user` and let loom 078's fix
-   clear it.
-2. **How a fire is delivered.** The proposal: a `tell` plus a `wait_id` field. The
-   alternative, a new `MessageKind::Wait`, reads better, but `MessageKind` has no
-   `Unknown` fallback, so an older client listing messages would fail to parse it.
-3. **A waiter that closes with live waits.** The proposal: cancel them silently.
-   The alternative: fire them to the decider with reason `waiter closed`, which
-   tells a parent that a child it was counting on is gone. Node monitors (PR2)
-   cover that case from the parent's side anyway.
+1. **`then user` sets a separate flag, never `task_status`.** Agent info gains
+   optional `wait_needs_user: { wait_id, reason }`, and the sidebar's questions
+   section (047) shows it. It clears when the wait is cancelled or re-armed, or
+   when the waiter reports again. The waiter's `task_status` stays its own report
+   (loom 078 is what a second writer costs).
+2. **A fire is a `tell` with an optional `wait_id`, for now.** `MessageKind` has
+   no `Unknown` fallback, so a new `kind: wait` would break older clients. Revisit
+   it once `MessageKind` gains a fallback.
+3. **A waiter that closes cancels its live waits silently.** A parent that needs
+   to know when a child closes declares a wait on that child (PR2).

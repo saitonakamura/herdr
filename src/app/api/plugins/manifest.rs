@@ -1,7 +1,7 @@
 use crate::api::schema::{
     InstalledPluginInfo, PluginManifestAction, PluginManifestBuild, PluginManifestEventHook,
-    PluginManifestLinkHandler, PluginManifestPane, PluginManifestStartup, PluginPanePlacement,
-    PluginPlatform, PluginSourceInfo, PluginSourceKind,
+    PluginManifestLinkHandler, PluginManifestPane, PluginManifestReader, PluginManifestStartup,
+    PluginPanePlacement, PluginPlatform, PluginSourceInfo, PluginSourceKind,
 };
 use crate::popup_size::PopupSize;
 
@@ -31,6 +31,17 @@ struct RawPluginManifest {
     panes: Vec<RawPluginManifestPane>,
     #[serde(default)]
     link_handlers: Vec<RawPluginManifestLinkHandler>,
+    #[serde(default)]
+    readers: Vec<RawPluginManifestReader>,
+}
+
+#[derive(serde::Deserialize)]
+struct RawPluginManifestReader {
+    kind: String,
+    interval: String,
+    #[serde(default)]
+    platforms: Option<Vec<RawPlatform>>,
+    command: Vec<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -197,6 +208,13 @@ pub(crate) fn load_plugin_manifest(
         .collect::<Result<Vec<_>, _>>()?;
     reject_duplicate_link_handler_ids(&link_handlers)?;
     validate_link_handler_actions(&link_handlers, &actions)?;
+    let mut readers = raw
+        .readers
+        .into_iter()
+        .map(normalize_manifest_reader)
+        .collect::<Result<Vec<_>, _>>()?;
+    reject_duplicate_reader_kinds(&readers)?;
+    readers.sort_by(|a, b| a.kind.cmp(&b.kind));
 
     let mut warnings = validate_event_names(&events);
     if platforms.is_none() {
@@ -219,6 +237,7 @@ pub(crate) fn load_plugin_manifest(
         events,
         panes,
         link_handlers,
+        readers,
         source: Default::default(),
         warnings,
     })
@@ -460,6 +479,64 @@ fn normalize_manifest_event(
         platforms,
         command,
     })
+}
+
+fn normalize_manifest_reader(
+    reader: RawPluginManifestReader,
+) -> Result<PluginManifestReader, (&'static str, String)> {
+    use crate::app::wait_readers::{MAX_READ_INTERVAL_MS, MIN_READ_INTERVAL_MS};
+    let kind = reader.kind.trim().to_string();
+    let valid_kind = kind.len() <= 32
+        && kind.starts_with(|ch: char| ch.is_ascii_lowercase())
+        && kind
+            .chars()
+            .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || matches!(ch, '-' | '_'));
+    if !valid_kind {
+        return Err((
+            "invalid_plugin_reader",
+            format!("reader kind '{kind}' must be lowercase letters, digits, - or _, starting with a letter"),
+        ));
+    }
+    if crate::app::waits::RESERVED_SOURCES.contains(&kind.as_str()) {
+        return Err((
+            "invalid_plugin_reader",
+            format!("reader kind '{kind}' is herdr's own"),
+        ));
+    }
+    let interval_ms = crate::app::waits::parse_duration_ms(reader.interval.trim())
+        .filter(|ms| (MIN_READ_INTERVAL_MS..=MAX_READ_INTERVAL_MS).contains(ms))
+        .ok_or_else(|| {
+            (
+                "invalid_plugin_reader",
+                format!(
+                    "reader '{kind}' interval '{}' must be a duration from 10s to 1d, like 5m",
+                    reader.interval
+                ),
+            )
+        })?;
+    let platforms = normalize_platforms(reader.platforms)?;
+    let command = normalize_command(reader.command)?;
+    Ok(PluginManifestReader {
+        kind,
+        platforms,
+        command,
+        interval_ms,
+    })
+}
+
+fn reject_duplicate_reader_kinds(
+    readers: &[PluginManifestReader],
+) -> Result<(), (&'static str, String)> {
+    let mut seen = std::collections::HashSet::new();
+    for reader in readers {
+        if !seen.insert(reader.kind.as_str()) {
+            return Err((
+                "duplicate_plugin_reader_kind",
+                format!("duplicate reader kind '{}'", reader.kind),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn normalize_manifest_link_handler(

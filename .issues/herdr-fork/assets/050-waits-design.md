@@ -211,3 +211,54 @@ settled it:
   `wait_needs_user` is the news; a completion on top would ping for every fire, just before
   the message wakes the agent.
 
+## Changes made while building PR3 (2026-10-29)
+
+PR3 adds plugin readers: `[[readers]]` in a plugin manifest, read results and liveness on
+the wait, and with them `mr:`, `pr:`, `ci:` or any other kind a plugin reads. The design
+said only that readers run "on the plugin-command threads" with "N errors" and "the liveness
+window"; this is how the build settled them:
+
+- **The manifest.** `[[readers]] kind = "pr" interval = "5m" command = [...]`, with optional
+  `platforms`. `kind` is lowercase letters, digits, `-` and `_`. `node` and `run` are
+  herdr's own and refused. `interval` is 10 s to 1 d. A plugin may declare a kind once. When
+  two enabled plugins read the same kind, the one whose id sorts first is used.
+- **The read contract is loom 091's.** The command gets `<kind>:<target>` as its last
+  argument, the plugin's runtime environment and `HERDR_WAIT_ID`. It prints
+  `{ok, state, error}` on the last line of stdout. Exit 0 with `ok` and a `state` is a read,
+  and exit 2 is a source the reader cannot read. Anything else is a failed read, including
+  an exit 0 without a state, a timeout, or a reader that would not start.
+- **Not on the plugin-command threads, and not in the plugin log.** Reads run as tokio tasks
+  with `tokio::process`, in their own process group (a kill-on-close job on Windows), with a
+  30 s timeout. They reuse the tab-bar status commands' `StatusCommandGuard`, so a timeout or
+  a server going away kills the reader and its descendants. That is 042's concern for plugin
+  actions, met here for readers from the start. A read is too frequent for the 200-entry
+  command log, and its result lives on the wait instead. At most 16 reads run at once; a
+  read due beyond that tries again 5 s later.
+- **When a wait is read.** At declare, then every `interval` while it is live. After a load
+  or handoff, every live reader wait is read at once. The schedule is runtime state, a
+  `BTreeSet<(Instant, wait id)>`, so the loop wakes for the next read as it does for the
+  next deadline, and a tick costs O(reads due).
+- **What a read does.** It records `last_state`, `last_ok_at_ms` and `errors = 0`. A state
+  equal to `until` satisfies the wait and tells the waiter, as a node wait does:
+  `wait <id> satisfied: <kind>:<target> is <state>: <summary>`. `until` is required for a
+  reader kind: herdr cannot know what states a source has. herdr also cannot tell which
+  states are terminal, so a PR closed while the wait is for `merged` waits on until the
+  deadline.
+- **N is 3.** Three failed reads in a row fire `failed: source unreachable` to the decider.
+  A successful read resets the run, and `last_error` keeps what the last failure said.
+- **Exit 2 fires at once** as `failed: the reader cannot read this source`. 091 calls it a
+  misdeclared wait that retrying will not fix.
+- **The liveness window** is three intervals, and at least an interval plus the timeout. When
+  no read has landed in it, the wait fires `failed: reader dead`. The window starts at the
+  declare or the load, and every landed read restarts it. A kind that no enabled plugin
+  reads any more (disabled, unlinked, or not loaded after a restart) starts no reads, and its
+  waits fire `reader dead` after 15 minutes.
+- **`wait_sources` stays herdr's own kinds** (`["node"]`). The server answers capabilities
+  from the socket thread, with a snapshot taken at start, while readers come and go with
+  plugins. So servers with readers advertise a separate static `wait_readers: true`, and
+  `plugin.list` shows each plugin's `readers`. loom declares its readers itself, so
+  `wait_readers` plus its own manifest tells it which kinds it can use. A kind with no
+  reader is refused with `wait_source_unsupported`, as before.
+- **Fire and satisfy messages restate the last read**: the source and `until`, the last
+  state and how long ago it was read, and any failed reads in a row with the last error.
+

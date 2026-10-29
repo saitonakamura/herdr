@@ -96,6 +96,11 @@ id = "github-issue"
 title = "Open GitHub issue"
 pattern = "^https://github\\.com/[^/]+/[^/]+/(issues|pull)/[0-9]+$"
 action = "apply"
+
+[[readers]]
+kind = "pr"
+interval = "5m"
+command = ["node", "dist/read.js"]
 ```
 
 Top-level `id`, `name`, `version`, and `min_herdr_version` are required.
@@ -261,6 +266,33 @@ and exit. For example, a plugin can save a declarative Agent view under
 Startup hooks receive the normal runtime plugin environment and
 `HERDR_PLUGIN_EVENT=startup`. The install preview lists every startup command so
 users can review code that will run automatically.
+
+## Wait readers
+
+`[[readers]]` lets agents wait on a source Herdr cannot read itself, such as a
+pull request or a CI run: `herdr wait declare <waiter> --on pr:owner/repo#12
+--until merged …`. Each reader names the `kind` it reads, an `interval` from
+`10s` to `1d`, and a `command`. `kind` is lowercase letters, digits, `-` and
+`_`, and cannot be one Herdr reads itself (`node`, `run`). When two enabled
+plugins read the same kind, the one whose id sorts first is used.
+
+While a wait on that kind is live, Herdr runs the command at once and then every
+`interval`, with `<kind>:<target>` appended as its last argument, the normal
+runtime environment, and `HERDR_WAIT_ID`. Each run gets 30 seconds, in its own
+process group (a job object on Windows) that is killed on timeout or when the
+server goes away. The last line of stdout is the answer:
+
+```json
+{"ok": true, "state": "merged", "error": null}
+```
+
+Exit 0 with `ok` and a `state` is a read; a `state` equal to the wait's
+`--until` satisfies it. Exit 2 means the reader cannot read that source at all,
+and the wait fires at once. Any other exit, a missing state, or a timeout is a
+failed read, and three in a row fire the wait as `failed: source unreachable`.
+When no read lands within three intervals (at least an interval plus 30
+seconds), for example because the plugin was disabled, the wait fires as
+`failed: reader dead`. The deadline still applies throughout.
 
 ## Commands and environment
 

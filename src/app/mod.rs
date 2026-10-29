@@ -37,6 +37,7 @@ mod terminal_targets;
 mod terminal_titles;
 mod theme_sync;
 mod user_input;
+pub(crate) mod wait_readers;
 pub(crate) mod waits;
 mod window_title;
 mod worktrees;
@@ -141,6 +142,8 @@ pub struct App {
     pub(crate) worktree_read_slots: std::sync::Arc<tokio::sync::Semaphore>,
     pub(crate) pending_api_worktree_remove_paths: HashMap<std::path::PathBuf, u64>,
     pub(crate) pending_worktree_remove_runtime_exits: HashMap<crate::layout::PaneId, usize>,
+    /// When each live wait on a plugin reader's kind is next read.
+    pub(crate) wait_reads: wait_readers::ReaderSchedule,
     pub(crate) pending_worktree_remove_runtime_restores: HashMap<crate::layout::PaneId, u64>,
     pub(crate) next_api_worktree_operation_id: u64,
     pub(crate) next_auto_update_check: Option<Instant>,
@@ -678,6 +681,7 @@ impl App {
             worktree_read_slots: std::sync::Arc::new(tokio::sync::Semaphore::new(8)),
             pending_api_worktree_remove_paths: HashMap::new(),
             pending_worktree_remove_runtime_exits: HashMap::new(),
+            wait_reads: wait_readers::ReaderSchedule::default(),
             pending_worktree_remove_runtime_restores: HashMap::new(),
             next_api_worktree_operation_id: 1,
             next_auto_update_check: version_check_enabled
@@ -722,6 +726,7 @@ impl App {
         app.configure_tab_bar_status(&config.ui.tab_bar_right, &config.ui.tab_bar_right_separator);
         app.configure_window_title(&config.ui.window_title);
         app.refresh_restored_workspace_git_metadata();
+        app.schedule_live_wait_reads();
         Ok(app)
     }
 
@@ -770,6 +775,7 @@ impl App {
         app.state.messages = snapshot.messages.clone();
         app.state.message_delivery_due = true;
         app.state.waits = snapshot.waits.clone();
+        app.schedule_live_wait_reads();
         app.state.session_pane.width_override = snapshot.session_pane_width;
         // Handed-over parents may sit in another workspace (ADR 0008); the first sync drops them.
         app.state.agent_identities_dirty = true;

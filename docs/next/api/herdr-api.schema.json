@@ -1550,12 +1550,26 @@
                 }
               ]
             },
+            "last_error": {
+              "description": "What the last failed read said, while errors run.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "last_ok_at_ms": {
               "description": "The last time a reader reached the source.",
               "format": "uint64",
               "minimum": 0,
               "type": [
                 "integer",
+                "null"
+              ]
+            },
+            "last_state": {
+              "description": "The state the last successful read found.",
+              "type": [
+                "string",
                 "null"
               ]
             },
@@ -9374,6 +9388,13 @@
             "plugin_root": {
               "type": "string"
             },
+            "readers": {
+              "description": "Commands that read a wait source's state, one per `on` kind.",
+              "items": {
+                "$ref": "#/schemas/success_response/$defs/PluginManifestReader"
+              },
+              "type": "array"
+            },
             "source": {
               "$ref": "#/schemas/success_response/$defs/PluginSourceInfo",
               "default": {
@@ -11085,6 +11106,40 @@
           ],
           "type": "object"
         },
+        "PluginManifestReader": {
+          "description": "A command herdr runs at an interval to read the state of each live wait on `kind`. It gets\n`<kind>:<target>` as its last argument and prints `{ok, state, error}` as JSON; exit 1 is a\nfailed read and exit 2 a source it cannot read.",
+          "properties": {
+            "command": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "interval_ms": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "platforms": {
+              "items": {
+                "$ref": "#/schemas/success_response/$defs/PluginPlatform"
+              },
+              "type": [
+                "array",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "command",
+            "interval_ms"
+          ],
+          "type": "object"
+        },
         "PluginManifestStartup": {
           "properties": {
             "command": {
@@ -12662,6 +12717,11 @@
               "description": "Whether this server supports explicit client-shell surface interest.",
               "type": "boolean"
             },
+            "wait_readers": {
+              "default": false,
+              "description": "Plugins can add wait source kinds with `[[readers]]`; `plugin.list` shows which.",
+              "type": "boolean"
+            },
             "wait_sources": {
               "default": [],
               "description": "The `on` source kinds `wait.declare` accepts; empty means deadlines only.",
@@ -12986,12 +13046,26 @@
                 }
               ]
             },
+            "last_error": {
+              "description": "What the last failed read said, while errors run.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "last_ok_at_ms": {
               "description": "The last time a reader reached the source.",
               "format": "uint64",
               "minimum": 0,
               "type": [
                 "integer",
+                "null"
+              ]
+            },
+            "last_state": {
+              "description": "The state the last successful read found.",
+              "type": [
+                "string",
                 "null"
               ]
             },

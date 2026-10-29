@@ -63,12 +63,12 @@ pub(crate) fn on() -> Input<Option<WaitSourceInfo>> {
         });
         Ok(())
     })
-    .help("What it watches, such as node:<agent>; `herdr status server --json` lists the kinds as wait_sources")
+    .help("What it watches, such as node:<agent> or a plugin reader's kind (pr:owner/repo#12); wait_sources in `herdr status server --json` lists herdr's own")
 }
 
 pub(crate) fn until() -> Input<Option<String>> {
     optional_text("until", "STATE")
-        .help("The source state that satisfies it; for node, a task status (default complete)")
+        .help("The source state that satisfies it; for node, a task status (default complete); required for a reader's kind")
 }
 
 pub(crate) fn rearm() -> Input<Option<u64>> {
@@ -148,21 +148,7 @@ pub(crate) fn parse_deadline(value: &str) -> Result<Deadline, ParseError> {
         let ms = at.unix_timestamp_nanos() / 1_000_000;
         return u64::try_from(ms).map(Deadline::AtMs).map_err(|_| invalid());
     }
-    let unit_at = value
-        .find(|ch: char| !ch.is_ascii_digit())
-        .ok_or_else(invalid)?;
-    let (count, unit) = value.split_at(unit_at);
-    let count: u64 = count.parse().map_err(|_| invalid())?;
-    let unit_ms = match unit {
-        "ms" => 1,
-        "s" => 1_000,
-        "m" => 60_000,
-        "h" => 3_600_000,
-        "d" => 86_400_000,
-        _ => return Err(invalid()),
-    };
-    count
-        .checked_mul(unit_ms)
+    crate::app::waits::parse_duration_ms(value)
         .map(Deadline::InMs)
         .ok_or_else(invalid)
 }

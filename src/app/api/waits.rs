@@ -7,6 +7,9 @@ use crate::api::schema::{
     WaitTarget,
 };
 use crate::app::messages::NewMessage;
+use crate::app::wait_readers::{
+    liveness_window, ReadOutcome, ORPHANED_LIVENESS_WINDOW, READ_ERROR_LIMIT,
+};
 use crate::app::waits::{
     epoch_now_ms, node_outcome, node_until, task_status_name, ChangeError, DeclareError, NewWait,
     NodeOutcome, Wait, WaitRecipient, WaitSource, WaitState, LIVE_LIMIT, LIVE_PER_WAITER_LIMIT,
@@ -15,8 +18,12 @@ use crate::app::waits::{
 use crate::app::App;
 use crate::terminal::AgentId;
 
-/// Source kinds `wait.declare` accepts in `on`; advertised as `wait_sources`.
+/// Source kinds herdr reads itself; advertised as `wait_sources`. Plugin readers add others.
 pub(crate) const WAIT_SOURCES: &[&str] = &[NODE_SOURCE];
+
+const SOURCE_UNREACHABLE: &str = "failed: source unreachable";
+const READER_DEAD: &str = "failed: reader dead";
+const SOURCE_REFUSED: &str = "failed: the reader cannot read this source";
 
 /// The sender name a fired wait's message carries.
 const WAIT_SENDER: &str = "herdr wait";
@@ -32,13 +39,32 @@ impl App {
         if summary.is_empty() || summary.chars().count() > SUMMARY_LIMIT {
             return invalid_wait(id, "wait summary must be 1 to 200 characters");
         }
+        let mut read = false;
         if let Some(on) = &params.on {
-            if !WAIT_SOURCES.contains(&on.kind.as_str()) {
+            read = !WAIT_SOURCES.contains(&on.kind.as_str());
+            if read && self.wait_reader_for(&on.kind).is_none() {
                 return encode_error(
                     id,
                     "wait_source_unsupported",
                     format!(
-                        "this server cannot wait on {:?} sources; wait_sources lists the kinds it can",
+                        "this server cannot wait on {:?} sources; wait_sources and the plugins' readers list the kinds it can",
+                        on.kind
+                    ),
+                );
+            }
+            if on.target.trim().is_empty() {
+                return invalid_wait(id, "on needs a target: KIND:TARGET");
+            }
+            if read
+                && params
+                    .until
+                    .as_deref()
+                    .is_none_or(|until| until.trim().is_empty())
+            {
+                return invalid_wait(
+                    id,
+                    format!(
+                        "a {} wait needs until: the state that satisfies it",
                         on.kind
                     ),
                 );
@@ -79,9 +105,9 @@ impl App {
             on => (
                 on.map(|on| WaitSource {
                     kind: on.kind,
-                    target: on.target,
+                    target: on.target.trim().to_owned(),
                 }),
-                params.until,
+                params.until.map(|until| until.trim().to_owned()),
             ),
         };
         let declared = self.state.waits.declare(NewWait {
@@ -106,6 +132,9 @@ impl App {
         });
         // A node that has closed, or already reached a state the wait cares about, settles it now.
         self.settle_node_wait_now(wait_id);
+        if read {
+            self.wait_reads.add(wait_id, std::time::Instant::now());
+        }
         match self.state.waits.get(wait_id) {
             Some(wait) => encode_success(id, ResponseResult::WaitInfo { wait: wait.info() }),
             None => wait_not_found(id, wait_id),
@@ -212,8 +241,10 @@ impl App {
         }
     }
 
-    /// Fires every live wait whose deadline has passed. Cheap when none is due: one index lookup.
+    /// Starts the reads that are due and fires every live wait whose deadline has passed. Cheap
+    /// when nothing is due: one lookup in each index.
     pub(crate) fn fire_due_waits(&mut self) {
+        self.run_due_wait_reads(std::time::Instant::now());
         let now = epoch_now_ms();
         if self
             .state
@@ -320,12 +351,140 @@ impl App {
         });
     }
 
-    /// The next deadline as an `Instant`, converted against the wall clock now.
+    /// The next deadline as an `Instant`, converted against the wall clock now, or the next read.
     pub(crate) fn next_wait_deadline(&self, now: std::time::Instant) -> Option<std::time::Instant> {
-        let deadline = self.state.waits.next_deadline_ms()?;
-        let wait = deadline.saturating_sub(epoch_now_ms());
         // A deadline past what an Instant can hold needs no wake-up: the loop polls anyway.
-        now.checked_add(std::time::Duration::from_millis(wait))
+        let deadline = self.state.waits.next_deadline_ms().and_then(|deadline| {
+            let wait = deadline.saturating_sub(epoch_now_ms());
+            now.checked_add(std::time::Duration::from_millis(wait))
+        });
+        match (deadline, self.wait_reads.next_due()) {
+            (Some(deadline), Some(read)) => Some(deadline.min(read)),
+            (deadline, read) => deadline.or(read),
+        }
+    }
+
+    /// Watches the live waits on plugin readers' kinds again, after a load or handoff: each is
+    /// read at once, and its liveness window starts now.
+    pub(in crate::app) fn schedule_live_wait_reads(&mut self) {
+        let now = std::time::Instant::now();
+        let reads: Vec<u64> = self
+            .state
+            .waits
+            .iter()
+            .filter(|wait| {
+                wait.is_live()
+                    && wait
+                        .on
+                        .as_ref()
+                        .is_some_and(|on| !WAIT_SOURCES.contains(&on.kind.as_str()))
+            })
+            .map(|wait| wait.id)
+            .collect();
+        for wait_id in reads {
+            self.wait_reads.add(wait_id, now);
+        }
+    }
+
+    /// Looks at each reader wait that is due: fires it when no read has landed within its
+    /// liveness window, and otherwise starts a read when its kind still has a reader.
+    fn run_due_wait_reads(&mut self, now: std::time::Instant) {
+        if self.wait_reads.next_due().is_none_or(|due| due > now) {
+            return;
+        }
+        for wait_id in self.wait_reads.take_due(now) {
+            let Some(on) = self
+                .state
+                .waits
+                .get(wait_id)
+                .filter(|wait| wait.is_live())
+                .and_then(|wait| wait.on.clone())
+            else {
+                self.wait_reads.remove(wait_id);
+                continue;
+            };
+            let reader = self.wait_reader_for(&on.kind);
+            let interval = reader
+                .as_ref()
+                .map(|(_, reader)| std::time::Duration::from_millis(reader.interval_ms));
+            let window = interval.map_or(ORPHANED_LIVENESS_WINDOW, liveness_window);
+            let last_landed = self.wait_reads.last_landed(wait_id).unwrap_or(now);
+            if now.saturating_duration_since(last_landed) >= window {
+                self.wait_reads.remove(wait_id);
+                self.fire_wait(wait_id, epoch_now_ms(), READER_DEAD.to_owned());
+                continue;
+            }
+            let (Some((plugin, reader)), Some(interval)) = (reader, interval) else {
+                // No plugin reads this kind now: only the liveness window can end the wait early.
+                self.wait_reads.reschedule(wait_id, last_landed + window);
+                continue;
+            };
+            let next = (now + interval).min(last_landed + window);
+            if self.wait_reads.in_flight(wait_id) {
+                self.wait_reads.reschedule(wait_id, next);
+            } else if !self.wait_reads.has_room() {
+                self.wait_reads.retry_soon(wait_id, now);
+            } else {
+                self.start_wait_read(
+                    wait_id,
+                    &plugin,
+                    &reader,
+                    &format!("{}:{}", on.kind, on.target),
+                );
+                self.wait_reads.started(wait_id);
+                self.wait_reads.reschedule(wait_id, next);
+            }
+        }
+    }
+
+    /// A read came back: records it on the wait, and settles the wait when the read says so.
+    pub(in crate::app) fn wait_read_finished(&mut self, wait_id: u64, outcome: ReadOutcome) {
+        if !self.wait_reads.landed(wait_id, std::time::Instant::now()) {
+            return;
+        }
+        let Some((until, source)) = self
+            .state
+            .waits
+            .get(wait_id)
+            .filter(|wait| wait.is_live())
+            .and_then(|wait| {
+                let on = wait.on.as_ref()?;
+                Some((wait.until.clone(), format!("{}:{}", on.kind, on.target)))
+            })
+        else {
+            self.wait_reads.remove(wait_id);
+            return;
+        };
+        let now = epoch_now_ms();
+        let settled = match outcome {
+            ReadOutcome::Read(state) => {
+                self.state
+                    .waits
+                    .record_read(wait_id, now, Ok(state.clone()));
+                (until.as_deref() == Some(state.as_str()))
+                    .then(|| Settled::Satisfied(format!("{source} is {state}")))
+            }
+            ReadOutcome::Failed(error) => {
+                let errors = self.state.waits.record_read(wait_id, now, Err(error));
+                errors
+                    .is_some_and(|errors| errors >= READ_ERROR_LIMIT)
+                    .then(|| Settled::Fired(SOURCE_UNREACHABLE.to_owned()))
+            }
+            ReadOutcome::Refused(error) => {
+                self.state.waits.record_read(wait_id, now, Err(error));
+                Some(Settled::Fired(SOURCE_REFUSED.to_owned()))
+            }
+        };
+        self.state.mark_session_dirty();
+        self.schedule_session_save();
+        if settled.is_some() {
+            self.wait_reads.remove(wait_id);
+        }
+        match settled {
+            Some(Settled::Fired(reason)) => self.fire_wait(wait_id, now, reason),
+            Some(Settled::Satisfied(reason)) => self.satisfy_wait(wait_id, now, reason),
+            None => {}
+        }
     }
 
     fn fire_wait(&mut self, wait_id: u64, now: u64, reason: String) {
@@ -430,7 +589,7 @@ impl App {
             return String::new();
         };
         let Some(node) = on.node() else {
-            return format!("on: {}:{}\n", on.kind, on.target);
+            return self.read_source_lines(wait, on);
         };
         let until = wait.until.as_deref().unwrap_or_default();
         let now = match self
@@ -447,6 +606,27 @@ impl App {
             "on: node {}, until {until}\nnode now: {now}\n",
             self.agent_label(&node)
         )
+    }
+
+    /// A reader wait's source, and what its reads found.
+    fn read_source_lines(&self, wait: &Wait, on: &WaitSource) -> String {
+        let until = wait.until.as_deref().unwrap_or_default();
+        let mut lines = format!("on: {}:{}, until {until}\n", on.kind, on.target);
+        match (&wait.last_state, wait.last_ok_at_ms) {
+            (Some(state), Some(at_ms)) => lines.push_str(&format!(
+                "last read: {state}, {}s ago\n",
+                epoch_now_ms().saturating_sub(at_ms) / 1_000
+            )),
+            _ => lines.push_str("last read: none landed\n"),
+        }
+        if wait.errors > 0 {
+            lines.push_str(&format!(
+                "failed reads in a row: {}, last: {}\n",
+                wait.errors,
+                wait.last_error.as_deref().unwrap_or("unknown")
+            ));
+        }
+        lines
     }
 
     /// `name (id)`, or the id alone for an agent without a name or one that has closed.
@@ -580,6 +760,12 @@ impl App {
     }
 }
 
+/// How a read ended a wait, with the reason.
+enum Settled {
+    Fired(String),
+    Satisfied(String),
+}
+
 fn one_level_up(decider: WaitDecider) -> Option<WaitDecider> {
     match decider {
         WaitDecider::Waiter => Some(WaitDecider::Parent),
@@ -678,6 +864,7 @@ mod tests {
         Request, TaskStatus, WaitCancelParams, WaitDecider, WaitDeclareParams, WaitExtendParams,
         WaitSourceInfo,
     };
+    use crate::app::wait_readers::{ReadOutcome, ORPHANED_LIVENESS_WINDOW};
     use crate::app::waits::{epoch_now_ms, NewWait, WaitRecipient, WaitState};
     use crate::app::App;
     use crate::detect::{Agent, AgentState};
@@ -686,6 +873,7 @@ mod tests {
 
     const EMPTY: &str = "\u{276f} ";
     const LATER: u64 = 3_600_000;
+    const READ_INTERVAL: std::time::Duration = std::time::Duration::from_secs(300);
 
     struct Fixture {
         app: App,
@@ -769,9 +957,11 @@ mod tests {
             }))
         }
 
-        /// The worker's wait, its deadline already passed.
+        /// The worker's wait, its deadline already passed while this server ran.
         fn due_wait(&mut self, then: WaitDecider, extensions: u8) -> u64 {
             let waiter = self.id(self.worker);
+            // The start itself: due now, and never before the start, even within its millisecond.
+            let due_at = self.app.state.server_started_at_ms;
             let waits = &mut self.app.state.waits;
             let id = waits
                 .declare(NewWait {
@@ -789,7 +979,7 @@ mod tests {
             for _ in 0..extensions {
                 waits.extend(id, epoch_now_ms() + LATER).unwrap();
             }
-            waits.set_deadline_for_test(id, epoch_now_ms() - 1);
+            waits.set_deadline_for_test(id, due_at);
             id
         }
 
@@ -832,6 +1022,61 @@ mod tests {
                 until: until.map(str::to_owned),
                 rearm: None,
             }))
+        }
+
+        /// Installs an enabled plugin that reads `kind` sources every 5 minutes.
+        fn install_reader(&mut self, kind: &str) {
+            let plugin = crate::api::schema::InstalledPluginInfo {
+                plugin_id: "example.readers".into(),
+                name: "Readers".into(),
+                version: "0.1.0".into(),
+                min_herdr_version: "0.7.0".into(),
+                description: None,
+                manifest_path: "/plugins/readers/herdr-plugin.toml".into(),
+                plugin_root: "/plugins/readers".into(),
+                enabled: true,
+                platforms: None,
+                build: Vec::new(),
+                startup: Vec::new(),
+                actions: Vec::new(),
+                events: Vec::new(),
+                panes: Vec::new(),
+                link_handlers: Vec::new(),
+                readers: vec![crate::api::schema::PluginManifestReader {
+                    kind: kind.into(),
+                    platforms: None,
+                    command: vec!["homebase".into(), "read".into(), "--json".into()],
+                    interval_ms: READ_INTERVAL.as_millis() as u64,
+                }],
+                source: Default::default(),
+                warnings: Vec::new(),
+            };
+            self.app
+                .state
+                .installed_plugins
+                .insert(plugin.plugin_id.clone(), plugin);
+        }
+
+        /// The worker declares a wait on `pr:o/r#1` until merged, decided by its parent.
+        fn declare_read(&mut self, until: Option<&str>) -> serde_json::Value {
+            let waiter = self.public(self.worker);
+            self.call(Method::WaitDeclare(WaitDeclareParams {
+                waiter,
+                summary: "PR merged".into(),
+                deadline_at_ms: None,
+                deadline_in_ms: Some(LATER),
+                then: Some(WaitDecider::Parent),
+                on: Some(WaitSourceInfo {
+                    kind: "pr".into(),
+                    target: "o/r#1".into(),
+                }),
+                until: until.map(str::to_owned),
+                rearm: None,
+            }))
+        }
+
+        fn reads_started(&self) -> Vec<(u64, Vec<String>)> {
+            self.app.wait_reads.started_for_test.clone()
         }
 
         fn report(&mut self, pane: PaneId, status: TaskStatus) {
@@ -1112,7 +1357,8 @@ mod tests {
 
         let mut f = fixture();
         f.app.state.waits = serde_json::from_str(&saved).unwrap();
-        f.app.state.server_started_at_ms = epoch_now_ms();
+        let deadline = f.app.state.waits.get(id).unwrap().deadline_at_ms;
+        f.app.state.server_started_at_ms = deadline + 1;
         let worker = before.id(before.worker);
         f.terminal(f.worker).agent_id = Some(worker);
         f.app.fire_due_waits();
@@ -1536,5 +1782,258 @@ mod tests {
 
         assert_eq!(f.agent_state(f.worker), AgentState::Awaiting);
         f.app.state.assert_invariants_for_test();
+    }
+
+    #[test]
+    fn a_reader_wait_needs_a_plugin_reader_a_target_and_until() {
+        let mut f = fixture();
+        let unread = f.declare_read(Some("merged"));
+        assert_eq!(
+            unread["error"]["code"], "wait_source_unsupported",
+            "{unread}"
+        );
+
+        f.install_reader("pr");
+        let no_until = f.declare_read(None);
+        assert_eq!(no_until["error"]["code"], "invalid_wait", "{no_until}");
+        let waiter = f.public(f.worker);
+        let no_target = f.call(Method::WaitDeclare(WaitDeclareParams {
+            waiter,
+            summary: "PR merged".into(),
+            deadline_at_ms: None,
+            deadline_in_ms: Some(LATER),
+            then: Some(WaitDecider::Waiter),
+            on: Some(WaitSourceInfo {
+                kind: "pr".into(),
+                target: " ".into(),
+            }),
+            until: Some("merged".into()),
+            rearm: None,
+        }));
+        assert_eq!(no_target["error"]["code"], "invalid_wait", "{no_target}");
+        assert!(f.app.state.waits.is_empty());
+        assert!(f.reads_started().is_empty());
+    }
+
+    #[test]
+    fn a_reader_wait_is_read_at_once_and_satisfied_when_the_source_gets_there() {
+        let mut f = fixture();
+        f.make_lead_parent();
+        f.install_reader("pr");
+        let worker = f.id(f.worker);
+        let declared = f.declare_read(Some("merged"));
+        let id = declared["result"]["wait"]["wait_id"].as_u64().unwrap();
+        let now = std::time::Instant::now();
+        assert!(f
+            .app
+            .next_wait_deadline(now)
+            .is_some_and(|wake| wake <= now + std::time::Duration::from_millis(50)));
+
+        f.app.fire_due_waits();
+        assert_eq!(
+            f.reads_started(),
+            vec![(
+                id,
+                vec![
+                    "homebase".into(),
+                    "read".into(),
+                    "--json".into(),
+                    "pr:o/r#1".into()
+                ]
+            )],
+            "the reader gets <kind>:<target> last"
+        );
+        f.app.fire_due_waits();
+        assert_eq!(
+            f.reads_started().len(),
+            1,
+            "the next read waits for the interval"
+        );
+
+        f.app
+            .wait_read_finished(id, ReadOutcome::Read("open".into()));
+        let wait = f.app.state.waits.get(id).unwrap().clone();
+        assert_eq!(
+            (wait.state, wait.last_state.as_deref()),
+            (WaitState::Live, Some("open"))
+        );
+        assert!(wait.last_ok_at_ms.is_some());
+
+        f.app
+            .handle_internal_event(crate::events::AppEvent::WaitReadFinished {
+                wait_id: id,
+                outcome: ReadOutcome::Read("merged".into()),
+            });
+        assert!(matches!(f.state(id), WaitState::Satisfied { .. }));
+        assert_eq!(
+            f.messages(),
+            vec![(
+                worker,
+                format!("wait {id} satisfied: pr:o/r#1 is merged: PR merged"),
+                Some(id)
+            )],
+            "the waiter is told, not its parent"
+        );
+        let body = f
+            .app
+            .state
+            .messages
+            .iter()
+            .next()
+            .unwrap()
+            .body
+            .clone()
+            .unwrap();
+        assert!(body.contains("on: pr:o/r#1, until merged"), "{body}");
+        assert!(body.contains("last read: merged"), "{body}");
+        assert!(f.app.wait_reads.watched().is_empty());
+        f.app.state.assert_invariants_for_test();
+    }
+
+    #[test]
+    fn three_failed_reads_in_a_row_fire_the_wait_as_source_unreachable() {
+        let mut f = fixture();
+        f.make_lead_parent();
+        f.install_reader("pr");
+        let lead = f.id(f.lead);
+        let id = f.declare_read(Some("merged"))["result"]["wait"]["wait_id"]
+            .as_u64()
+            .unwrap();
+
+        f.app
+            .wait_read_finished(id, ReadOutcome::Failed("gh: 502".into()));
+        f.app
+            .wait_read_finished(id, ReadOutcome::Failed("gh: 502".into()));
+        assert_eq!(f.app.state.waits.get(id).unwrap().errors, 2);
+        f.app
+            .wait_read_finished(id, ReadOutcome::Read("open".into()));
+        assert_eq!(
+            f.app.state.waits.get(id).unwrap().errors,
+            0,
+            "a read resets the run"
+        );
+        for _ in 0..3 {
+            f.app
+                .wait_read_finished(id, ReadOutcome::Failed("gh: not logged in".into()));
+        }
+
+        assert_eq!(f.fired_to(id), (vec![WaitRecipient::Agent(lead)], false));
+        assert_eq!(
+            f.messages()[0].1,
+            format!("wait {id} fired: failed: source unreachable: PR merged")
+        );
+        let body = f
+            .app
+            .state
+            .messages
+            .iter()
+            .next()
+            .unwrap()
+            .body
+            .clone()
+            .unwrap();
+        assert!(
+            body.contains("failed reads in a row: 3, last: gh: not logged in"),
+            "{body}"
+        );
+        assert!(body.contains("last read: open"), "{body}");
+        f.app.state.assert_invariants_for_test();
+    }
+
+    #[test]
+    fn a_refused_read_fires_at_once_and_a_late_read_is_ignored() {
+        let mut f = fixture();
+        f.install_reader("pr");
+        let id = f.declare_read(Some("merged"))["result"]["wait"]["wait_id"]
+            .as_u64()
+            .unwrap();
+
+        f.app
+            .wait_read_finished(id, ReadOutcome::Refused("pr: bad ref".into()));
+        assert!(matches!(
+            f.state(id),
+            WaitState::Fired { ref reason, .. } if reason == "failed: the reader cannot read this source"
+        ));
+        f.app
+            .wait_read_finished(id, ReadOutcome::Read("merged".into()));
+        assert!(
+            matches!(f.state(id), WaitState::Fired { .. }),
+            "a late read changes nothing"
+        );
+        assert_eq!(f.messages().len(), 0, "parent unset: the user is flagged");
+        assert!(f
+            .app
+            .agent_info(0, f.worker)
+            .unwrap()
+            .wait_needs_user
+            .is_some());
+    }
+
+    #[test]
+    fn no_read_landing_within_the_liveness_window_fires_reader_dead() {
+        let mut f = fixture();
+        f.install_reader("pr");
+        let hung = f.declare_read(Some("merged"))["result"]["wait"]["wait_id"]
+            .as_u64()
+            .unwrap();
+        let start = std::time::Instant::now();
+        f.app.fire_due_waits();
+        assert_eq!(f.reads_started().len(), 1);
+
+        let window = crate::app::wait_readers::liveness_window(READ_INTERVAL);
+        f.app
+            .run_due_wait_reads(start + window - std::time::Duration::from_secs(1));
+        assert_eq!(
+            f.state(hung),
+            WaitState::Live,
+            "a read in flight is not started twice"
+        );
+        assert_eq!(f.reads_started().len(), 1);
+        f.app
+            .run_due_wait_reads(start + window + std::time::Duration::from_secs(1));
+        assert!(matches!(
+            f.state(hung),
+            WaitState::Fired { ref reason, .. } if reason == "failed: reader dead"
+        ));
+
+        let orphaned = f.declare_read(Some("merged"))["result"]["wait"]["wait_id"]
+            .as_u64()
+            .unwrap();
+        f.app.state.installed_plugins.clear();
+        let start = std::time::Instant::now();
+        f.app
+            .run_due_wait_reads(start + std::time::Duration::from_secs(60));
+        assert_eq!(f.state(orphaned), WaitState::Live);
+        assert_eq!(f.reads_started().len(), 1, "no reader, no read");
+        f.app.run_due_wait_reads(
+            start + ORPHANED_LIVENESS_WINDOW + std::time::Duration::from_secs(1),
+        );
+        assert!(matches!(
+            f.state(orphaned),
+            WaitState::Fired { ref reason, .. } if reason == "failed: reader dead"
+        ));
+        assert!(f.app.wait_reads.watched().is_empty());
+        f.app.state.assert_invariants_for_test();
+    }
+
+    #[test]
+    fn reader_waits_are_watched_again_after_a_load() {
+        let mut before = fixture();
+        before.install_reader("pr");
+        let id = before.declare_read(Some("merged"))["result"]["wait"]["wait_id"]
+            .as_u64()
+            .unwrap();
+        before.declare(Some(WaitDecider::Waiter));
+        let saved = serde_json::to_string(&before.app.state.waits).unwrap();
+        assert!(saved.contains("\"until\":\"merged\""), "{saved}");
+
+        let mut f = fixture();
+        f.app.state.waits = serde_json::from_str(&saved).unwrap();
+        f.app.schedule_live_wait_reads();
+        assert_eq!(
+            f.app.wait_reads.watched(),
+            vec![id],
+            "deadline-only waits are not read"
+        );
     }
 }

@@ -435,6 +435,8 @@ A wait is a deadline an agent declares on what it is waiting for, which Herdr ke
 
 `--on node:<agent>` waits on another agent, named by agent ID, agent name or pane ID, until its task status reaches `--until`: `complete` (the default), `failed`, `closed`, `needs_parent` or `needs_user`. Reaching it satisfies the wait, and the waiter gets a `tell` from `herdr wait`, `wait <id> satisfied: <reason>: <summary>`, whoever `--then` names. Any other terminal status (`complete`, `failed`) or the agent's pane closing fires the wait to its decider instead, with the reason `node <id> reported <status>` or `node <id> closed`, and the deadline still applies. A wait on an agent that has already closed, or already reached `--until`, settles when it is declared. Both messages restate what was awaited and where the node stands now.
 
+Plugins add source kinds with [`[[readers]]`](/docs/plugins/#wait-readers), such as `--on pr:owner/repo#12 --until merged`. These need `--until`, compared with the state the reader reports. The wait is read at once and then at the reader's interval. Reaching `--until` satisfies it as a node wait does, with the reason `<kind>:<target> is <state>`. Three failed reads in a row fire it as `failed: source unreachable`, a reader that refuses the source fires it at once, and no read landing in the reader's liveness window fires it as `failed: reader dead`. `wait show` carries `last_state`, `last_ok_at_ms`, `errors` and `last_error`, and the fire message restates the last read.
+
 While an agent has a live wait, an idle turn reads as `awaiting` rather than `idle` or `done`, and messages still reach it at once. The wait ending is not a completion: its message or flag is the news.
 
 ## Direct terminal attach

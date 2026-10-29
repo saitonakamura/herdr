@@ -152,6 +152,11 @@ impl App {
             return Vec::new();
         }
 
+        if let AppEvent::WaitReadFinished { wait_id, outcome } = ev {
+            self.wait_read_finished(wait_id, outcome);
+            return Vec::new();
+        }
+
         if let AppEvent::PluginCommandFinished {
             log_id,
             finished_unix_ms,

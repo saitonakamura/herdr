@@ -40,3 +40,19 @@ Exclude modifier-only keys, terminal replies, focus and mouse. Reproduce first: 
 [000-map](./000-map.md)
 
 ## Resolution
+
+Draft until the PR merges. Built 2026-10-29 by host pi (`input-046`, the first
+host-pi dogfood run), finished in the cockpit.
+
+- **Fixed: bare modifiers on the terminal-attach path.** A raw attach client
+  (`herdr agent attach`, `herdr terminal attach`) counted a kitty-protocol
+  modifier-only press (`CSI 57441..57454 u`, Ctrl/Alt/Shift/Super) as typing.
+  `terminal_attach_input_is_typing` now skips `KeyCode::Modifier`. Focus, colour,
+  DA, kitty-flag, size and mouse reports and key releases were already excluded;
+  tests now pin all of them, at the classifier and through the headless server.
+- **The 10-26 incident is not explained by this.** That pane was in the normal
+  client shell, which already drops modifier-only keys before forwarding them
+  (`src/client/shell/input.rs`, except into a popup pane). Its stamp came from a
+  key, text or paste event the client forwarded; which one was not captured, and
+  no log records it today. If it shows again, reopen with a trace on the stamp
+  first, then reproduce.

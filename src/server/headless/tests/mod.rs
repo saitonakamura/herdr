@@ -8547,6 +8547,73 @@ async fn done_clears_once_for_every_client_when_its_pane_is_focused_in_a_focused
     shutdown_test_runtimes(&mut server);
 }
 
+#[test]
+fn terminal_attach_reports_do_not_record_last_user_input() {
+    with_terminal_session_test_server(|server, terminal_id, terminal_id_string, _pane_id| {
+        // Attach input needs a runtime that accepts writes; keep its receiver open.
+        let (runtime, _input_rx) =
+            crate::terminal::TerminalRuntime::test_with_channel_and_scrollback_bytes(
+                80, 24, 0, b"", 64,
+            );
+        server
+            .app
+            .terminal_runtimes
+            .insert(terminal_id.clone(), runtime);
+        let mut client = ClientConnection::new(
+            (80, 24),
+            crate::kitty_graphics::HostCellSize::default(),
+            1,
+            RenderEncoding::SemanticFrame,
+            None,
+        );
+        client.mode = ClientConnectionMode::TerminalAttach {
+            terminal_id: terminal_id_string,
+        };
+        server.clients.insert(1, client);
+        let send = |server: &mut HeadlessServer, data: &str| {
+            server
+                .app
+                .state
+                .terminals
+                .get_mut(&terminal_id)
+                .unwrap()
+                .last_user_input_at_ms = None;
+            server.handle_server_event(ServerEvent::ClientInput {
+                client_id: 1,
+                data: data.as_bytes().to_vec(),
+            });
+            server.app.state.terminals[&terminal_id].last_user_input_at_ms
+        };
+
+        for data in [
+            "\x1b[57442;5:1u",
+            "\x1b[57442;5:2u",
+            "\x1b[57442;1:3u",
+            "\x1b[57444;9:1u",
+            "\x1b[I",
+            "\x1b[O",
+            "\x1b]11;rgb:0000/ffff/0000\x1b\\",
+            "\x1b[?1;2c",
+            "\x1b[?31u",
+            "\x1b[6;16;8t",
+            "\x1b[97;1:3u",
+            "\x1b[<32;3;4M",
+        ] {
+            assert_eq!(
+                send(server, data),
+                None,
+                "report must not claim user typing: {data:?}"
+            );
+        }
+        for data in ["a", "\r", "\x7f", "\x1b[97;1:2u", "\x1b[200~paste\x1b[201~"] {
+            assert!(
+                send(server, data).is_some(),
+                "typing still records the timestamp: {data:?}"
+            );
+        }
+    });
+}
+
 #[tokio::test]
 async fn client_typing_records_last_user_input_and_api_writes_do_not() {
     let mut server = test_headless_server();

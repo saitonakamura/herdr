@@ -200,14 +200,14 @@ pub(super) fn apply_terminal_attach_input(
     }
 }
 
-/// Whether raw attach input carries typing: a key press or repeat, text, or a
-/// paste. Mouse and focus reports from the host terminal do not count.
+/// Whether raw attach input carries typing: a non-modifier key press or repeat,
+/// text, or a paste. Mouse, focus, terminal replies and bare modifiers do not count.
 pub(super) fn terminal_attach_input_is_typing(data: &[u8]) -> bool {
     crate::raw_input::parse_framed_input(data)
         .iter()
         .any(|event| match event {
             crate::raw_input::RawInputEvent::Key(key) => {
-                key.as_key_event().kind != KeyEventKind::Release
+                key.kind != KeyEventKind::Release && !matches!(key.code, KeyCode::Modifier(_))
             }
             crate::raw_input::RawInputEvent::Text(text) => !text.as_str().is_empty(),
             crate::raw_input::RawInputEvent::Paste(text) => !text.is_empty(),
@@ -386,6 +386,60 @@ mod tests {
         assert!(!terminal_attach_input_is_typing(b""));
         assert!(!terminal_attach_input_is_typing(b"\x1b[I"));
         assert!(!terminal_attach_input_is_typing(b"\x1b[<0;3;4M"));
+    }
+
+    #[test]
+    fn terminal_attach_typing_counts_text_keys_and_pastes() {
+        for data in [
+            "a",
+            "\u{0436}",
+            "\r",
+            "\x7f",
+            "\x03",
+            "\x1b[A",
+            "\x1b[97;1:1u",
+            "\x1b[97;1:2u",
+            "\x1b[200~paste\x1b[201~",
+        ] {
+            assert!(terminal_attach_input_is_typing(data.as_bytes()), "{data:?}");
+        }
+        assert!(!terminal_attach_input_is_typing(b"\x1b[200~\x1b[201~"));
+    }
+
+    #[test]
+    fn terminal_attach_typing_ignores_terminal_replies_and_releases() {
+        for data in [
+            "\x1b[I",
+            "\x1b[O",
+            "\x1b]10;rgb:ffff/0000/0000\x07",
+            "\x1b]11;rgb:0000/ffff/0000\x1b\\",
+            "\x1b[?1;2c",
+            "\x1b[>1;4000;13c",
+            "\x1b[?31u",
+            "\x1b[6;16;8t",
+            "\x1b[?997;1n",
+            "\x1b[97;1:3u",
+            "\x1b[<0;3;4M",
+            "\x1b[<32;3;4M",
+        ] {
+            assert!(
+                !terminal_attach_input_is_typing(data.as_bytes()),
+                "terminal report is not typing: {data:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn terminal_attach_typing_ignores_modifier_only_keys() {
+        for codepoint in 57441..=57454 {
+            for kind in 1..=3 {
+                let sequence = format!("\x1b[{codepoint};5:{kind}u");
+                assert!(
+                    !terminal_attach_input_is_typing(sequence.as_bytes()),
+                    "modifier-only report is not typing: {sequence:?}"
+                );
+            }
+        }
     }
 
     #[tokio::test]

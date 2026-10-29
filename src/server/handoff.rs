@@ -545,6 +545,7 @@ mod tests {
             sidebar_section_split: None,
             collapsed_space_keys: Default::default(),
             messages: Default::default(),
+            waits: Default::default(),
             session_pane_width: None,
         }
     }

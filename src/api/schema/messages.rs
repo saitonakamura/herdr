@@ -88,4 +88,7 @@ pub struct MessageInfo {
     pub sent_at_ms: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delivered_at_ms: Option<u64>,
+    /// The wait whose firing sent this message.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait_id: Option<u64>,
 }

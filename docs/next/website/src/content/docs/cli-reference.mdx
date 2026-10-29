@@ -415,6 +415,24 @@ Each agent has its own queue. Herdr types a message into the recipient's pane as
 
 `show` prints the header, summary and body as text; `--json` prints the API response. `list` prints messages oldest first. `withdraw` removes a message that is still pending and refuses one already delivered. Herdr keeps pending messages until they are delivered or withdrawn and the most recent 500 delivered ones; messages to an agent are dropped when its pane closes. Messages persist with the session, and changes are published as `message.queued` and `message.delivered` events.
 
+## Waits
+
+```bash
+herdr wait declare <waiter> --summary TEXT --deadline WHEN [--then self|parent|user] [--on KIND:TARGET] [--until STATE] [--rearm WAIT_ID]
+herdr wait list [--waiter TARGET] [--state live|fired|satisfied|cancelled|all] [--all]
+herdr wait show <wait-id>
+herdr wait extend <wait-id> --deadline WHEN [--by TARGET|--user]
+herdr wait cancel <wait-id> [--by TARGET|--user]
+```
+
+A wait is a deadline an agent declares on what it is waiting for, which Herdr keeps with the session and fires when it passes. `<waiter>`, `--waiter` and `--by` are agent IDs, agent names or pane IDs, and a waiter pane without an agent ID gets one. `--summary` says what the wait is for, in 1 to 200 characters. `--deadline` is a duration from now (`90s`, `30m`, `2h`, `1d`) or an RFC 3339 time, and must lie in the future.
+
+`--then` is required and names who decides what happens when the wait fires: `self` the waiter, `parent` the waiter's parent agent, or the user when it has none, and `user` the user. Herdr resolves it when the wait fires, not when it is declared. A fire to an agent is a `tell` from `herdr wait` with the summary `wait <id> fired: <reason>: <summary>` and the wait's `wait_id`, queued and delivered like any other message, so it joins whatever else is pending in one block. A fire to the user sets `wait_needs_user` on the waiter's agent info, never its `task_status`. The flag clears when the wait is cancelled or re-armed, or when the waiter next sets its task status. A deadline that passed while the server was down fires as soon as it starts again, with the reason `deadline passed while the server was down`.
+
+`extend` moves a live wait's deadline, at most twice. A wait that fires with both extensions spent also goes one level above its decider: `self` to the parent, `parent` to the user. `declare --rearm <id>` starts a new wait, with a new ID, in place of a fired wait of the same waiter. It inherits that wait's extensions and `--then`, which may be left out. `extend` and `cancel` are allowed for the waiter, its parent and the user. They act as the calling pane, which counts as the user when it has no agent, and `--user` acts as the user anywhere. `cancel` on a fired wait that still needs the user clears the flag.
+
+`list` prints live waits oldest first; `--state` or `--all` selects others. An agent keeps at most 32 live waits and a session 1024. Herdr keeps live waits until they finish and the most recent 500 finished ones. When a waiter's pane closes its live waits are cancelled and nobody is told. `--on` and `--until` name a source to watch, such as another agent; a server lists the kinds it accepts as `wait_sources` in `herdr status server --json`, and refuses others with `wait_source_unsupported`. Waits persist with the session and survive a live handoff, and changes are published as `wait.declared`, `wait.fired` and `wait.finished` events.
+
 ## Direct terminal attach
 
 ```bash

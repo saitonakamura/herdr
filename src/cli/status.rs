@@ -288,6 +288,8 @@ struct ServerCapabilitiesJson {
     pane_user_input: bool,
     pane_restore_command: bool,
     agent_annotations: bool,
+    agent_waits: bool,
+    wait_sources: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -341,6 +343,8 @@ fn server_status_json(server: &ServerRuntimeStatus) -> ServerStatusJson {
                     pane_user_input: capabilities.pane_user_input,
                     pane_restore_command: capabilities.pane_restore_command,
                     agent_annotations: capabilities.agent_annotations,
+                    agent_waits: capabilities.agent_waits,
+                    wait_sources: capabilities.wait_sources.clone(),
                 }),
             compatible: protocol.map(|value| value == crate::protocol::PROTOCOL_VERSION),
             endpoint_compatible: capabilities.as_ref().and_then(|capabilities| {
@@ -446,6 +450,8 @@ mod tests {
                 pane_user_input: false,
                 pane_restore_command: false,
                 agent_annotations: false,
+                agent_waits: false,
+                wait_sources: Vec::new(),
             }),
         }
     }

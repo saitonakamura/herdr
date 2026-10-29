@@ -11,11 +11,13 @@ pub(crate) mod plugins;
 pub(super) mod responses;
 mod session;
 mod tabs;
+mod waits;
 mod workspaces;
 mod worktrees;
 
 use super::{api_helpers::pane_agent_status, App, Mode, OverlayPaneState, ToastKind};
 use crate::events::AppEvent;
+pub(crate) use waits::WAIT_SOURCES;
 
 const API_NOTIFICATION_RATE_LIMIT: Duration = Duration::from_secs(1);
 #[cfg(windows)]
@@ -1176,6 +1178,11 @@ impl App {
             Method::MessageWithdraw(target) => {
                 return self.handle_message_withdraw(request.id, target)
             }
+            Method::WaitDeclare(params) => return self.handle_wait_declare(request.id, params),
+            Method::WaitList(params) => return self.handle_wait_list(request.id, params),
+            Method::WaitGet(target) => return self.handle_wait_get(request.id, target),
+            Method::WaitExtend(params) => return self.handle_wait_extend(request.id, params),
+            Method::WaitCancel(params) => return self.handle_wait_cancel(request.id, params),
             Method::AgentSetTaskStatus(params) => {
                 return self.handle_agent_set_task_status(request.id, params)
             }

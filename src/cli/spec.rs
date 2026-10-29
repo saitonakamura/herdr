@@ -43,6 +43,7 @@ pub(super) fn command() -> Command {
         .subcommand(notification_command())
         .subcommand(agent_command())
         .subcommand(super::message::command())
+        .subcommand(super::wait::command())
         .subcommand(pane_command())
         .subcommand(terminal_command())
         .subcommand(session_command())
@@ -617,9 +618,12 @@ mod tests {
     #[test]
     fn spec_matches_refactored_agent_and_pane_commands() {
         let cmd = super::command();
-        assert!(cmd
+        // The fork's top-level `wait` is agent waits (wait.*), not the old agent-status wait.
+        let wait = command_path(&cmd, &["wait"]);
+        assert!(!has_option(wait, "until"));
+        assert!(wait
             .get_subcommands()
-            .all(|subcommand| subcommand.get_name() != "wait"));
+            .any(|subcommand| subcommand.get_name() == "declare"));
 
         let agent = command_path(&cmd, &["agent"]);
         assert!(agent

@@ -31,6 +31,11 @@ pub struct SessionSnapshot {
         skip_serializing_if = "crate::app::messages::MessageStore::is_empty"
     )]
     pub messages: crate::app::messages::MessageStore,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::app::waits::WaitStore::is_empty"
+    )]
+    pub waits: crate::app::waits::WaitStore,
     /// Expanded session pane width a client set by dragging (fork-only).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_pane_width: Option<u16>,
@@ -230,6 +235,8 @@ struct RawSessionSnapshot {
     #[serde(default)]
     messages: crate::app::messages::MessageStore,
     #[serde(default)]
+    waits: crate::app::waits::WaitStore,
+    #[serde(default)]
     session_pane_width: Option<u16>,
 }
 
@@ -247,6 +254,7 @@ fn migrate_snapshot(raw: RawSessionSnapshot) -> Result<SessionSnapshot, String> 
         sidebar_section_split: raw.sidebar_section_split,
         collapsed_space_keys: raw.collapsed_space_keys,
         messages: raw.messages,
+        waits: raw.waits,
         session_pane_width: raw.session_pane_width,
     })
 }
@@ -320,6 +328,7 @@ pub fn capture(
         sidebar_section_split: None,
         collapsed_space_keys: std::collections::HashSet::new(),
         messages: Default::default(),
+        waits: Default::default(),
         session_pane_width: None,
     }
 }
@@ -465,10 +474,11 @@ pub(super) fn layout_fingerprint(snapshot: &SessionSnapshot) -> Option<String> {
     let mut collapsed: Vec<_> = snapshot.collapsed_space_keys.iter().collect();
     collapsed.sort_unstable();
     value["collapsed_space_keys"] = serde_json::to_value(collapsed).ok()?;
-    // Messages and the session pane width are not layout; neither may orphan saved
+    // Messages, waits and the session pane width are not layout; none may orphan saved
     // pane history.
     if let Some(object) = value.as_object_mut() {
         object.remove("messages");
+        object.remove("waits");
         object.remove("session_pane_width");
     }
     let bytes = serde_json::to_vec(&value).ok()?;
@@ -731,6 +741,7 @@ mod tests {
             body: Some("details".into()),
             reply_to: None,
             sent_at_ms: 1,
+            wait_id: None,
         });
 
         let restored = parse_snapshot(&serde_json::to_string(&snapshot).unwrap()).unwrap();
@@ -740,6 +751,44 @@ mod tests {
         assert_eq!(
             layout_fingerprint(&restored).as_deref(),
             Some(without_messages.as_str())
+        );
+    }
+
+    #[test]
+    fn waits_round_trip_stay_out_of_an_empty_snapshot_and_leave_the_layout_fingerprint_alone() {
+        let fixture = include_str!("../../tests/fixtures/session/current-herdr-session.json");
+        assert!(!fixture.contains("\"waits\""), "the fixture predates waits");
+        let mut snapshot = parse_snapshot(fixture).unwrap();
+        assert!(snapshot.waits.is_empty(), "a snapshot without waits loads");
+        let without_waits = layout_fingerprint(&snapshot).unwrap();
+        assert!(!serde_json::to_string(&snapshot)
+            .unwrap()
+            .contains("\"waits\""));
+
+        let wait_id = snapshot
+            .waits
+            .declare(crate::app::waits::NewWait {
+                waiter: crate::terminal::AgentId::parse("2345bcde").unwrap(),
+                on: None,
+                until: None,
+                summary: "CI".into(),
+                deadline_at_ms: 2_000,
+                then: Some(crate::api::schema::WaitDecider::Parent),
+                rearm: None,
+                created_at_ms: 1,
+            })
+            .unwrap()
+            .id;
+        snapshot.waits.extend(wait_id, 3_000).unwrap();
+
+        let restored = parse_snapshot(&serde_json::to_string(&snapshot).unwrap()).unwrap();
+
+        assert_eq!(restored.waits, snapshot.waits);
+        assert_eq!(restored.waits.next_deadline_ms(), Some(3_000));
+        restored.waits.assert_invariants_for_test();
+        assert_eq!(
+            layout_fingerprint(&restored).as_deref(),
+            Some(without_waits.as_str())
         );
     }
 
@@ -776,6 +825,7 @@ mod tests {
             sidebar_section_split: Some(0.5),
             collapsed_space_keys: std::collections::HashSet::new(),
             messages: Default::default(),
+            waits: Default::default(),
             session_pane_width: None,
         };
         let json = serde_json::to_string(&snap).unwrap();
@@ -887,6 +937,7 @@ mod tests {
             sidebar_section_split: Some(0.5),
             collapsed_space_keys: std::collections::HashSet::new(),
             messages: Default::default(),
+            waits: Default::default(),
             session_pane_width: None,
             version: SNAPSHOT_VERSION,
         };
@@ -1719,6 +1770,7 @@ mod tests {
             sidebar_section_split: Some(0.5),
             collapsed_space_keys: std::collections::HashSet::new(),
             messages: Default::default(),
+            waits: Default::default(),
             session_pane_width: None,
         };
 

@@ -70,6 +70,7 @@ impl App {
             self.state.mark_session_dirty();
             self.schedule_session_save();
         }
+        self.cancel_waits_of_gone_agents(&live);
         if changed.is_empty() {
             return;
         }

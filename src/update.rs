@@ -3100,6 +3100,8 @@ mod tests {
                 pane_user_input: false,
                 pane_restore_command: false,
                 agent_annotations: false,
+                agent_waits: false,
+                wait_sources: Vec::new(),
             }),
         };
         let missing_baseline = crate::api::RuntimeStatus {
@@ -3182,6 +3184,8 @@ mod tests {
                     pane_user_input: false,
                     pane_restore_command: false,
                     agent_annotations: false,
+                    agent_waits: false,
+                    wait_sources: Vec::new(),
                 }),
             },
         };
@@ -3448,6 +3452,8 @@ mod tests {
                     pane_user_input: false,
                     pane_restore_command: false,
                     agent_annotations: false,
+                    agent_waits: false,
+                    wait_sources: Vec::new(),
                 }),
             },
         };

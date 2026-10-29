@@ -37,6 +37,7 @@ mod status;
 pub(crate) mod tab;
 mod target;
 mod title;
+pub(crate) mod wait;
 mod workspace;
 pub(crate) mod workspace_bindings;
 pub(crate) mod worktree;
@@ -133,6 +134,7 @@ pub fn maybe_run(args: &[String]) -> std::io::Result<CommandOutcome> {
         "notification" => notification::run_notification_command(&args[2..])?,
         "agent" => agent::run_agent_command(&args[2..])?,
         "message" => message::run_message_command(&args[2..])?,
+        "wait" => wait::run_wait_command(&args[2..])?,
         "terminal" => run_terminal_command(&args[2..])?,
         "pane" => pane::run_pane_command(&args[2..])?,
         "plugin" => plugin::run_plugin_command(&args[2..])?,
@@ -153,6 +155,7 @@ fn api_group(name: &str) -> Option<clap::Command> {
         "notification" => notification::command(),
         "agent" => agent::command(),
         "message" => message::command(),
+        "wait" => wait::command(),
         "pane" => pane::command(),
         "plugin" => plugin::command(),
         _ => return None,

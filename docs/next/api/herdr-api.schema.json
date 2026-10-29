@@ -775,6 +775,55 @@
                 "message"
               ],
               "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "wait_declared",
+                  "type": "string"
+                },
+                "wait": {
+                  "$ref": "#/schemas/event/$defs/WaitInfo"
+                }
+              },
+              "required": [
+                "type",
+                "wait"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "wait_fired",
+                  "type": "string"
+                },
+                "wait": {
+                  "$ref": "#/schemas/event/$defs/WaitInfo"
+                }
+              },
+              "required": [
+                "type",
+                "wait"
+              ],
+              "type": "object"
+            },
+            {
+              "description": "Satisfied or cancelled.",
+              "properties": {
+                "type": {
+                  "const": "wait_finished",
+                  "type": "string"
+                },
+                "wait": {
+                  "$ref": "#/schemas/event/$defs/WaitInfo"
+                }
+              },
+              "required": [
+                "type",
+                "wait"
+              ],
+              "type": "object"
             }
           ]
         },
@@ -807,7 +856,10 @@
             "pane_agent_status_changed",
             "layout_updated",
             "message_queued",
-            "message_delivered"
+            "message_delivered",
+            "wait_declared",
+            "wait_fired",
+            "wait_finished"
           ],
           "type": "string"
         },
@@ -868,6 +920,15 @@
             },
             "to_agent_id": {
               "type": "string"
+            },
+            "wait_id": {
+              "description": "The wait whose firing sent this message.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
             }
           },
           "required": [
@@ -1410,6 +1471,192 @@
             "closed"
           ],
           "type": "string"
+        },
+        "WaitDecider": {
+          "description": "Who decides what happens when a wait fires, resolved when it fires: `self` is the waiter,\n`parent` its parent agent (the user when it has none), and `user` flags the waiter's agent\ninfo with `wait_needs_user`.",
+          "enum": [
+            "self",
+            "parent",
+            "user"
+          ],
+          "type": "string"
+        },
+        "WaitFiredInfo": {
+          "description": "What a fired wait did.",
+          "properties": {
+            "escalated": {
+              "description": "Its extensions were spent, so it went one level above its decider too.",
+              "type": "boolean"
+            },
+            "reason": {
+              "type": "string"
+            },
+            "to": {
+              "description": "Agent ids messaged, and `user` when the user was flagged.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "reason",
+            "to"
+          ],
+          "type": "object"
+        },
+        "WaitInfo": {
+          "properties": {
+            "created_at_ms": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "deadline_at_ms": {
+              "description": "Unix time in milliseconds.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "errors": {
+              "description": "Reader errors in a row.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "extensions": {
+              "description": "Deadline extensions used, at most 2; a re-armed wait carries its predecessor's.",
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "finished_at_ms": {
+              "description": "When it fired, was satisfied or was cancelled.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "fired": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/event/$defs/WaitFiredInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "last_ok_at_ms": {
+              "description": "The last time a reader reached the source.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "needs_user": {
+              "description": "It fired to the user, who has not dealt with it yet.",
+              "type": "boolean"
+            },
+            "on": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/event/$defs/WaitSourceInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "rearm_of": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "state": {
+              "$ref": "#/schemas/event/$defs/WaitState"
+            },
+            "summary": {
+              "type": "string"
+            },
+            "then": {
+              "$ref": "#/schemas/event/$defs/WaitDecider"
+            },
+            "until": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "wait_id": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "waiter_agent_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "wait_id",
+            "waiter_agent_id",
+            "state",
+            "summary",
+            "deadline_at_ms",
+            "then",
+            "extensions",
+            "created_at_ms"
+          ],
+          "type": "object"
+        },
+        "WaitSourceInfo": {
+          "description": "What a wait watches. `kind` is open: a server refuses one it does not list in `wait_sources`.",
+          "properties": {
+            "kind": {
+              "type": "string"
+            },
+            "target": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "target"
+          ],
+          "type": "object"
+        },
+        "WaitState": {
+          "oneOf": [
+            {
+              "enum": [
+                "cancelled"
+              ],
+              "type": "string"
+            },
+            {
+              "const": "live",
+              "description": "Waiting for its source or its deadline.",
+              "type": "string"
+            },
+            {
+              "const": "fired",
+              "description": "Its deadline passed, or its source failed; the decider was told.",
+              "type": "string"
+            },
+            {
+              "const": "satisfied",
+              "description": "Its source reached the state it waited for.",
+              "type": "string"
+            }
+          ]
         },
         "WorkspaceInfo": {
           "properties": {
@@ -4962,6 +5209,42 @@
                 "type"
               ],
               "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "wait.declared",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "wait.fired",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "wait.finished",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
             }
           ]
         },
@@ -5073,6 +5356,201 @@
             "bottom-right"
           ],
           "type": "string"
+        },
+        "WaitCancelParams": {
+          "properties": {
+            "by": {
+              "description": "Who asks: agent id, agent name, or pane id. Omit, or name a pane without an agent, to ask as the user.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "wait_id": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "wait_id"
+          ],
+          "type": "object"
+        },
+        "WaitDecider": {
+          "description": "Who decides what happens when a wait fires, resolved when it fires: `self` is the waiter,\n`parent` its parent agent (the user when it has none), and `user` flags the waiter's agent\ninfo with `wait_needs_user`.",
+          "enum": [
+            "self",
+            "parent",
+            "user"
+          ],
+          "type": "string"
+        },
+        "WaitDeclareParams": {
+          "properties": {
+            "deadline_at_ms": {
+              "description": "Unix time in milliseconds. Give this or `deadline_in_ms`.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "deadline_in_ms": {
+              "description": "Milliseconds from now. Give this or `deadline_at_ms`.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "on": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/request/$defs/WaitSourceInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "rearm": {
+              "description": "A fired wait of the same waiter to re-arm: the new wait inherits its extensions and `then`.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "summary": {
+              "description": "What it waits for, 1 to 200 characters.",
+              "type": "string"
+            },
+            "then": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/request/$defs/WaitDecider"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Required, unless `rearm` names a wait to inherit it from."
+            },
+            "until": {
+              "description": "The source state that satisfies the wait, interpreted per source kind.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "waiter": {
+              "description": "The agent that waits: agent id, agent name, or pane id. A pane without an agent gets an agent id.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "waiter",
+            "summary"
+          ],
+          "type": "object"
+        },
+        "WaitExtendParams": {
+          "properties": {
+            "by": {
+              "description": "Who asks: agent id, agent name, or pane id. Omit, or name a pane without an agent, to ask as the user.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "deadline_at_ms": {
+              "description": "Unix time in milliseconds. Give this or `deadline_in_ms`.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "deadline_in_ms": {
+              "description": "Milliseconds from now. Give this or `deadline_at_ms`.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "wait_id": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "wait_id"
+          ],
+          "type": "object"
+        },
+        "WaitListParams": {
+          "properties": {
+            "state": {
+              "$ref": "#/schemas/request/$defs/WaitListState",
+              "default": "live"
+            },
+            "waiter": {
+              "description": "Only waits of this agent id, agent name, or pane id.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "type": "object"
+        },
+        "WaitListState": {
+          "description": "Which waits `wait.list` returns.",
+          "enum": [
+            "live",
+            "fired",
+            "satisfied",
+            "cancelled",
+            "all"
+          ],
+          "type": "string"
+        },
+        "WaitSourceInfo": {
+          "description": "What a wait watches. `kind` is open: a server refuses one it does not list in `wait_sources`.",
+          "properties": {
+            "kind": {
+              "type": "string"
+            },
+            "target": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "target"
+          ],
+          "type": "object"
+        },
+        "WaitTarget": {
+          "properties": {
+            "wait_id": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "wait_id"
+          ],
+          "type": "object"
         },
         "WorkspaceCloseParams": {
           "properties": {
@@ -7177,6 +7655,86 @@
         {
           "properties": {
             "method": {
+              "const": "wait.declare",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/WaitDeclareParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "wait.list",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/WaitListParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "wait.get",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/WaitTarget"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "wait.extend",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/WaitExtendParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "wait.cancel",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/WaitCancelParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "agent.set_task_status",
               "type": "string"
             },
@@ -7680,6 +8238,15 @@
             "launch_pending": {
               "type": "boolean"
             },
+            "live_waits": {
+              "description": "Waits this agent declared that are still live.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
             "name": {
               "type": [
                 "string",
@@ -7771,6 +8338,17 @@
                 "pattern": "^[A-Za-z0-9_-]{1,32}$"
               },
               "type": "object"
+            },
+            "wait_needs_user": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/success_response/$defs/WaitNeedsUserInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A wait of this agent's fired to the user, who has not dealt with it yet."
             },
             "workspace_id": {
               "type": "string"
@@ -8626,6 +9204,55 @@
                 "message"
               ],
               "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "wait_declared",
+                  "type": "string"
+                },
+                "wait": {
+                  "$ref": "#/schemas/success_response/$defs/WaitInfo"
+                }
+              },
+              "required": [
+                "type",
+                "wait"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "wait_fired",
+                  "type": "string"
+                },
+                "wait": {
+                  "$ref": "#/schemas/success_response/$defs/WaitInfo"
+                }
+              },
+              "required": [
+                "type",
+                "wait"
+              ],
+              "type": "object"
+            },
+            {
+              "description": "Satisfied or cancelled.",
+              "properties": {
+                "type": {
+                  "const": "wait_finished",
+                  "type": "string"
+                },
+                "wait": {
+                  "$ref": "#/schemas/success_response/$defs/WaitInfo"
+                }
+              },
+              "required": [
+                "type",
+                "wait"
+              ],
+              "type": "object"
             }
           ]
         },
@@ -8673,7 +9300,10 @@
             "pane_agent_status_changed",
             "layout_updated",
             "message_queued",
-            "message_delivered"
+            "message_delivered",
+            "wait_declared",
+            "wait_fired",
+            "wait_finished"
           ],
           "type": "string"
         },
@@ -9023,6 +9653,15 @@
             },
             "to_agent_id": {
               "type": "string"
+            },
+            "wait_id": {
+              "description": "The wait whose firing sent this message.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
             }
           },
           "required": [
@@ -11885,6 +12524,41 @@
             },
             {
               "properties": {
+                "type": {
+                  "const": "wait_info",
+                  "type": "string"
+                },
+                "wait": {
+                  "$ref": "#/schemas/success_response/$defs/WaitInfo"
+                }
+              },
+              "required": [
+                "type",
+                "wait"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "wait_list",
+                  "type": "string"
+                },
+                "waits": {
+                  "items": {
+                    "$ref": "#/schemas/success_response/$defs/WaitInfo"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "type",
+                "waits"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
                 "agents": {
                   "description": "Deepest first, in the order they were (or would be) closed.",
                   "items": {
@@ -11941,6 +12615,11 @@
               "description": "Keeps a task status per agent (`agent.set_task_status`) and closes subtrees (`agent.close`).",
               "type": "boolean"
             },
+            "agent_waits": {
+              "default": false,
+              "description": "Keeps agent waits with deadlines (`wait.*`).",
+              "type": "boolean"
+            },
             "detached_server_daemon": {
               "default": false,
               "type": "boolean"
@@ -11981,6 +12660,14 @@
               "default": false,
               "description": "Whether this server supports explicit client-shell surface interest.",
               "type": "boolean"
+            },
+            "wait_sources": {
+              "default": [],
+              "description": "The `on` source kinds `wait.declare` accepts; empty means deadlines only.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
             },
             "worktree_post_create": {
               "default": false,
@@ -12219,6 +12906,210 @@
             "closed"
           ],
           "type": "string"
+        },
+        "WaitDecider": {
+          "description": "Who decides what happens when a wait fires, resolved when it fires: `self` is the waiter,\n`parent` its parent agent (the user when it has none), and `user` flags the waiter's agent\ninfo with `wait_needs_user`.",
+          "enum": [
+            "self",
+            "parent",
+            "user"
+          ],
+          "type": "string"
+        },
+        "WaitFiredInfo": {
+          "description": "What a fired wait did.",
+          "properties": {
+            "escalated": {
+              "description": "Its extensions were spent, so it went one level above its decider too.",
+              "type": "boolean"
+            },
+            "reason": {
+              "type": "string"
+            },
+            "to": {
+              "description": "Agent ids messaged, and `user` when the user was flagged.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "reason",
+            "to"
+          ],
+          "type": "object"
+        },
+        "WaitInfo": {
+          "properties": {
+            "created_at_ms": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "deadline_at_ms": {
+              "description": "Unix time in milliseconds.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "errors": {
+              "description": "Reader errors in a row.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "extensions": {
+              "description": "Deadline extensions used, at most 2; a re-armed wait carries its predecessor's.",
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "finished_at_ms": {
+              "description": "When it fired, was satisfied or was cancelled.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "fired": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/success_response/$defs/WaitFiredInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "last_ok_at_ms": {
+              "description": "The last time a reader reached the source.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "needs_user": {
+              "description": "It fired to the user, who has not dealt with it yet.",
+              "type": "boolean"
+            },
+            "on": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/success_response/$defs/WaitSourceInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "rearm_of": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "state": {
+              "$ref": "#/schemas/success_response/$defs/WaitState"
+            },
+            "summary": {
+              "type": "string"
+            },
+            "then": {
+              "$ref": "#/schemas/success_response/$defs/WaitDecider"
+            },
+            "until": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "wait_id": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "waiter_agent_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "wait_id",
+            "waiter_agent_id",
+            "state",
+            "summary",
+            "deadline_at_ms",
+            "then",
+            "extensions",
+            "created_at_ms"
+          ],
+          "type": "object"
+        },
+        "WaitNeedsUserInfo": {
+          "description": "A wait of this agent's fired to the user, who has not dealt with it yet.",
+          "properties": {
+            "reason": {
+              "type": "string"
+            },
+            "wait_id": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "wait_id",
+            "reason"
+          ],
+          "type": "object"
+        },
+        "WaitSourceInfo": {
+          "description": "What a wait watches. `kind` is open: a server refuses one it does not list in `wait_sources`.",
+          "properties": {
+            "kind": {
+              "type": "string"
+            },
+            "target": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "target"
+          ],
+          "type": "object"
+        },
+        "WaitState": {
+          "oneOf": [
+            {
+              "enum": [
+                "cancelled"
+              ],
+              "type": "string"
+            },
+            {
+              "const": "live",
+              "description": "Waiting for its source or its deadline.",
+              "type": "string"
+            },
+            {
+              "const": "fired",
+              "description": "Its deadline passed, or its source failed; the decider was told.",
+              "type": "string"
+            },
+            {
+              "const": "satisfied",
+              "description": "Its source reached the state it waited for.",
+              "type": "string"
+            }
+          ]
         },
         "WorkspaceInfo": {
           "properties": {

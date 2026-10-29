@@ -399,6 +399,17 @@ impl App {
             return None;
         }
         let pane = self.pane_metadata(ws_idx, pane_id)?;
+        let (live_waits, wait_needs_user) =
+            terminal.agent_id.as_ref().map_or((None, None), |agent_id| {
+                let live = self.state.waits.live_count(agent_id);
+                (
+                    (live > 0).then_some(live),
+                    self.state
+                        .waits
+                        .needs_user(agent_id)
+                        .and_then(crate::app::waits::Wait::needs_user_info),
+                )
+            });
         Some(crate::api::schema::AgentInfo {
             terminal_id: pane.terminal_id,
             name: terminal.agent_name.clone(),
@@ -418,6 +429,8 @@ impl App {
             launch_args: pane.launch_args,
             agent_home: pane.agent_home,
             task_status: pane.task_status,
+            live_waits,
+            wait_needs_user,
             last_user_input_at_ms: pane.last_user_input_at_ms,
             annotations: pane.annotations,
             repo: pane.repo,

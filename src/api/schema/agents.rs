@@ -277,6 +277,12 @@ pub struct AgentInfo {
     /// What the agent last said about its brief.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_status: Option<TaskStatus>,
+    /// Waits this agent declared that are still live.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub live_waits: Option<u32>,
+    /// A wait of this agent's fired to the user, who has not dealt with it yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait_needs_user: Option<super::waits::WaitNeedsUserInfo>,
     /// Unix epoch ms when a client last typed into this pane: keys, text or paste, never API writes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_user_input_at_ms: Option<u64>,

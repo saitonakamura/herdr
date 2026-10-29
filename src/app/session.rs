@@ -49,6 +49,7 @@ impl App {
                 self.state.selected,
             );
             snapshot.messages = self.state.messages.clone();
+            snapshot.waits = self.state.waits.clone();
             snapshot.session_pane_width = self.state.session_pane.width_override;
             let history = self.persist_pane_history.then(|| {
                 crate::persist::capture_history(
@@ -173,5 +174,35 @@ mod tests {
         assert_eq!(saved(&app), None);
         app.set_session_pane_width(Some(30));
         assert_eq!(saved(&app), Some(30));
+    }
+
+    #[test]
+    fn the_saved_session_keeps_the_waits() {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &crate::config::Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        app.state.workspaces = vec![crate::workspace::Workspace::test_new("waits")];
+        app.state
+            .waits
+            .declare(crate::app::waits::NewWait {
+                waiter: crate::terminal::AgentId::parse("2345bcde").unwrap(),
+                on: None,
+                until: None,
+                summary: "CI".into(),
+                deadline_at_ms: 2_000,
+                then: Some(crate::api::schema::WaitDecider::Waiter),
+                rearm: None,
+                created_at_ms: 1,
+            })
+            .unwrap();
+        match app.capture_session_save_job() {
+            SessionSaveJob::Save { snapshot, .. } => assert_eq!(snapshot.waits, app.state.waits),
+            SessionSaveJob::Clear => panic!("expected a save"),
+        }
     }
 }

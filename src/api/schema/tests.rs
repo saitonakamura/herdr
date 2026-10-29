@@ -735,6 +735,8 @@ fn success_response_round_trips() {
                 pane_user_input: false,
                 pane_restore_command: false,
                 agent_annotations: false,
+                agent_waits: false,
+                wait_sources: Vec::new(),
             }),
         },
     };

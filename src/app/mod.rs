@@ -18,6 +18,7 @@ mod api;
 #[cfg(test)]
 pub(crate) use api::test_support::exiting_test_command;
 mod api_helpers;
+pub(crate) use api::WAIT_SOURCES;
 pub(crate) use api_helpers::limit_snapshot_lines;
 mod creation;
 mod custom_commands;
@@ -36,6 +37,7 @@ mod terminal_targets;
 mod terminal_titles;
 mod theme_sync;
 mod user_input;
+pub(crate) mod waits;
 mod window_title;
 mod worktrees;
 
@@ -434,6 +436,10 @@ impl App {
             .as_ref()
             .map(|snapshot| snapshot.messages.clone())
             .unwrap_or_default();
+        let restored_waits = snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.waits.clone())
+            .unwrap_or_default();
         let restored_session_pane_width = snapshot
             .as_ref()
             .and_then(|snapshot| snapshot.session_pane_width);
@@ -608,6 +614,8 @@ impl App {
             messages: restored_messages,
             message_delivery_due: true,
             message_delivery_attempts: std::collections::HashMap::new(),
+            waits: restored_waits,
+            server_started_at_ms: waits::epoch_now_ms(),
         };
 
         state.terminals = restored_terminals;
@@ -761,6 +769,7 @@ impl App {
         app.terminal_runtimes = runtimes.into();
         app.state.messages = snapshot.messages.clone();
         app.state.message_delivery_due = true;
+        app.state.waits = snapshot.waits.clone();
         app.state.session_pane.width_override = snapshot.session_pane_width;
         // Handed-over parents may sit in another workspace (ADR 0008); the first sync drops them.
         app.state.agent_identities_dirty = true;

@@ -86,6 +86,12 @@ pub enum Subscription {
     MessageQueued {},
     #[serde(rename = "message.delivered")]
     MessageDelivered {},
+    #[serde(rename = "wait.declared")]
+    WaitDeclared {},
+    #[serde(rename = "wait.fired")]
+    WaitFired {},
+    #[serde(rename = "wait.finished")]
+    WaitFinished {},
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -224,6 +230,9 @@ pub enum EventKind {
     LayoutUpdated,
     MessageQueued,
     MessageDelivered,
+    WaitDeclared,
+    WaitFired,
+    WaitFinished,
 }
 
 impl EventKind {
@@ -257,6 +266,9 @@ impl EventKind {
             EventKind::LayoutUpdated => "layout.updated",
             EventKind::MessageQueued => "message.queued",
             EventKind::MessageDelivered => "message.delivered",
+            EventKind::WaitDeclared => "wait.declared",
+            EventKind::WaitFired => "wait.fired",
+            EventKind::WaitFinished => "wait.finished",
         }
     }
 }
@@ -291,6 +303,9 @@ pub const KNOWN_EVENT_KINDS: &[EventKind] = &[
     EventKind::LayoutUpdated,
     EventKind::MessageQueued,
     EventKind::MessageDelivered,
+    EventKind::WaitDeclared,
+    EventKind::WaitFired,
+    EventKind::WaitFinished,
 ];
 
 pub const PLUGIN_HOOK_EVENT_KINDS: &[EventKind] = &[
@@ -318,6 +333,9 @@ pub const PLUGIN_HOOK_EVENT_KINDS: &[EventKind] = &[
     EventKind::PaneAgentStatusChanged,
     EventKind::MessageQueued,
     EventKind::MessageDelivered,
+    EventKind::WaitDeclared,
+    EventKind::WaitFired,
+    EventKind::WaitFinished,
 ];
 
 #[cfg(test)]
@@ -574,5 +592,15 @@ pub enum EventData {
     },
     MessageDelivered {
         message: super::messages::MessageInfo,
+    },
+    WaitDeclared {
+        wait: super::waits::WaitInfo,
+    },
+    WaitFired {
+        wait: super::waits::WaitInfo,
+    },
+    /// Satisfied or cancelled.
+    WaitFinished {
+        wait: super::waits::WaitInfo,
     },
 }

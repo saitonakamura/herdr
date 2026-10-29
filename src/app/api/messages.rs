@@ -45,29 +45,17 @@ impl App {
             None => (None, USER_SENDER.to_owned()),
         };
         let body = params.body.filter(|body| !body.trim().is_empty());
-        let message_id = self
-            .state
-            .messages
-            .push(NewMessage {
-                kind: params.kind,
-                from,
-                from_name,
-                to: to.clone(),
-                summary,
-                body,
-                reply_to: params.reply_to,
-                sent_at_ms: now_ms(),
-            })
-            .id;
-        self.messages_changed();
-        if let Some(message) = self.state.messages.get(message_id) {
-            let message = message.info();
-            self.emit_event(EventEnvelope {
-                event: EventKind::MessageQueued,
-                data: EventData::MessageQueued { message },
-            });
-        }
-        self.try_deliver_message_to(&to);
+        let message_id = self.queue_message(NewMessage {
+            kind: params.kind,
+            from,
+            from_name,
+            to,
+            summary,
+            body,
+            reply_to: params.reply_to,
+            sent_at_ms: now_ms(),
+            wait_id: None,
+        });
         match self.state.messages.get(message_id) {
             Some(message) => encode_success(
                 id,
@@ -161,6 +149,23 @@ impl App {
                 ),
             ),
         }
+    }
+
+    /// Queues a message and delivers it at once when its recipient can take it. Everything that
+    /// sends a message goes through here, so it batches with whatever else is pending.
+    pub(super) fn queue_message(&mut self, new: NewMessage) -> u64 {
+        let to = new.to.clone();
+        let message_id = self.state.messages.push(new).id;
+        self.messages_changed();
+        if let Some(message) = self.state.messages.get(message_id) {
+            let message = message.info();
+            self.emit_event(EventEnvelope {
+                event: EventKind::MessageQueued,
+                data: EventData::MessageQueued { message },
+            });
+        }
+        self.try_deliver_message_to(&to);
+        message_id
     }
 
     /// Delivers what is due, at most one block per recipient per state change.
@@ -271,7 +276,7 @@ impl App {
     }
 
     /// Resolves a target to its agent id, giving a pane without one an id.
-    fn message_agent_id(&mut self, target: &str) -> Result<AgentId, AgentParentError> {
+    pub(super) fn message_agent_id(&mut self, target: &str) -> Result<AgentId, AgentParentError> {
         let (_, _, terminal_id) = self.resolve_agent_identity_target(target)?;
         if self.assign_agent_identity(&terminal_id, None) {
             self.state.mark_session_dirty();
@@ -288,7 +293,10 @@ impl App {
     }
 
     /// Resolves a target to the agent id it already has; a filter never mints one.
-    fn existing_agent_id(&self, target: &str) -> Result<Option<AgentId>, AgentParentError> {
+    pub(super) fn existing_agent_id(
+        &self,
+        target: &str,
+    ) -> Result<Option<AgentId>, AgentParentError> {
         let (_, _, terminal_id) = self.resolve_agent_identity_target(target)?;
         Ok(self
             .state

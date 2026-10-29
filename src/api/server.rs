@@ -82,6 +82,11 @@ fn default_capabilities() -> Option<ServerCapabilities> {
         pane_user_input: true,
         pane_restore_command: true,
         agent_annotations: true,
+        agent_waits: true,
+        wait_sources: crate::app::WAIT_SOURCES
+            .iter()
+            .map(|kind| (*kind).to_owned())
+            .collect(),
     })
 }
 
@@ -1421,6 +1426,8 @@ mod tests {
                 pane_user_input: false,
                 pane_restore_command: false,
                 agent_annotations: false,
+                agent_waits: false,
+                wait_sources: Vec::new(),
             }),
             None,
             None,

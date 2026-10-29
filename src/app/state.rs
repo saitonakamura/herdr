@@ -905,6 +905,11 @@ pub struct AppState {
     /// Each recipient's state change sequence at its last delivery attempt: one attempt per change.
     pub(crate) message_delivery_attempts:
         std::collections::HashMap<crate::terminal::AgentId, Option<u64>>,
+    /// Agent waits, persisted with the session.
+    pub(crate) waits: crate::app::waits::WaitStore,
+    /// Unix epoch ms when this server's state was built: a deadline before it passed while the
+    /// server was down.
+    pub(crate) server_started_at_ms: u64,
 }
 
 impl AppState {
@@ -1144,6 +1149,8 @@ impl AppState {
             agent_identities_dirty: false,
             messages: Default::default(),
             message_delivery_due: false,
+            waits: Default::default(),
+            server_started_at_ms: 0,
             message_delivery_attempts: std::collections::HashMap::new(),
         }
     }
@@ -1177,6 +1184,7 @@ impl AppState {
     }
 
     pub fn assert_invariants_for_test(&self) {
+        self.waits.assert_invariants_for_test();
         if self.workspaces.is_empty() {
             assert!(
                 self.active.is_none(),

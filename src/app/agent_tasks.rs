@@ -22,6 +22,14 @@ impl App {
             changed |= terminal.task_status != Some(status);
             terminal.task_status = Some(status);
         }
+        if let Some(agent_id) = self
+            .state
+            .terminals
+            .get(&terminal_id)
+            .and_then(|terminal| terminal.agent_id.clone())
+        {
+            changed |= self.clear_wait_needs_user(&agent_id);
+        }
         if changed {
             self.state.mark_session_dirty();
             self.schedule_session_save();

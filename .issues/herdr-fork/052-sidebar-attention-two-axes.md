@@ -47,3 +47,27 @@ Until then, dotfiles' `config.fork.toml` binds `prefix+alt+a` to `loom ack "$HER
 
 Docs: dotfiles `.issues/loom/085-attention-model.md` § Resolution,
 `.issues/loom/095-attention-two-axes.md` § Resolution, `.config/herdr/plugins/loom/lib/attention.sh`.
+
+## Decided with the user (2026-11-02)
+
+047 (questions section) is folded into this ticket: one design, one child, one PR in `tools/sidebar`. No server or API change; everything is read from `pane list`.
+
+Vocabulary (GLOSSARY.md): **wanted** (task status `needs_user`, or state `blocked` for any blocked reason), **unread report** (loom's `unseen` annotation, cleared only by `loom ack`), **mark read** (the `a` key), **attention section**. herdr's *acknowledgement* (focus clears `done`) is a different thing; don't call the `a` action "ack" or "seen" in sidebar UI or docs. loom's names (`loom ack`, `unseen`) stay.
+
+- **Attention section**, pinned at the top of herdr-sidebar, always session-wide whatever the scope toggle. One row per agent that is wanted or has an unread report. Hidden when empty; `[sidebar] attention = false` turns it off. The agent also keeps its row in its tree.
+- **Three marked states**, drawn the same in the section and in the tree:
+  - loud (wanted, unread): status glyph in reverse video, bold name;
+  - steady (wanted, read): today's look, the coloured status glyph;
+  - quiet (not wanted, unread): a dim `•` after the name, coloured by report kind (done cyan, failed red, …).
+  - herdr-blocked panes count as wanted and stay loud until their state changes; they have no unread axis unless loom also set `unseen`.
+  - Colours come from `[sidebar.colors]`.
+- **Order** in the section: loud, steady, quiet; oldest first within each.
+- **Row**: line 1 is glyph, name, workspace label, `?N` when the `questions` token is set, and how long it has waited. Line 2 is the reason cut to width: loom's `reason` annotation, else herdr's blocked reason (`question`, `permission`, `form`, `interrupted`), else for a quiet row the report kind and its first line. `enter` focuses the pane; `a` and `c` work as in the tree.
+- **Focus dims loud**: after about 10 s with a loud row's pane focused, it draws as steady until its state next changes. Sidebar-local, not persisted, never clears unread.
+- **`a` key**: a built-in `Ack` command, a no-op unless `[sidebar.actions] ack` is configured, mirroring `c`/`close`.
+- **`questions` token**: herdr-sidebar gains a line-1 `questions` token (`?N`) for tree rows.
+- **Dotfiles, same change** (branch `herdr-fork/052-sidebar-attention`): `config.fork.toml` adds `ack = { command = ["loom", "ack", "{agent_id}"] }` and the `questions` token on line 1. Stock 0.9.4 and the native sidebar stay untouched; keep `prefix+alt+a`.
+
+## Parent
+
+[herdr-fork map](./000-map.md)

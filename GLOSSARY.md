@@ -53,6 +53,22 @@ _Avoid_: seen, read
 What a blocked agent waits on: a `question` asked in prose, a tool `permission`, a `form` to fill in, or a decision on a turn a restart `interrupted`.
 _Avoid_: block type, blocker
 
+**Wanted**:
+An agent that needs something from the user now: its task status is needs_user, or its state is blocked.
+_Avoid_: needs attention, pending
+
+**Unread report**:
+An agent's latest report that the user has not marked read. Focus never clears it, unlike done.
+_Avoid_: unseen, unacked
+
+**Mark read**:
+The user's explicit act that clears an unread report. It is not an acknowledgement, which is focus clearing done.
+_Avoid_: ack, seen
+
+**Attention section**:
+The session-wide list of every wanted agent and every agent with an unread report, at the top of the sidebar.
+_Avoid_: questions section, attention queue
+
 **Sentinel**:
 The last line of an agent's turn, declaring what the agent waits on: the user (`⏳ awaiting your answer`) or background work it started (`🔄 awaiting background work`).
 _Avoid_: marker, flag

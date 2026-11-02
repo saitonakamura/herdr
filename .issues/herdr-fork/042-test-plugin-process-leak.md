@@ -22,6 +22,7 @@ Source: `plugin_updates_preserve_running_consumers_and_failed_activation` in `te
 - The test is upstream code. Fix it here, fork-only, kept small so upstream merges stay cheap (FORK.md).
 
 - **Handoff servers leak too.** Seen 2026-11-02: six debug `herdr server --handoff-import /tmp/hlh-*/config/herdr-dev/herdr-handoff-*.sock` processes, two each from the `028-gate-probe`, `loom-100-sources-run` and `041-spaces-repo-token-check` worktrees, still running 1.5–3 hours after their `just check` runs (one worktree already deleted). These are the import side of a handoff test, which the harness doesn't track as a spawned pid, so the teardown fix should reap them as well.
+- **Every full sandboxed run leaks two.** Reported by the pi cockpit on 2026-11-02 (dotfiles host-pi 035): each full herdr test run under host pi's seatbelt leaves two handoff servers behind. [056](./056-live-handoff-pgrep.md) is the pgrep half of the same tests.
 
 ## Parent
 

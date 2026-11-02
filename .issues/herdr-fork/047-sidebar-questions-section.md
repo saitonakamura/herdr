@@ -1,7 +1,7 @@
 ---
 id: herdr-fork-sidebar-questions-section
 title: Show agents' open questions for the user as a herdr-sidebar section
-status: open
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
@@ -45,3 +45,5 @@ Docs: dotfiles `docs/setup/herdr.md` § "Questions for the user are records", an
 ## Blocked by
 
 ## Resolution
+
+Folded into [052](./052-sidebar-attention-two-axes.md) on 2026-11-02 (with the user): the session-wide attention section there replaces a per-question section. Each wanted agent gets one row with `?N` and its reason, read from `pane list`, so no `loom questions --json` polling.

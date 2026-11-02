@@ -40,9 +40,9 @@ impl WaitSource {
     }
 }
 
-/// What a node's new task status (or its close, as `closed`) does to a wait on it, with the reason.
+/// How a source's news ends a wait, with the reason.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum NodeOutcome {
+pub(crate) enum WaitOutcome {
     Satisfied(String),
     Fired(String),
 }
@@ -65,24 +65,25 @@ pub(crate) fn node_until(until: Option<&str>) -> Option<TaskStatus> {
     .then_some(status)
 }
 
-/// Reaching `until` satisfies the wait; ending any other way fires it; anything else waits on.
+/// What a node's new task status (or its close, as `closed`) does to a wait on it: reaching
+/// `until` satisfies the wait, ending any other way fires it, and anything else waits on.
 pub(crate) fn node_outcome(
     node: &AgentId,
     until: TaskStatus,
     status: TaskStatus,
-) -> Option<NodeOutcome> {
+) -> Option<WaitOutcome> {
     let reason = match status {
         TaskStatus::Closed => format!("node {node} closed"),
         status => format!("node {node} reported {}", task_status_name(status)),
     };
     if status == until {
-        return Some(NodeOutcome::Satisfied(reason));
+        return Some(WaitOutcome::Satisfied(reason));
     }
     matches!(
         status,
         TaskStatus::Closed | TaskStatus::Complete | TaskStatus::Failed
     )
-    .then_some(NodeOutcome::Fired(reason))
+    .then_some(WaitOutcome::Fired(reason))
 }
 
 pub(crate) fn task_status_name(status: TaskStatus) -> &'static str {
@@ -152,6 +153,9 @@ pub(crate) struct Wait {
     pub errors: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
+    /// When the run's pid started, so a later process that reuses the pid is not taken for it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_start_token: Option<u64>,
 }
 
 impl Wait {
@@ -232,9 +236,11 @@ pub(crate) struct NewWait {
     pub then: Option<WaitDecider>,
     pub rearm: Option<u64>,
     pub created_at_ms: u64,
+    /// A run wait's process start token, read at declare.
+    pub run_start_token: Option<u64>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum DeclareError {
     WaiterLimit,
     SessionLimit,
@@ -245,6 +251,8 @@ pub(crate) enum DeclareError {
     RearmOtherWaiter,
     /// A re-arm inherits `then`; asking for another one is refused rather than ignored.
     RearmDeciderMismatch,
+    /// The node already waits on the waiter, through these live node waits in order.
+    Cycle(Vec<u64>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -272,6 +280,8 @@ struct WaitIndex {
     needs_user_per_waiter: HashMap<AgentId, u32>,
     /// Live node waits by the agent they watch, so a status change touches only its own.
     live_on_node: HashMap<AgentId, BTreeSet<u64>>,
+    /// Live node waits by their waiter: the edges of the wait-for graph.
+    node_waits_of: HashMap<AgentId, BTreeSet<u64>>,
 }
 
 impl WaitIndex {
@@ -281,6 +291,10 @@ impl WaitIndex {
             *self.live_per_waiter.entry(wait.waiter.clone()).or_default() += 1;
             if let Some(node) = wait.on.as_ref().and_then(WaitSource::node) {
                 self.live_on_node.entry(node).or_default().insert(wait.id);
+                self.node_waits_of
+                    .entry(wait.waiter.clone())
+                    .or_default()
+                    .insert(wait.id);
             }
         }
         if wait.needs_user {
@@ -296,16 +310,21 @@ impl WaitIndex {
             self.deadlines.remove(&(wait.deadline_at_ms, wait.id));
             decrement(&mut self.live_per_waiter, &wait.waiter);
             if let Some(node) = wait.on.as_ref().and_then(WaitSource::node) {
-                if let Some(ids) = self.live_on_node.get_mut(&node) {
-                    ids.remove(&wait.id);
-                    if ids.is_empty() {
-                        self.live_on_node.remove(&node);
-                    }
-                }
+                remove_id(&mut self.live_on_node, &node, wait.id);
+                remove_id(&mut self.node_waits_of, &wait.waiter, wait.id);
             }
         }
         if wait.needs_user {
             decrement(&mut self.needs_user_per_waiter, &wait.waiter);
+        }
+    }
+}
+
+fn remove_id(ids_by: &mut HashMap<AgentId, BTreeSet<u64>>, key: &AgentId, id: u64) {
+    if let Some(ids) = ids_by.get_mut(key) {
+        ids.remove(&id);
+        if ids.is_empty() {
+            ids_by.remove(key);
         }
     }
 }
@@ -396,6 +415,11 @@ impl WaitStore {
             }
             None => (new.then.ok_or(DeclareError::MissingDecider)?, 0),
         };
+        if let Some(node) = new.on.as_ref().and_then(WaitSource::node) {
+            if let Some(path) = self.wait_path(&node, &new.waiter) {
+                return Err(DeclareError::Cycle(path));
+            }
+        }
         if let Some(rearm) = new.rearm {
             self.modify(rearm, |old| old.needs_user = false);
         }
@@ -418,6 +442,7 @@ impl WaitStore {
             last_state: None,
             errors: 0,
             last_error: None,
+            run_start_token: new.run_start_token,
         };
         self.index.add(&wait);
         self.records.waits.push(wait);
@@ -533,6 +558,38 @@ impl WaitStore {
             .get(node)
             .map(|ids| ids.iter().copied().collect())
             .unwrap_or_default()
+    }
+
+    /// The live node waits by which `from` already waits on `to`, directly or through other
+    /// agents' node waits, in order: the shortest such path, or None when there is none.
+    pub(crate) fn wait_path(&self, from: &AgentId, to: &AgentId) -> Option<Vec<u64>> {
+        // Breadth first over the edges; each agent is visited once, so this is O(live node waits).
+        let mut reached: HashMap<AgentId, Option<(AgentId, u64)>> = HashMap::new();
+        reached.insert(from.clone(), None);
+        let mut queue = std::collections::VecDeque::from([from.clone()]);
+        while let Some(agent) = queue.pop_front() {
+            for &id in self.index.node_waits_of.get(&agent).into_iter().flatten() {
+                let Some(node) = self.get(id).and_then(|wait| wait.on.as_ref()?.node()) else {
+                    continue;
+                };
+                if reached.contains_key(&node) {
+                    continue;
+                }
+                reached.insert(node.clone(), Some((agent.clone(), id)));
+                if &node == to {
+                    let mut path = Vec::new();
+                    let mut at = node;
+                    while let Some(Some((before, id))) = reached.get(&at) {
+                        path.push(*id);
+                        at = before.clone();
+                    }
+                    path.reverse();
+                    return Some(path);
+                }
+                queue.push_back(node);
+            }
+        }
+        None
     }
 
     /// The live node waits whose node is not in `live`, oldest first.
@@ -725,6 +782,7 @@ mod tests {
             then: Some(WaitDecider::Parent),
             rearm: None,
             created_at_ms: 1,
+            run_start_token: None,
         }
     }
 
@@ -1018,6 +1076,38 @@ mod tests {
     }
 
     #[test]
+    fn a_node_wait_that_would_close_a_loop_is_refused_with_the_path() {
+        let mut store = WaitStore::default();
+        let a_on_b = store.declare(on_node("1111aaaa", "2222bbbb")).unwrap().id;
+        let b_on_c = store.declare(on_node("2222bbbb", "3333cccc")).unwrap().id;
+        assert_eq!(
+            store.declare(on_node("3333cccc", "1111aaaa")).unwrap_err(),
+            DeclareError::Cycle(vec![a_on_b, b_on_c])
+        );
+        assert_eq!(
+            store.declare(on_node("2222bbbb", "1111aaaa")).unwrap_err(),
+            DeclareError::Cycle(vec![a_on_b])
+        );
+        // A second edge the same way, a plain wait and a branch are not loops.
+        let a_on_c = store.declare(on_node("1111aaaa", "3333cccc")).unwrap().id;
+        store.declare(new("3333cccc", 10)).unwrap();
+        store.declare(on_node("3333cccc", "4444dddd")).unwrap();
+        store.assert_invariants_for_test();
+
+        // Only live waits are edges.
+        store.satisfy(b_on_c, 30).unwrap();
+        fire(&mut store, a_on_b);
+        assert_eq!(
+            store.declare(on_node("3333cccc", "1111aaaa")).unwrap_err(),
+            DeclareError::Cycle(vec![a_on_c]),
+            "a still waits on c directly"
+        );
+        store.cancel(a_on_c, 40).unwrap();
+        store.declare(on_node("3333cccc", "1111aaaa")).unwrap();
+        store.assert_invariants_for_test();
+    }
+
+    #[test]
     fn a_node_wait_waits_for_a_terminal_status_or_a_call_for_help() {
         assert_eq!(node_until(None), Some(TaskStatus::Complete));
         for until in ["complete", "failed", "closed", "needs_parent", "needs_user"] {
@@ -1034,25 +1124,25 @@ mod tests {
         let outcome = |until, status| node_outcome(&node, until, status);
         assert_eq!(
             outcome(TaskStatus::Complete, TaskStatus::Complete),
-            Some(NodeOutcome::Satisfied(
+            Some(WaitOutcome::Satisfied(
                 "node 3333cccc reported complete".into()
             ))
         );
         assert_eq!(
             outcome(TaskStatus::Complete, TaskStatus::Failed),
-            Some(NodeOutcome::Fired("node 3333cccc reported failed".into()))
+            Some(WaitOutcome::Fired("node 3333cccc reported failed".into()))
         );
         assert_eq!(
             outcome(TaskStatus::Complete, TaskStatus::Closed),
-            Some(NodeOutcome::Fired("node 3333cccc closed".into()))
+            Some(WaitOutcome::Fired("node 3333cccc closed".into()))
         );
         assert_eq!(
             outcome(TaskStatus::Closed, TaskStatus::Closed),
-            Some(NodeOutcome::Satisfied("node 3333cccc closed".into()))
+            Some(WaitOutcome::Satisfied("node 3333cccc closed".into()))
         );
         assert_eq!(
             outcome(TaskStatus::NeedsParent, TaskStatus::Complete),
-            Some(NodeOutcome::Fired("node 3333cccc reported complete".into()))
+            Some(WaitOutcome::Fired("node 3333cccc reported complete".into()))
         );
         for status in [
             TaskStatus::Starting,

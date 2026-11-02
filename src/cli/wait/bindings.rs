@@ -63,12 +63,12 @@ pub(crate) fn on() -> Input<Option<WaitSourceInfo>> {
         });
         Ok(())
     })
-    .help("What it watches, such as node:<agent> or a plugin reader's kind (pr:owner/repo#12); wait_sources in `herdr status server --json` lists herdr's own")
+    .help("What it watches, such as node:<agent>, run:<pid>:<exit file> or a plugin reader's kind (pr:owner/repo#12); wait_sources in `herdr status server --json` lists herdr's own")
 }
 
 pub(crate) fn until() -> Input<Option<String>> {
     optional_text("until", "STATE")
-        .help("The source state that satisfies it; for node, a task status (default complete); required for a reader's kind")
+        .help("The source state that satisfies it; for node, a task status (default complete); for run, exit (the default) or success; required for a reader's kind")
 }
 
 pub(crate) fn rearm() -> Input<Option<u64>> {

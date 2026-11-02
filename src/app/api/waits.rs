@@ -10,16 +10,20 @@ use crate::app::messages::NewMessage;
 use crate::app::wait_readers::{
     liveness_window, ReadOutcome, ORPHANED_LIVENESS_WINDOW, READ_ERROR_LIMIT,
 };
+use crate::app::wait_runs::{
+    check_run, parse_run_target, run_alive, run_check_line, run_outcome, run_until, RunUntil,
+    RUN_CHECK_INTERVAL, RUN_SOURCE, RUN_UNTIL_EXIT, RUN_UNTIL_SUCCESS,
+};
 use crate::app::waits::{
     epoch_now_ms, node_outcome, node_until, task_status_name, ChangeError, DeclareError, NewWait,
-    NodeOutcome, Wait, WaitRecipient, WaitSource, WaitState, LIVE_LIMIT, LIVE_PER_WAITER_LIMIT,
+    Wait, WaitOutcome, WaitRecipient, WaitSource, WaitState, LIVE_LIMIT, LIVE_PER_WAITER_LIMIT,
     MAX_EXTENSIONS, NODE_SOURCE,
 };
 use crate::app::App;
 use crate::terminal::AgentId;
 
 /// Source kinds herdr reads itself; advertised as `wait_sources`. Plugin readers add others.
-pub(crate) const WAIT_SOURCES: &[&str] = &[NODE_SOURCE];
+pub(crate) const WAIT_SOURCES: &[&str] = &[NODE_SOURCE, RUN_SOURCE];
 
 const SOURCE_UNREACHABLE: &str = "failed: source unreachable";
 const READER_DEAD: &str = "failed: reader dead";
@@ -81,6 +85,7 @@ impl App {
             Ok(agent_id) => agent_id,
             Err(err) => return encode_error_body(id, self.agent_parent_error_body(err)),
         };
+        let mut run_start_token = None;
         let (on, until) = match params.on {
             Some(on) if on.kind == NODE_SOURCE => {
                 let Some(until) = node_until(params.until.as_deref()) else {
@@ -102,6 +107,27 @@ impl App {
                 };
                 (Some(on), Some(task_status_name(until).to_owned()))
             }
+            Some(on) if on.kind == RUN_SOURCE => {
+                let Some(until) = run_until(params.until.as_deref().map(str::trim)) else {
+                    return invalid_wait(id, "a run wait's until is exit or success");
+                };
+                let target = match parse_run_target(on.target.trim()) {
+                    Ok(target) => target,
+                    Err(message) => return invalid_wait(id, message),
+                };
+                run_start_token = crate::platform::process_exists(target.pid)
+                    .then(|| crate::platform::process_start_token(target.pid))
+                    .flatten();
+                let on = WaitSource {
+                    kind: on.kind,
+                    target: format!("{}:{}", target.pid, target.exit_file.display()),
+                };
+                let until = match until {
+                    RunUntil::Exit => RUN_UNTIL_EXIT,
+                    RunUntil::Success => RUN_UNTIL_SUCCESS,
+                };
+                (Some(on), Some(until.to_owned()))
+            }
             on => (
                 on.map(|on| WaitSource {
                     kind: on.kind,
@@ -119,9 +145,11 @@ impl App {
             then: params.then,
             rearm: params.rearm,
             created_at_ms: now,
+            run_start_token,
         });
         let wait = match declared {
             Ok(wait) => wait.info(),
+            Err(DeclareError::Cycle(path)) => return self.wait_cycle_error(id, &path, &waiter),
             Err(err) => return declare_error(id, err, params.rearm, &waiter),
         };
         let wait_id = wait.wait_id;
@@ -132,6 +160,7 @@ impl App {
         });
         // A node that has closed, or already reached a state the wait cares about, settles it now.
         self.settle_node_wait_now(wait_id);
+        self.check_run_wait(wait_id, std::time::Instant::now());
         if read {
             self.wait_reads.add(wait_id, std::time::Instant::now());
         }
@@ -139,6 +168,30 @@ impl App {
             Some(wait) => encode_success(id, ResponseResult::WaitInfo { wait: wait.info() }),
             None => wait_not_found(id, wait_id),
         }
+    }
+
+    /// The node already waits on the waiter: names both, and the waits between them.
+    fn wait_cycle_error(&self, id: String, path: &[u64], waiter: &AgentId) -> String {
+        let node = path
+            .first()
+            .and_then(|first| self.state.waits.get(*first))
+            .map_or_else(
+                || "the node".to_owned(),
+                |wait| format!("agent {}", self.agent_label(&wait.waiter)),
+            );
+        let path = path
+            .iter()
+            .map(u64::to_string)
+            .collect::<Vec<_>>()
+            .join(" → ");
+        encode_error(
+            id,
+            "wait_cycle",
+            format!(
+                "{node} already waits on agent {} through wait {path}; waiting on it would leave both waiting for each other",
+                self.agent_label(waiter)
+            ),
+        )
     }
 
     /// The node's agent id. An id that names no agent is a node that has closed.
@@ -245,6 +298,7 @@ impl App {
     /// when nothing is due: one lookup in each index.
     pub(crate) fn fire_due_waits(&mut self) {
         self.run_due_wait_reads(std::time::Instant::now());
+        self.run_due_run_checks(std::time::Instant::now());
         let now = epoch_now_ms();
         if self
             .state
@@ -318,10 +372,10 @@ impl App {
         let until =
             node_until(wait.until.as_deref()).unwrap_or(crate::app::waits::NODE_UNTIL_DEFAULT);
         match node_outcome(&node, until, status) {
-            Some(NodeOutcome::Satisfied(reason)) => {
+            Some(WaitOutcome::Satisfied(reason)) => {
                 self.satisfy_wait(wait_id, epoch_now_ms(), reason);
             }
-            Some(NodeOutcome::Fired(reason)) => self.fire_wait(wait_id, epoch_now_ms(), reason),
+            Some(WaitOutcome::Fired(reason)) => self.fire_wait(wait_id, epoch_now_ms(), reason),
             None => {}
         }
     }
@@ -358,31 +412,75 @@ impl App {
             let wait = deadline.saturating_sub(epoch_now_ms());
             now.checked_add(std::time::Duration::from_millis(wait))
         });
-        match (deadline, self.wait_reads.next_due()) {
-            (Some(deadline), Some(read)) => Some(deadline.min(read)),
-            (deadline, read) => deadline.or(read),
-        }
+        [
+            deadline,
+            self.wait_reads.next_due(),
+            self.wait_runs.next_due(),
+        ]
+        .into_iter()
+        .flatten()
+        .min()
     }
 
-    /// Watches the live waits on plugin readers' kinds again, after a load or handoff: each is
-    /// read at once, and its liveness window starts now.
-    pub(in crate::app) fn schedule_live_wait_reads(&mut self) {
+    /// Watches the live reader and run waits again, after a load or handoff: each is looked at
+    /// at once, and a reader's liveness window starts now.
+    pub(in crate::app) fn watch_live_wait_sources(&mut self) {
         let now = std::time::Instant::now();
-        let reads: Vec<u64> = self
+        let watched: Vec<(u64, bool)> = self
             .state
             .waits
             .iter()
-            .filter(|wait| {
-                wait.is_live()
-                    && wait
-                        .on
-                        .as_ref()
-                        .is_some_and(|on| !WAIT_SOURCES.contains(&on.kind.as_str()))
+            .filter(|wait| wait.is_live())
+            .filter_map(|wait| {
+                let kind = wait.on.as_ref()?.kind.as_str();
+                if kind == RUN_SOURCE {
+                    Some((wait.id, true))
+                } else {
+                    (!WAIT_SOURCES.contains(&kind)).then_some((wait.id, false))
+                }
             })
-            .map(|wait| wait.id)
             .collect();
-        for wait_id in reads {
-            self.wait_reads.add(wait_id, now);
+        for (wait_id, run) in watched {
+            if run {
+                self.wait_runs.add(wait_id, now);
+            } else {
+                self.wait_reads.add(wait_id, now);
+            }
+        }
+    }
+
+    /// Looks at each run wait that is due.
+    fn run_due_run_checks(&mut self, now: std::time::Instant) {
+        if self.wait_runs.next_due().is_none_or(|due| due > now) {
+            return;
+        }
+        for wait_id in self.wait_runs.take_due(now) {
+            self.check_run_wait(wait_id, now);
+        }
+    }
+
+    /// Settles a live run wait when its run has ended, and otherwise looks again later.
+    fn check_run_wait(&mut self, wait_id: u64, now: std::time::Instant) {
+        let Some(wait) = self.state.waits.get(wait_id).filter(|wait| wait.is_live()) else {
+            return;
+        };
+        let Some(on) = wait.on.as_ref().filter(|on| on.kind == RUN_SOURCE) else {
+            return;
+        };
+        let (Ok(target), Some(until)) = (
+            parse_run_target(&on.target),
+            run_until(wait.until.as_deref()),
+        ) else {
+            return;
+        };
+        let start_token = wait.run_start_token;
+        let check = check_run(&target, |pid| run_alive(pid, start_token));
+        match run_outcome(target.pid, until, &check) {
+            Some(WaitOutcome::Satisfied(reason)) => {
+                self.satisfy_wait(wait_id, epoch_now_ms(), reason);
+            }
+            Some(WaitOutcome::Fired(reason)) => self.fire_wait(wait_id, epoch_now_ms(), reason),
+            None => self.wait_runs.add(wait_id, now + RUN_CHECK_INTERVAL),
         }
     }
 
@@ -462,17 +560,17 @@ impl App {
                     .waits
                     .record_read(wait_id, now, Ok(state.clone()));
                 (until.as_deref() == Some(state.as_str()))
-                    .then(|| Settled::Satisfied(format!("{source} is {state}")))
+                    .then(|| WaitOutcome::Satisfied(format!("{source} is {state}")))
             }
             ReadOutcome::Failed(error) => {
                 let errors = self.state.waits.record_read(wait_id, now, Err(error));
                 errors
                     .is_some_and(|errors| errors >= READ_ERROR_LIMIT)
-                    .then(|| Settled::Fired(SOURCE_UNREACHABLE.to_owned()))
+                    .then(|| WaitOutcome::Fired(SOURCE_UNREACHABLE.to_owned()))
             }
             ReadOutcome::Refused(error) => {
                 self.state.waits.record_read(wait_id, now, Err(error));
-                Some(Settled::Fired(SOURCE_REFUSED.to_owned()))
+                Some(WaitOutcome::Fired(SOURCE_REFUSED.to_owned()))
             }
         };
         self.state.mark_session_dirty();
@@ -481,8 +579,8 @@ impl App {
             self.wait_reads.remove(wait_id);
         }
         match settled {
-            Some(Settled::Fired(reason)) => self.fire_wait(wait_id, now, reason),
-            Some(Settled::Satisfied(reason)) => self.satisfy_wait(wait_id, now, reason),
+            Some(WaitOutcome::Fired(reason)) => self.fire_wait(wait_id, now, reason),
+            Some(WaitOutcome::Satisfied(reason)) => self.satisfy_wait(wait_id, now, reason),
             None => {}
         }
     }
@@ -588,6 +686,9 @@ impl App {
         let Some(on) = &wait.on else {
             return String::new();
         };
+        if on.kind == RUN_SOURCE {
+            return run_source_lines(wait, on);
+        }
         let Some(node) = on.node() else {
             return self.read_source_lines(wait, on);
         };
@@ -760,12 +861,6 @@ impl App {
     }
 }
 
-/// How a read ended a wait, with the reason.
-enum Settled {
-    Fired(String),
-    Satisfied(String),
-}
-
 fn one_level_up(decider: WaitDecider) -> Option<WaitDecider> {
     match decider {
         WaitDecider::Waiter => Some(WaitDecider::Parent),
@@ -798,6 +893,21 @@ fn deadline(at_ms: Option<u64>, in_ms: Option<u64>, now: u64) -> Result<u64, &'s
     Ok(deadline)
 }
 
+/// A run wait's source, and where the run stands now.
+fn run_source_lines(wait: &Wait, on: &WaitSource) -> String {
+    let until = wait.until.as_deref().unwrap_or_default();
+    let Ok(target) = parse_run_target(&on.target) else {
+        return format!("on: run:{}, until {until}\n", on.target);
+    };
+    let check = check_run(&target, |pid| run_alive(pid, wait.run_start_token));
+    format!(
+        "on: run {}, exit file {}, until {until}\nrun now: {}\n",
+        target.pid,
+        target.exit_file.display(),
+        run_check_line(&check)
+    )
+}
+
 fn declare_error(id: String, err: DeclareError, rearm: Option<u64>, waiter: &AgentId) -> String {
     let rearm = rearm.unwrap_or_default();
     match err {
@@ -827,6 +937,11 @@ fn declare_error(id: String, err: DeclareError, rearm: Option<u64>, waiter: &Age
         DeclareError::RearmDeciderMismatch => invalid_wait(
             id,
             format!("a re-arm inherits then from wait {rearm}; leave then out or repeat it"),
+        ),
+        DeclareError::Cycle(_) => encode_error(
+            id,
+            "wait_cycle",
+            format!("the node already waits on agent {waiter}"),
         ),
     }
 }
@@ -865,6 +980,7 @@ mod tests {
         WaitSourceInfo,
     };
     use crate::app::wait_readers::{ReadOutcome, ORPHANED_LIVENESS_WINDOW};
+    use crate::app::wait_runs::RUN_CHECK_INTERVAL;
     use crate::app::waits::{epoch_now_ms, NewWait, WaitRecipient, WaitState};
     use crate::app::App;
     use crate::detect::{Agent, AgentState};
@@ -973,6 +1089,7 @@ mod tests {
                     then: Some(then),
                     rearm: None,
                     created_at_ms: 1,
+                    run_start_token: None,
                 })
                 .unwrap()
                 .id;
@@ -1069,6 +1186,28 @@ mod tests {
                 on: Some(WaitSourceInfo {
                     kind: "pr".into(),
                     target: "o/r#1".into(),
+                }),
+                until: until.map(str::to_owned),
+                rearm: None,
+            }))
+        }
+
+        /// The worker declares a wait on a run of this test process, which leaves `exit_file`.
+        fn declare_run(
+            &mut self,
+            exit_file: &std::path::Path,
+            until: Option<&str>,
+        ) -> serde_json::Value {
+            let waiter = self.public(self.worker);
+            self.call(Method::WaitDeclare(WaitDeclareParams {
+                waiter,
+                summary: "the build".into(),
+                deadline_at_ms: None,
+                deadline_in_ms: Some(LATER),
+                then: Some(WaitDecider::Parent),
+                on: Some(WaitSourceInfo {
+                    kind: "run".into(),
+                    target: format!("{}:{}", std::process::id(), exit_file.display()),
                 }),
                 until: until.map(str::to_owned),
                 rearm: None,
@@ -2029,11 +2168,206 @@ mod tests {
 
         let mut f = fixture();
         f.app.state.waits = serde_json::from_str(&saved).unwrap();
-        f.app.schedule_live_wait_reads();
+        f.app.watch_live_wait_sources();
         assert_eq!(
             f.app.wait_reads.watched(),
             vec![id],
             "deadline-only waits are not read"
         );
+    }
+
+    fn run_dir(name: &str) -> std::path::PathBuf {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "herdr-run-wait-{name}-{}-{stamp}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_run_wait_is_satisfied_when_its_exit_file_appears() {
+        let mut f = fixture();
+        let worker = f.id(f.worker);
+        let dir = run_dir("satisfied");
+        let exit_file = dir.join("exit");
+        let pid = std::process::id();
+        let declared = f.declare_run(&exit_file, None);
+        let wait = &declared["result"]["wait"];
+        assert_eq!(wait["state"], "live", "{declared}");
+        assert_eq!(wait["until"], "exit", "until defaults to exit");
+        assert_eq!(
+            wait["on"]["target"],
+            format!("{pid}:{}", exit_file.display())
+        );
+        let id = wait["wait_id"].as_u64().unwrap();
+        assert_eq!(f.app.wait_runs.watched(), vec![id]);
+        let now = std::time::Instant::now();
+        assert!(f.app.next_wait_deadline(now).unwrap() <= now + RUN_CHECK_INTERVAL);
+
+        // The run is this test process, so it is alive with no exit code yet.
+        let later = now + RUN_CHECK_INTERVAL;
+        f.app.run_due_run_checks(later);
+        assert_eq!(f.state(id), WaitState::Live);
+
+        std::fs::write(&exit_file, "1\n").unwrap();
+        f.app.run_due_run_checks(later + RUN_CHECK_INTERVAL);
+        assert!(matches!(f.state(id), WaitState::Satisfied { .. }));
+        assert_eq!(
+            f.messages(),
+            vec![(
+                worker,
+                format!("wait {id} satisfied: run {pid} exited 1: the build"),
+                Some(id)
+            )],
+            "until exit takes any exit code"
+        );
+        let body = f
+            .app
+            .state
+            .messages
+            .iter()
+            .next()
+            .unwrap()
+            .body
+            .clone()
+            .unwrap();
+        assert!(body.contains("run now: exited 1"), "{body}");
+        assert!(f.app.wait_runs.watched().is_empty());
+        f.app.state.assert_invariants_for_test();
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_run_that_fails_or_vanishes_fires_its_wait_to_the_decider() {
+        let mut f = fixture();
+        f.make_lead_parent();
+        let lead = f.id(f.lead);
+        let pid = std::process::id();
+        let dir = run_dir("fired");
+
+        let exit_file = dir.join("failed");
+        std::fs::write(&exit_file, "2").unwrap();
+        let settled = f.declare_run(&exit_file, Some("success"));
+        let id = settled["result"]["wait"]["wait_id"].as_u64().unwrap();
+        assert_eq!(
+            settled["result"]["wait"]["state"], "fired",
+            "a run already over settles at declare: {settled}"
+        );
+        assert_eq!(
+            f.messages(),
+            vec![(
+                lead.clone(),
+                format!("wait {id} fired: run {pid} exited 2: the build"),
+                Some(id)
+            )]
+        );
+
+        // A pid that now belongs to another process is a run that is gone.
+        let Some(token) = crate::platform::process_start_token(pid) else {
+            return;
+        };
+        let worker = f.id(f.worker);
+        let gone = f
+            .app
+            .state
+            .waits
+            .declare(NewWait {
+                waiter: worker,
+                on: Some(crate::app::waits::WaitSource {
+                    kind: "run".into(),
+                    target: format!("{pid}:{}", dir.join("never").display()),
+                }),
+                until: Some("exit".into()),
+                summary: "the build".into(),
+                deadline_at_ms: epoch_now_ms() + LATER,
+                then: Some(WaitDecider::Parent),
+                rearm: None,
+                created_at_ms: 1,
+                run_start_token: Some(token.wrapping_add(1)),
+            })
+            .unwrap()
+            .id;
+        f.app.check_run_wait(gone, std::time::Instant::now());
+        assert_eq!(
+            f.messages()[1].1,
+            format!("wait {gone} fired: failed: run {pid} ended without an exit file: the build")
+        );
+        f.app.state.assert_invariants_for_test();
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_run_wait_refuses_a_target_it_cannot_watch_and_an_unknown_until() {
+        let mut f = fixture();
+        let waiter = f.public(f.worker);
+        for (target, until) in [
+            ("4242", None),
+            ("pid:/tmp/exit", None),
+            ("4242:runs/exit", None),
+            ("4242:/tmp/exit", Some("merged")),
+        ] {
+            let refused = f.call(Method::WaitDeclare(WaitDeclareParams {
+                waiter: waiter.clone(),
+                summary: "the build".into(),
+                deadline_at_ms: None,
+                deadline_in_ms: Some(LATER),
+                then: Some(WaitDecider::Parent),
+                on: Some(WaitSourceInfo {
+                    kind: "run".into(),
+                    target: target.into(),
+                }),
+                until: until.map(str::to_owned),
+                rearm: None,
+            }));
+            assert_eq!(
+                refused["error"]["code"], "invalid_wait",
+                "{target}: {refused}"
+            );
+        }
+        assert!(f.app.state.waits.is_empty());
+    }
+
+    #[test]
+    fn run_waits_are_watched_again_after_a_load() {
+        let mut before = fixture();
+        let dir = run_dir("load");
+        let id = before.declare_run(&dir.join("exit"), None)["result"]["wait"]["wait_id"]
+            .as_u64()
+            .unwrap();
+        before.declare(Some(WaitDecider::Waiter));
+        let saved = serde_json::to_string(&before.app.state.waits).unwrap();
+
+        let mut f = fixture();
+        f.app.state.waits = serde_json::from_str(&saved).unwrap();
+        f.app.watch_live_wait_sources();
+        assert_eq!(f.app.wait_runs.watched(), vec![id]);
+        assert!(f.app.wait_reads.watched().is_empty());
+        if crate::platform::process_start_token(std::process::id()).is_some() {
+            assert!(saved.contains("run_start_token"), "{saved}");
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_node_wait_that_would_close_a_loop_is_refused() {
+        let mut f = fixture();
+        let worker = f.id(f.worker);
+        let lead_waits = f.declare_on(f.lead, &f.public(f.worker), None, WaitDecider::Parent);
+        let id = lead_waits["result"]["wait"]["wait_id"].as_u64().unwrap();
+        let refused = f.declare_on(f.worker, &f.public(f.lead), None, WaitDecider::Parent);
+        assert_eq!(refused["error"]["code"], "wait_cycle", "{refused}");
+        let message = refused["error"]["message"].as_str().unwrap();
+        assert!(message.contains(&format!("through wait {id}")), "{message}");
+        assert!(message.contains(&worker.to_string()), "{message}");
+        assert!(
+            message.starts_with("agent lead ("),
+            "names the node: {message}"
+        );
+        assert_eq!(f.app.state.waits.live_count(&worker), 0);
     }
 }

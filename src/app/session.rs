@@ -198,6 +198,7 @@ mod tests {
                 then: Some(crate::api::schema::WaitDecider::Waiter),
                 rearm: None,
                 created_at_ms: 1,
+                run_start_token: None,
             })
             .unwrap();
         match app.capture_session_save_job() {

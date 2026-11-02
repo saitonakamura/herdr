@@ -262,3 +262,45 @@ window"; this is how the build settled them:
 - **Fire and satisfy messages restate the last read**: the source and `until`, the last
   state and how long ago it was read, and any failed reads in a row with the last error.
 
+
+## Changes made while building PR4 (2026-11-02)
+
+PR4 adds `run` to `wait_sources` and the wait-for graph's cycle check. Loom 080 Q20(b) said
+only that `loom run` starts the command in the caller's process tree and "herdr only
+supervises the exit file". Nothing defined that file yet, so this sets the contract `loom
+run` (loom 093) writes to:
+
+- **The target is `<pid>:<absolute exit file>`**, so `on` stays two strings and
+  `--on run:4242:/…/exit` needs no new parameter. The split is at the first colon, so a
+  Windows drive letter survives. A relative path is refused, because the server's directory
+  is not the waiter's.
+- **The exit file holds the exit code as a decimal number**, written atomically (write, then
+  rename). An empty file reads as not written yet. Anything that is not an exit code fires
+  the wait as `failed: run <pid>'s exit file is unreadable: …`. herdr reads at most 64 bytes,
+  and refuses anything that is not a regular file, since opening a FIFO would block the
+  server loop.
+- **The pid counts as the run while it is the same process.** Declare records its start
+  token (`process_start_token`, available on every platform), persisted on the wait as
+  `run_start_token` but not part of the API. A pid that is gone, or now belongs to a later
+  process, with no exit file fires `failed: run <pid> ended without an exit file`. A look
+  reads the exit file, then the pid, then the exit file again, so a run that writes its exit
+  file as it ends is not taken for one that vanished.
+- **`until` is `exit` (the default) or `success`.** Any exit code satisfies `exit`. Only 0
+  satisfies `success`, and any other code fires the wait as `run <pid> exited <code>`.
+  Satisfying tells the waiter, as for node and reader waits.
+- **herdr never starts, signals or reads the output of the command.**
+- **When a run is looked at:** at declare, which settles a run that is already over, then
+  every 2 s while the wait is live. After a load or handoff it is looked at at once.
+- **Cost.** The schedule is runtime state, a `BTreeSet<(Instant, wait id)>` beside the
+  readers', so a tick costs O(looks due). A look is one `stat` and one small read of the exit
+  file, plus one `kill(pid, 0)` and one start-token read, all on the server loop. Messages
+  read the run again ("run now: …").
+- **The wait-for graph is the live node waits**, waiter → node, indexed by waiter in the
+  store. Declaring a node wait searches breadth first from the node for a path back to the
+  waiter, which is O(live node waits) and runs at declare only. A path refuses the declare
+  with `wait_cycle`, naming both agents and the waits on it. Plain, reader and run waits add
+  no edges. Asks and `blocked` are not in the graph yet (089 says "later"). A satisfied,
+  fired or cancelled wait leaves the graph with its index entry.
+- **No capability for the graph.** The refusal code says what happened, and a server without
+  the check simply accepts the wait.
+- `NodeOutcome` became `WaitOutcome`, shared by node, reader and run waits.

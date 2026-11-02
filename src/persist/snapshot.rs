@@ -776,6 +776,7 @@ mod tests {
                 then: Some(crate::api::schema::WaitDecider::Parent),
                 rearm: None,
                 created_at_ms: 1,
+                run_start_token: None,
             })
             .unwrap()
             .id;

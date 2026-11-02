@@ -24,7 +24,7 @@ fn declaration(name: &'static str) -> Command {
                 .required(true)
                 .value_parser(["self", "parent", "user"]),
         )
-        .arg(Arg::new("until").long("until").default_value("done"))
+        .arg(Arg::new("until").long("until"))
         .arg(Arg::new("summary").long("summary"));
     if name == "watch" {
         command.arg(
@@ -34,10 +34,9 @@ fn declaration(name: &'static str) -> Command {
         )
     } else {
         command.arg(
-            Arg::new("on")
-                .long("on")
-                .required(true)
-                .help("node:<agent identity>; other kinds follow in loom ticket 100"),
+            Arg::new("on").long("on").required(true).help(
+                "node:<agent>, run:<name>, or a plugin reader source such as pr:<owner/repo#N>",
+            ),
         )
     }
 }
@@ -52,6 +51,26 @@ pub fn command() -> Command {
                 .long("json")
                 .global(true)
                 .action(ArgAction::SetTrue),
+        )
+        .subcommand(
+            Command::new("run")
+                .about("Start a caller-local detached command; declare its wait separately")
+                .arg(Arg::new("name").long("name").required(true))
+                .arg(deadline().required(false).requires("then"))
+                .arg(
+                    Arg::new("then")
+                        .long("then")
+                        .value_parser(["self", "parent", "user"])
+                        .requires("deadline"),
+                )
+                .arg(
+                    Arg::new("until")
+                        .long("until")
+                        .value_parser(["exit", "success"])
+                        .requires("deadline"),
+                )
+                .arg(Arg::new("summary").long("summary").requires("deadline"))
+                .arg(Arg::new("cmd").required(true).num_args(1..).last(true)),
         )
         .subcommand(declaration("watch"))
         .subcommand(
@@ -149,18 +168,34 @@ pub fn request(matches: &ArgMatches, caller: Option<&str>) -> Result<Request, St
             "node:{}",
             args.get_one::<String>("node").ok_or("missing node")?
         )
+    } else if verb == "run" {
+        format!(
+            "run:{}",
+            args.get_one::<String>("name").ok_or("missing --name")?
+        )
     } else {
         args.get_one::<String>("on").ok_or("missing --on")?.clone()
     };
+    let source = normalize_source(&source);
     let (kind, target) = source
         .split_once(':')
-        .filter(|(k, t)| !k.is_empty() && !t.is_empty())
+        .filter(|(k, t)| {
+            !k.is_empty()
+                && k.bytes().all(|b| b.is_ascii_lowercase() || b == b'_')
+                && !t.is_empty()
+                && !t.chars().any(char::is_whitespace)
+        })
         .ok_or("--on must be kind:target")?;
-    let until = args
-        .get_one::<String>("until")
-        .map(String::as_str)
-        .unwrap_or("done");
-    let until = if until == "done" { "complete" } else { until };
+    let until = args.get_one::<String>("until").map(String::as_str);
+    let until = match (kind, until) {
+        ("node", None | Some("done")) => "complete",
+        ("run", None) => "exit",
+        (_, Some(state)) if !state.is_empty() => state,
+        _ => return Err("reader sources require an explicit --until state".into()),
+    };
+    if kind == "run" && !["exit", "success"].contains(&until) {
+        return Err("run --until must be exit or success".into());
+    }
     if kind == "node"
         && !["complete", "failed", "closed", "needs_parent", "needs_user"].contains(&until)
     {
@@ -196,14 +231,26 @@ pub fn check_capabilities(capabilities: &Value, request: &Request) -> Result<(),
         let advertised = capabilities["wait_sources"]
             .as_array()
             .is_some_and(|sources| sources.iter().any(|s| s.as_str() == Some(kind)));
-        if kind != "node" {
-            return Err(format!("source kind {kind:?} is not implemented by this client (server advertises it: {advertised}); see loom ticket 100, Rust sources and run"));
-        }
-        if !advertised {
-            return Err("this Herdr server does not advertise node in wait_sources; upgrade the fork server".into());
+        if !advertised
+            && (["node", "run"].contains(&kind)
+                || capabilities["wait_readers"].as_bool() != Some(true))
+        {
+            return Err(format!("this Herdr server does not advertise {kind} in wait_sources or support its plugin readers; upgrade the fork server"));
         }
     }
     Ok(())
+}
+
+pub fn normalize_source(source: &str) -> String {
+    if let Some(target) = source.strip_prefix("jira:") {
+        return format!("issues:jira:{target}");
+    }
+    if let Some((kind, target)) = source.split_once(':') {
+        if ["mr", "ci"].contains(&kind) && target.contains('!') && !target.starts_with("gl:") {
+            return format!("{kind}:gl:{target}");
+        }
+    }
+    source.to_owned()
 }
 
 #[cfg(test)]
@@ -252,6 +299,40 @@ mod tests {
         ] {
             assert!(command().try_get_matches_from(args).is_err());
         }
+    }
+
+    #[test]
+    fn run_wait_policy_is_paired_and_never_defaulted() {
+        for policy in [
+            vec!["--deadline", "1h"],
+            vec!["--then", "self"],
+            vec!["--until", "success"],
+        ] {
+            let mut argv = vec!["loom-rust", "run", "--name", "build"];
+            argv.extend(policy);
+            argv.extend(["--", "true"]);
+            assert!(command().try_get_matches_from(argv).is_err());
+        }
+        assert!(command()
+            .try_get_matches_from(["loom-rust", "run", "--name", "build", "--", "true"])
+            .is_ok());
+        let run = parse(&[
+            "loom-rust",
+            "run",
+            "--name",
+            "build",
+            "--deadline",
+            "2h",
+            "--then",
+            "self",
+            "--until",
+            "success",
+            "--",
+            "true",
+        ]);
+        assert_eq!(run.params["on"], json!({"kind":"run","target":"build"}));
+        assert_eq!(run.params["until"], "success");
+        assert_eq!(run.params["deadline_in_ms"], 7_200_000);
     }
 
     #[test]
@@ -344,6 +425,55 @@ mod tests {
     }
 
     #[test]
+    fn source_defaults_and_shorthand_are_kind_specific() {
+        for (source, until, kind, target) in [
+            ("mr:group/project!7", "merged", "mr", "gl:group/project!7"),
+            ("ci:group/project!7", "passed", "ci", "gl:group/project!7"),
+            ("jira:ABC-1", "Done", "issues", "jira:ABC-1"),
+            ("issues:o/r:.issues/x", "done", "issues", "o/r:.issues/x"),
+        ] {
+            let req = parse(&[
+                "loom-rust",
+                "wait",
+                "--on",
+                source,
+                "--until",
+                until,
+                "--deadline",
+                "1h",
+                "--then",
+                "self",
+            ]);
+            assert_eq!(req.params["on"], json!({"kind":kind,"target":target}));
+            assert_eq!(req.params["until"], until);
+        }
+        let req = parse(&[
+            "loom-rust",
+            "wait",
+            "--on",
+            "run:build",
+            "--deadline",
+            "1h",
+            "--then",
+            "self",
+        ]);
+        assert_eq!(req.params["until"], "exit");
+        let args = command()
+            .try_get_matches_from([
+                "loom-rust",
+                "wait",
+                "--on",
+                "pr:o/r#1",
+                "--deadline",
+                "1h",
+                "--then",
+                "self",
+            ])
+            .unwrap();
+        assert!(request(&args, Some("caller")).is_err());
+    }
+
+    #[test]
     fn sources_are_probed_not_assumed() {
         let wait = parse(&[
             "loom-rust",
@@ -376,7 +506,15 @@ mod tests {
             &json!({"agent_waits":true,"wait_sources":["node","pr"]}),
             &other
         )
-        .unwrap_err()
-        .contains("ticket 100"));
+        .is_ok());
+        assert!(check_capabilities(
+            &json!({"agent_waits":true,"wait_sources":["node"],"wait_readers":true}),
+            &other
+        )
+        .is_ok());
+        assert!(
+            check_capabilities(&json!({"agent_waits":true,"wait_sources":["node"]}), &other)
+                .is_err()
+        );
     }
 }

@@ -47,11 +47,25 @@ fn run(args: &[&str], exchanges: Vec<(&'static str, Value)>) -> std::process::Ou
             assert_eq!(request["method"], method);
             if method == "wait.declare" {
                 assert_eq!(request["params"]["waiter"], "caller");
-                assert_eq!(
-                    request["params"]["on"],
-                    json!({"kind":"node","target":"child"})
-                );
-                assert_eq!(request["params"]["until"], "complete");
+                match request["params"]["on"]["kind"].as_str().unwrap() {
+                    "node" => {
+                        assert_eq!(request["params"]["on"]["target"], "child");
+                        assert_eq!(request["params"]["until"], "complete");
+                    }
+                    "mr" => {
+                        assert_eq!(request["params"]["on"]["target"], "gl:group/project!7");
+                        assert_eq!(request["params"]["until"], "merged");
+                    }
+                    "run" => {
+                        let target = request["params"]["on"]["target"].as_str().unwrap();
+                        let (pid, exit) = target.split_once(':').unwrap();
+                        assert!(pid.parse::<u32>().unwrap() > 0);
+                        assert!(std::path::Path::new(exit).is_absolute());
+                        assert!(exit.ends_with("/caller/test-job/exit"));
+                        assert_eq!(request["params"]["until"], "success");
+                    }
+                    other => panic!("unexpected source {other}"),
+                }
             }
             writeln!(stream, "{}", json!({"id": request["id"], "result":result})).unwrap();
         }
@@ -60,9 +74,29 @@ fn run(args: &[&str], exchanges: Vec<(&'static str, Value)>) -> std::process::Ou
         .args(args)
         .env("LOOM_NODE", "caller")
         .env("HERDR_SOCKET_PATH", path)
+        .env("LOOM_RUN_DIR", dir.join("runs"))
         .output()
         .unwrap();
     server.join().unwrap();
+    if let Ok(value) = serde_json::from_slice::<Value>(&output.stdout) {
+        if let Some(exit_file) = value["result"]["run"]["exit_file"].as_str() {
+            let started = std::time::Instant::now();
+            while !std::path::Path::new(exit_file).exists() {
+                assert!(
+                    started.elapsed().as_secs() < 10,
+                    "supervisor never wrote its exit file"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            assert_eq!(std::fs::read_to_string(exit_file).unwrap(), "7\n");
+            assert_eq!(
+                std::fs::read_to_string(value["result"]["run"]["log_file"].as_str().unwrap())
+                    .unwrap(),
+                "command output\n"
+            );
+            assert!(std::path::Path::new(exit_file).is_absolute());
+        }
+    }
     std::fs::remove_dir_all(dir).unwrap();
     output
 }
@@ -111,7 +145,7 @@ fn an_old_server_is_refused_before_mutation() {
 }
 
 #[test]
-fn other_sources_point_to_the_follow_up_even_when_advertised() {
+fn reader_support_is_required_before_mutation() {
     let output = run(
         &[
             "wait",
@@ -126,9 +160,123 @@ fn other_sources_point_to_the_follow_up_even_when_advertised() {
         ],
         vec![(
             "ping",
-            json!({"capabilities":{"agent_waits":true,"wait_sources":["node","pr"]}}),
+            json!({"capabilities":{"agent_waits":true,"wait_sources":["node","run"]}}),
         )],
     );
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("ticket 100"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("plugin readers"));
+}
+
+#[test]
+fn a_reader_source_round_trips_with_normalized_shorthand() {
+    let output = run(
+        &[
+            "wait",
+            "--on",
+            "mr:group/project!7",
+            "--until",
+            "merged",
+            "--deadline",
+            "1h",
+            "--then",
+            "self",
+            "--json",
+        ],
+        vec![
+            (
+                "ping",
+                json!({"capabilities":{"agent_waits":true,"wait_sources":["node","run"],"wait_readers":true}}),
+            ),
+            (
+                "wait.declare",
+                json!({"wait":{"wait_id":10,"state":"live"}}),
+            ),
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn run_is_detached_and_retains_exit_code_and_output() {
+    let output = run(
+        &[
+            "run",
+            "--name",
+            "test-job",
+            "--json",
+            "--",
+            "/bin/sh",
+            "-c",
+            "sleep 0.1; printf 'command output\\n'; exit 7",
+        ],
+        vec![(
+            "ping",
+            json!({"capabilities":{"agent_waits":true,"wait_sources":["node","run"]}}),
+        )],
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["result"]["run"]["name"], "test-job");
+}
+
+#[test]
+fn run_can_declare_its_wait_in_the_same_call() {
+    let output = run(
+        &[
+            "run",
+            "--name",
+            "test-job",
+            "--deadline",
+            "1h",
+            "--then",
+            "parent",
+            "--until",
+            "success",
+            "--json",
+            "--",
+            "/bin/sh",
+            "-c",
+            "sleep 0.1; printf 'command output\\n'; exit 7",
+        ],
+        vec![
+            (
+                "ping",
+                json!({"capabilities":{"agent_waits":true,"wait_sources":["node","run"]}}),
+            ),
+            (
+                "wait.declare",
+                json!({"wait":{"wait_id":11,"state":"live"}}),
+            ),
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["result"]["wait"]["wait_id"], 11);
+}
+
+#[test]
+fn run_is_not_started_on_an_old_server() {
+    let output = run(
+        &[
+            "run", "--name", "test-job", "--", "/bin/sh", "-c", "exit 99",
+        ],
+        vec![(
+            "ping",
+            json!({"capabilities":{"agent_waits":true,"wait_sources":["node"]}}),
+        )],
+    );
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("wait_sources"));
 }

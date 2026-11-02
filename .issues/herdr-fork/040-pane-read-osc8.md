@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-pane-read-osc8
 title: Keep OSC 8 links in pane read
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee: saitonakamura
-claimed_by:
+claimed_by: macos/w1:p1H/4897df87-d87a-4835-9984-045f1456ef42
 ---
 
 ## Question

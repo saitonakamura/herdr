@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-sidebar-attention-two-axes
 title: Draw loom's wanted and seen in herdr-sidebar, with an ack key
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee: saitonakamura
-claimed_by:
+claimed_by: macos/w1:p1P/98495540-63fc-4a6d-a7dc-389963e21b04
 ---
 
 ## Question

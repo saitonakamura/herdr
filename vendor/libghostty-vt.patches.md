@@ -228,3 +228,48 @@ just test-one kitty_file_image_survives
 (cd vendor/libghostty-vt && zig build test-lib-vt -Dtest-filter='experimental PNG')
 just check
 ```
+
+## 0008 OSC 8 hyperlinks in VT formatter output
+
+status: active
+
+patch: `vendor/patches/libghostty-vt/0008-vt-formatter-hyperlinks.patch`
+
+herdr issue: none; fork ticket `herdr-fork-pane-read-osc8`
+(`.issues/herdr-fork/040-pane-read-osc8.md`)
+
+upstream discussion: not opened
+
+upstream pr: not opened; the vendored formatter notes that VT hyperlink output
+is planned ("In the future we can support emitting OSC 8 hyperlinks for VT
+output as well").
+
+vendored base: `44f2a44df7e8c4a0c6df3f7d872ef3d7ead88e51`
+
+local files:
+
+- `vendor/libghostty-vt/include/ghostty/vt/formatter.h`
+- `vendor/libghostty-vt/src/terminal/c/formatter.zig`
+- `vendor/libghostty-vt/src/terminal/formatter.zig`
+
+reason: `pane read --links` must return the OSC 8 hyperlinks a program printed,
+so a script can list links whose text is not their target. The page formatter
+already tracks per-cell hyperlinks, but only for HTML output. A default-off
+`hyperlinks` formatter option, appended to `GhosttyFormatterTerminalOptions`,
+reuses that tracking for VT output: an OSC 8 open where a link starts, one close
+where it ends, so a link that soft-wraps or spans style runs stays one link. A
+link that crosses a page boundary closes and reopens there. Every other
+formatter caller passes `false` and gets unchanged output.
+
+remove when: upstream libghostty-vt emits per-cell OSC 8 in VT output behind an
+option, and Herdr's `linked_ansi` tests pass using it without this patch. If
+upstream emits it unconditionally instead, Herdr's default ANSI reads must strip
+it to keep their output unchanged.
+
+verification:
+
+```sh
+just test-one linked_ansi
+just test-one pane_read_links
+just check
+```

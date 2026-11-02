@@ -616,6 +616,10 @@ pub(super) const LEAVES: &[Leaf] = &[
             {
                 params.format = ReadFormat::Ansi;
             }
+            // Links exist only in ANSI output, so asking for them asks for ANSI.
+            if params.links {
+                params.format = ReadFormat::Ansi;
+            }
             Ok(Method::PaneRead(params))
         },
     },

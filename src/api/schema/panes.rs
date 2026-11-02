@@ -410,6 +410,10 @@ crate::cli::projection::cli_params! {
         pub format: ReadFormat => binding::read_format(),
         #[serde(default = "super::default_true")]
         pub strip_ansi: bool => Field::new(true).input(binding::boolean("raw", false)),
+        /// With `format: ansi`: wrap each hyperlinked run in OSC 8. The `detection`
+        /// source has no links. Servers advertise the `pane_read_links` capability.
+        #[serde(default, skip_serializing_if = "super::is_false")]
+        pub links: bool => Field::new(false).input(binding::boolean("links", true)),
         #[serde(skip)]
         #[schemars(skip)]
         pub(crate) intent: super::common::ReadIntent => Field::new(super::common::ReadIntent::Interactive),

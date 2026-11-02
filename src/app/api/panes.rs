@@ -1542,11 +1542,12 @@ impl App {
         else {
             return pane_not_found(id, &params.pane_id);
         };
-        let (snapshot, revision) = crate::app::api_helpers::read_terminal_snapshot(
+        let (snapshot, revision) = crate::app::api_helpers::read_terminal_snapshot_with_links(
             pane,
             params.source,
             params.format,
             params.lines,
+            params.links,
         );
 
         encode_success(
@@ -2877,6 +2878,7 @@ mod tests {
                 lines: Some(2),
                 format: crate::api::schema::ReadFormat::Text,
                 strip_ansi: true,
+                links: false,
                 intent: crate::api::schema::ReadIntent::Interactive,
             },
         );
@@ -2901,6 +2903,7 @@ mod tests {
                 lines: None,
                 format: crate::api::schema::ReadFormat::Text,
                 strip_ansi: true,
+                links: false,
                 intent: crate::api::schema::ReadIntent::Interactive,
             },
         );

@@ -118,6 +118,49 @@ pub(super) fn read_terminal_snapshot(
     terminal.read_at_content_seq(|| read_terminal_source(terminal, source, format, lines))
 }
 
+/// [`read_terminal_snapshot`], keeping hyperlinks as OSC 8 in ANSI output when `links` is set.
+pub(super) fn read_terminal_snapshot_with_links(
+    terminal: &crate::terminal::TerminalRuntime,
+    source: crate::api::schema::ReadSource,
+    format: crate::api::schema::ReadFormat,
+    lines: Option<u32>,
+    links: bool,
+) -> (crate::pane::TerminalReadSnapshot, u64) {
+    terminal.read_at_content_seq(|| {
+        if links && format == crate::api::schema::ReadFormat::Ansi {
+            if let Some(snapshot) = read_linked_ansi(terminal, source, lines) {
+                return snapshot;
+            }
+        }
+        read_terminal_source(terminal, source, format, lines)
+    })
+}
+
+fn read_linked_ansi(
+    terminal: &crate::terminal::TerminalRuntime,
+    source: crate::api::schema::ReadSource,
+    lines: Option<u32>,
+) -> Option<crate::pane::TerminalReadSnapshot> {
+    use crate::api::schema::ReadSource;
+    use crate::pane::LinkedAnsiRead;
+
+    let line_limit = lines.map(|lines| lines.min(1000) as usize);
+    let recent_lines = line_limit.unwrap_or(80);
+    Some(match source {
+        ReadSource::Visible => limit_snapshot_lines(
+            terminal.linked_ansi_snapshot(LinkedAnsiRead::Visible).text,
+            line_limit,
+        ),
+        ReadSource::Recent => terminal.linked_ansi_snapshot(LinkedAnsiRead::Recent(recent_lines)),
+        ReadSource::RecentUnwrapped => {
+            terminal.linked_ansi_snapshot(LinkedAnsiRead::RecentUnwrapped(recent_lines))
+        }
+        ReadSource::Screen => terminal.linked_ansi_snapshot(LinkedAnsiRead::Screen(line_limit)),
+        // Detection text is plain, with nothing to link.
+        ReadSource::Detection => return None,
+    })
+}
+
 fn read_terminal_source(
     terminal: &crate::terminal::TerminalRuntime,
     source: crate::api::schema::ReadSource,

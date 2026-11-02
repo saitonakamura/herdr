@@ -111,6 +111,10 @@ pub const Options = struct {
     /// for HTML or the actual palette indexes for VT).
     palette: ?*const color.Palette = null,
 
+    /// For VT output, wrap hyperlinked cells in OSC 8 sequences, the way HTML
+    /// output wraps them in anchors. Plain output never emits hyperlinks.
+    hyperlinks: bool = false,
+
     pub const plain: Options = .{ .emit = .plain };
     pub const vt: Options = .{ .emit = .vt };
     pub const html: Options = .{ .emit = .html };
@@ -1456,10 +1460,8 @@ pub const PageFormatter = struct {
 
                 // Hyperlink state
                 hyperlink: {
-                    // We currently only emit hyperlinks for HTML. In the
-                    // future we can support emitting OSC 8 hyperlinks for
-                    // VT output as well.
-                    if (comptime emit != .html) break :hyperlink;
+                    // HTML always emits hyperlinks; VT only when asked to.
+                    if (!self.emitsHyperlinks(emit)) break :hyperlink;
 
                     // Get the hyperlink ID. This ID is our internal ID,
                     // not necessarily the OSC8 ID.
@@ -1679,7 +1681,7 @@ pub const PageFormatter = struct {
             // cell must belong to the currently open hyperlink (or none).
             // Transitions take the slow path. This is checked after blank
             // accounting because blank cells never touch hyperlink state.
-            if (comptime emit == .html) {
+            if (self.emitsHyperlinks(emit)) {
                 if (cell.hyperlink) {
                     const run_id = run_hyperlink_id orelse break;
                     const cell_id = self.page.lookupHyperlink(cell) orelse break;
@@ -2073,6 +2075,14 @@ pub const PageFormatter = struct {
         }
     }
 
+    inline fn emitsHyperlinks(self: *const PageFormatter, comptime emit: Format) bool {
+        return switch (emit) {
+            .html => true,
+            .vt => self.opts.hyperlinks,
+            .plain => false,
+        };
+    }
+
     fn formatHyperlinkOpen(
         self: PageFormatter,
         comptime emit: Format,
@@ -2080,7 +2090,13 @@ pub const PageFormatter = struct {
         uri: []const u8,
     ) std.Io.Writer.Error!void {
         switch (emit) {
-            .plain, .vt => unreachable,
+            .plain => unreachable,
+
+            .vt => {
+                try writer.writeAll("\x1b]8;;");
+                try writer.writeAll(uri);
+                try writer.writeAll("\x1b\\");
+            },
 
             // layout since we're primarily using it as a CSS wrapper.
             .html => {
@@ -2102,7 +2118,8 @@ pub const PageFormatter = struct {
     ) std.Io.Writer.Error!void {
         const str: []const u8 = switch (emit) {
             .html => "</a>",
-            .plain, .vt => return,
+            .vt => "\x1b]8;;\x1b\\",
+            .plain => return,
         };
 
         try writer.writeAll(str);

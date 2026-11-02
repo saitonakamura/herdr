@@ -738,6 +738,7 @@ fn success_response_round_trips() {
                 agent_waits: false,
                 wait_sources: Vec::new(),
                 wait_readers: false,
+                pane_read_links: false,
             }),
         },
     };

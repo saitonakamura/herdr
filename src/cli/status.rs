@@ -291,6 +291,7 @@ struct ServerCapabilitiesJson {
     agent_waits: bool,
     wait_sources: Vec<String>,
     wait_readers: bool,
+    pane_read_links: bool,
 }
 
 #[derive(Serialize)]
@@ -347,6 +348,7 @@ fn server_status_json(server: &ServerRuntimeStatus) -> ServerStatusJson {
                     agent_waits: capabilities.agent_waits,
                     wait_sources: capabilities.wait_sources.clone(),
                     wait_readers: capabilities.wait_readers,
+                    pane_read_links: capabilities.pane_read_links,
                 }),
             compatible: protocol.map(|value| value == crate::protocol::PROTOCOL_VERSION),
             endpoint_compatible: capabilities.as_ref().and_then(|capabilities| {
@@ -455,6 +457,7 @@ mod tests {
                 agent_waits: false,
                 wait_sources: Vec::new(),
                 wait_readers: false,
+                pane_read_links: false,
             }),
         }
     }

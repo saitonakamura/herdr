@@ -49,8 +49,9 @@ pub(crate) use self::terminal::test_encode_key_for_app;
 pub use self::terminal::InputState;
 use self::terminal::{GhosttyPaneTerminal, PaneTerminal};
 pub(crate) use self::terminal::{
-    TerminalCompressionStep, TerminalDirtyPatch, TerminalDirtyPatchOutcome, TerminalReadSnapshot,
-    TerminalSearchDirection, TerminalSearchWindow, TerminalTextPoint, TerminalWordMotion,
+    LinkedAnsiRead, TerminalCompressionStep, TerminalDirtyPatch, TerminalDirtyPatchOutcome,
+    TerminalReadSnapshot, TerminalSearchDirection, TerminalSearchWindow, TerminalTextPoint,
+    TerminalWordMotion,
 };
 pub use self::{
     state::PaneState,
@@ -3738,6 +3739,12 @@ impl PaneRuntime {
 
     pub(crate) fn recent_unwrapped_ansi_snapshot(&self, lines: usize) -> TerminalReadSnapshot {
         let result = self.terminal.recent_unwrapped_ansi_snapshot(lines);
+        self.compression.wake();
+        result
+    }
+
+    pub(crate) fn linked_ansi_snapshot(&self, read: LinkedAnsiRead) -> TerminalReadSnapshot {
+        let result = self.terminal.linked_ansi_snapshot(read);
         self.compression.wake();
         result
     }

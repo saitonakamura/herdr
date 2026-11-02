@@ -122,10 +122,18 @@ impl Config {
             .chain(tab_bar_right_diagnostics(&self.ui.tab_bar_right))
             .chain(window_title_diagnostics(&self.ui.window_title))
             .chain(self.invalid_sidebar_bounds_diagnostic())
-            .chain(self.ui.sidebar.spaces.repo_token_diagnostic())
             .chain(self.ui.sidebar.pane_diagnostics())
             .chain(self.invalid_headless_size_diagnostic())
             .chain(self.sidebar_program_diagnostic())
+            .collect()
+    }
+
+    pub fn collect_warnings(&self) -> Vec<String> {
+        self.ui
+            .sidebar
+            .spaces
+            .repo_token_diagnostic()
+            .into_iter()
             .collect()
     }
 

@@ -330,7 +330,8 @@ fn config_check(args: &[String]) -> std::io::Result<i32> {
         }
     }
 
-    let diagnostics = crate::config::Config::load().diagnostics;
+    let loaded = crate::config::Config::load();
+    let diagnostics = loaded.diagnostics;
     if diagnostics.is_empty() {
         println!("config: ok");
     } else {
@@ -338,6 +339,10 @@ fn config_check(args: &[String]) -> std::io::Result<i32> {
         for diagnostic in &diagnostics {
             println!("{diagnostic}");
         }
+    }
+
+    for warning in loaded.config.collect_warnings() {
+        println!("warning: {warning}");
     }
 
     Ok(i32::from(!diagnostics.is_empty()))

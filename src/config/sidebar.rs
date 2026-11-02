@@ -643,14 +643,38 @@ rows = [["workspace"], ["branch", { token = "git_status", fg = "#fff" }]]
         );
         assert!(config.ui.sidebar.spaces.repo_token_diagnostic().is_some());
         assert!(config
-            .collect_diagnostics()
+            .collect_warnings()
             .iter()
             .any(|diagnostic| diagnostic.starts_with("ui.sidebar.spaces rows")));
+        assert!(config.collect_diagnostics().is_empty());
+        assert!(crate::config::Config::default()
+            .collect_warnings()
+            .is_empty());
         assert_eq!(SpacesSidebarConfig::default().repo_token_diagnostic(), None);
         assert!(toml::from_str::<AgentsSidebarConfig>(
             r##"rows = [[{ token = "git_dirty", rules = [{ equals = "1", fg = "#fff" }] }]]"##
         )
         .is_err());
+    }
+
+    #[test]
+    fn invalid_pane_settings_remain_errors_not_rendering_warnings() {
+        let config: crate::config::Config = toml::from_str(
+            r#"
+[ui.sidebar]
+pane = []
+pane_collapsed_width = 0
+"#,
+        )
+        .unwrap();
+
+        let diagnostics = config.collect_diagnostics();
+        assert!(diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.starts_with("ui.sidebar.pane must name a program")));
+        assert!(diagnostics.iter().any(|diagnostic| diagnostic
+            .starts_with("ui.sidebar.pane_collapsed_width must be greater than zero")));
+        assert!(config.collect_warnings().is_empty());
     }
 
     #[test]

@@ -23,7 +23,7 @@ use serde_json::json;
 
 use crate::api::{self, ApiError, Client, MessageKind};
 use crate::app::{App, Effect};
-use crate::model::AgeClock;
+use crate::model::{self, AgeClock, AttentionClock};
 use crate::{config, state};
 
 /// At most about 20 refreshes and redraws a second (018).
@@ -35,6 +35,8 @@ enum Msg {
     Invalidate {
         exited: Option<String>,
         closed: Option<String>,
+        /// The sender of a message just queued: its latest report may have changed.
+        reported: Option<String>,
     },
     SubscriptionDown(ApiError),
     Ctl {
@@ -143,15 +145,22 @@ fn event_loop(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
 ) -> std::io::Result<Exit> {
     let mut clock = AgeClock::default();
+    let mut attention = AttentionClock::default();
+    let mut reports = ReportLines::default();
     let mut stale = true;
     let mut dirty = true;
     let mut last_refresh = Instant::now() - FRAME;
     let mut last_draw = Instant::now() - FRAME;
     loop {
+        // a focused loud row dims on a timer, with nothing from herdr to wake for
+        let dim_due = attention
+            .next_due()
+            .map(|at| Duration::from_secs(at.saturating_sub(now_secs())));
         let due = [stale.then_some(last_refresh), dirty.then_some(last_draw)]
             .into_iter()
             .flatten()
             .map(|at| (at + FRAME).saturating_duration_since(Instant::now()))
+            .chain(dim_due)
             .min();
         let msg = match due {
             Some(wait) => rx.recv_timeout(wait),
@@ -179,7 +188,14 @@ fn event_loop(
                 stale |= execute_all(app, client, paths, effects);
                 dirty = true;
             }
-            Ok(Msg::Invalidate { exited, closed }) => {
+            Ok(Msg::Invalidate {
+                exited,
+                closed,
+                reported,
+            }) => {
+                if let Some(agent) = reported {
+                    reports.forget(&agent);
+                }
                 if let Some(pane) = exited {
                     app.extras.exited.insert(pane);
                 }
@@ -189,6 +205,8 @@ fn event_loop(
                 stale = true;
             }
             Ok(Msg::SubscriptionDown(err)) => {
+                // a message queued while it was down went unnoticed
+                reports = ReportLines::default();
                 if err.code != "events_lost" {
                     app.set_status(format!("herdr: {err}; reconnecting"));
                 }
@@ -218,8 +236,13 @@ fn event_loop(
             match refresh(client) {
                 Ok((snapshot, pending)) => {
                     status.watch(&snapshot);
-                    clock.observe(&snapshot, now_secs());
-                    app.extras.ages = clock.ages(now_secs());
+                    let now = now_secs();
+                    clock.observe(&snapshot, now);
+                    app.extras.ages = clock.ages(now);
+                    attention.observe(&snapshot, now);
+                    app.extras.waited = attention.waited(now);
+                    app.extras.dimmed = attention.dimmed();
+                    app.extras.reports = reports.refresh(client, &snapshot);
                     app.extras.pending = pending;
                     let live: std::collections::HashSet<&str> =
                         snapshot.panes.iter().map(|p| p.pane_id.as_str()).collect();
@@ -231,6 +254,13 @@ fn event_loop(
                 }
                 Err(err) => app.set_status(format!("herdr: {err}")),
             }
+            dirty = true;
+        }
+        if attention.next_due().is_some_and(|at| at <= now_secs()) {
+            let now = now_secs();
+            attention.observe(&app.snapshot, now);
+            app.extras.waited = attention.waited(now);
+            app.extras.dimmed = attention.dimmed();
             dirty = true;
         }
         if dirty && last_draw.elapsed() >= FRAME {
@@ -251,6 +281,55 @@ fn refresh(client: &Client) -> Result<(api::SessionSnapshot, HashMap<String, usi
         }
     }
     Ok((snapshot, pending))
+}
+
+/// The first line of each agent's latest report, for rows with an unread report.
+/// Each agent's is read once, and again after it sends a message.
+#[derive(Default)]
+struct ReportLines {
+    lines: HashMap<String, Option<String>>,
+}
+
+impl ReportLines {
+    fn forget(&mut self, agent: &str) {
+        self.lines.remove(agent);
+    }
+
+    fn refresh(
+        &mut self,
+        client: &Client,
+        snapshot: &api::SessionSnapshot,
+    ) -> HashMap<String, String> {
+        let unread: Vec<&str> = snapshot
+            .panes
+            .iter()
+            .filter(|pane| model::unread_kind(pane).is_some())
+            .filter_map(|pane| pane.agent_id.as_deref())
+            .collect();
+        self.lines
+            .retain(|agent, _| unread.contains(&agent.as_str()));
+        for agent in unread {
+            if self.lines.contains_key(agent) {
+                continue;
+            }
+            // decoration: a failed read leaves the kind alone on the row until the agent sends again
+            let line = client
+                .call("message.list", json!({ "from": agent }))
+                .ok()
+                .and_then(|result| {
+                    api::messages_from_result(&result)
+                        .into_iter()
+                        .filter(|m| m.kind == MessageKind::Report)
+                        .max_by_key(|m| m.message_id)
+                })
+                .and_then(|m| m.summary.lines().next().map(str::to_string));
+            self.lines.insert(agent.to_string(), line);
+        }
+        self.lines
+            .iter()
+            .filter_map(|(agent, line)| Some((agent.clone(), line.clone()?)))
+            .collect()
+    }
 }
 
 /// Runs the effects; true when herdr's state may have changed.
@@ -411,6 +490,7 @@ fn spawn_subscription(client: Client, tx: Sender<Msg>) {
                     let _ = tx.send(Msg::Invalidate {
                         exited: None,
                         closed: None,
+                        reported: None,
                     });
                 },
                 |line| {
@@ -421,7 +501,14 @@ fn spawn_subscription(client: Client, tx: Sender<Msg>) {
                         let closed = (event.event == "pane.closed")
                             .then_some(event.pane_id)
                             .flatten();
-                        let _ = tx.send(Msg::Invalidate { exited, closed });
+                        let reported = (event.event == "message.queued")
+                            .then_some(event.from_agent_id)
+                            .flatten();
+                        let _ = tx.send(Msg::Invalidate {
+                            exited,
+                            closed,
+                            reported,
+                        });
                     }
                 },
             );
@@ -472,6 +559,7 @@ impl StatusWatch {
                         let _ = events.send(Msg::Invalidate {
                             exited: None,
                             closed: None,
+                            reported: None,
                         });
                     },
                 );
@@ -491,6 +579,7 @@ impl StatusWatch {
                             let _ = events.send(Msg::Invalidate {
                                 exited: None,
                                 closed: None,
+                                reported: None,
                             });
                         }
                     }

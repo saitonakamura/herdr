@@ -6,7 +6,7 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::config::Config;
 use crate::glyphs::Meaning;
-use crate::model::{AgentItem, HeaderItem, Item};
+use crate::model::{AgentItem, AttentionItem, HeaderItem, Item, Mark};
 
 /// Under this many columns rows are drawn narrow (ADR 0005).
 pub const NARROW_BELOW: u16 = 16;
@@ -112,9 +112,37 @@ fn age_text(seconds: u64) -> String {
 pub fn lines(items: &[Item], width: u16, config: &Config) -> Vec<Line> {
     let narrow = width < NARROW_BELOW;
     let mut out = Vec::new();
+    let mut in_section = false;
     for item in items {
         let key = item.key();
+        let section_item = matches!(item, Item::AttentionHeader(_) | Item::Attention(_));
+        if in_section && !section_item {
+            // a dead row between the attention section and the trees
+            out.push(Line {
+                spans: Vec::new(),
+                key: "gap".into(),
+                target: None,
+            });
+        }
+        in_section = section_item;
         match item {
+            Item::AttentionHeader(count) => {
+                let label = if narrow { "!" } else { "attention" };
+                let count = format!(" {count}");
+                let mut spans = vec![span(
+                    cut(label, width as usize),
+                    Style::default().add_modifier(Modifier::BOLD),
+                )];
+                if label.width() + count.width() <= width as usize {
+                    spans.push(span(count, fg(Some(config.muted))));
+                }
+                out.push(Line {
+                    spans,
+                    key,
+                    target: None,
+                });
+            }
+            Item::Attention(row) => out.extend(attention_lines(row, width, narrow, config, key)),
             Item::Scope(label) => out.push(Line {
                 spans: vec![span(
                     if narrow {
@@ -266,18 +294,49 @@ fn guides_text(agent: &AgentItem) -> String {
     out
 }
 
-// only the focused row is bold: underline alone is too faint to find
-fn name_style(agent: &AgentItem) -> Style {
-    let style = if agent.failed {
+// the focused row is bold and underlined: underline alone is too faint to find
+fn name_style(failed: bool, focused: bool, mark: Option<Mark>) -> Style {
+    let mut style = if failed {
         Style::default().fg(Color::Red)
     } else {
         Style::default()
     };
-    if agent.focused {
-        style.add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+    if focused {
+        style = style.add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
+    }
+    if mark == Some(Mark::Loud) {
+        style = style.add_modifier(Modifier::BOLD);
+    }
+    style
+}
+
+/// The state glyph's style: loud draws it in reverse video.
+fn state_style(color: Option<Color>, mark: Option<Mark>) -> Style {
+    let style = fg(color);
+    if mark == Some(Mark::Loud) {
+        style.add_modifier(Modifier::REVERSED)
     } else {
         style
     }
+}
+
+/// A quiet row's dim dot, coloured by its report's kind.
+fn unread_dot(mark: Option<Mark>, unread: Option<&str>, config: &Config) -> Option<Span> {
+    if mark != Some(Mark::Quiet) {
+        return None;
+    }
+    let glyph = config.glyphs.get(Meaning::for_unread(unread.unwrap_or("")));
+    Some(span(
+        glyph.text.clone(),
+        fg(glyph.color.or(Some(config.muted))).add_modifier(Modifier::DIM),
+    ))
+}
+
+fn questions_span(questions: &str, config: &Config) -> Span {
+    span(
+        questions.to_string(),
+        fg(config.glyphs.get(Meaning::BlockedQuestion).color),
+    )
 }
 
 fn agent_lines(agent: &AgentItem, width: u16, config: &Config, key: String) -> Vec<Line> {
@@ -291,7 +350,7 @@ fn agent_lines(agent: &AgentItem, width: u16, config: &Config, key: String) -> V
     let mut lead = vec![
         span(" ", Style::default()),
         span(guides.clone(), muted),
-        span(state.text.clone(), fg(state.color)),
+        span(state.text.clone(), state_style(state.color, agent.mark)),
     ];
     if let Some(brand) = &brand {
         lead.push(span(brand.text.clone(), fg(brand.color)));
@@ -299,7 +358,7 @@ fn agent_lines(agent: &AgentItem, width: u16, config: &Config, key: String) -> V
     }
     let lead_width: usize = lead.iter().map(|s| s.text.width()).sum();
 
-    let name_style = name_style(agent);
+    let name_style = name_style(agent.failed, agent.focused, agent.mark);
 
     // (token, span); `name` is always kept and cut last.
     let mut tokens: Vec<(&str, Span)> = Vec::new();
@@ -320,6 +379,10 @@ fn agent_lines(agent: &AgentItem, width: u16, config: &Config, key: String) -> V
                 let glyph = config.glyphs.get(Meaning::Messages);
                 span(format!("{}{}", glyph.text, agent.pending), fg(glyph.color))
             }),
+            "questions" => agent
+                .questions
+                .as_deref()
+                .map(|q| questions_span(q, config)),
             "source" => agent.source.as_ref().map(|(id, name)| Span {
                 text: format!("← {name}"),
                 style: muted.add_modifier(Modifier::DIM),
@@ -331,6 +394,13 @@ fn agent_lines(agent: &AgentItem, width: u16, config: &Config, key: String) -> V
         if let Some(piece) = piece {
             tokens.push((token.as_str(), piece));
         }
+    }
+    if let Some(dot) = unread_dot(agent.mark, agent.unread.as_deref(), config) {
+        let at = tokens
+            .iter()
+            .position(|(t, _)| *t == "name")
+            .map_or(0, |i| i + 1);
+        tokens.insert(at, ("unread", dot));
     }
     if agent.folded && agent.hidden_below > 0 {
         let fold = Span {
@@ -467,11 +537,111 @@ fn continuation(agent: &AgentItem) -> String {
     out
 }
 
+/// An attention row: glyph, name, workspace, `?N` and the time waited, then the
+/// reason under the name. Narrow, just the glyph and the name.
+fn attention_lines(
+    row: &AttentionItem,
+    width: u16,
+    narrow: bool,
+    config: &Config,
+    key: String,
+) -> Vec<Line> {
+    let width = width as usize;
+    let muted = fg(Some(config.muted));
+    let mark = Some(row.mark);
+    let state = config.glyphs.get(row.meaning);
+    let focus = Target::FocusPane(row.pane_id.clone());
+    let name_style = name_style(false, row.focused, mark);
+    let glyph = span(state.text.clone(), state_style(state.color, mark));
+    if narrow {
+        let room = width.saturating_sub(state.text.width());
+        let name: String = {
+            let mut out = String::new();
+            let mut used = 0;
+            for ch in row.name.chars() {
+                let w = ch.width().unwrap_or(0);
+                if used + w > room {
+                    break;
+                }
+                out.push(ch);
+                used += w;
+            }
+            out
+        };
+        return vec![Line {
+            spans: vec![glyph, span(name, name_style)],
+            key,
+            target: Some(focus),
+        }];
+    }
+    let lead = vec![span(" ", Style::default()), glyph];
+    let lead_width: usize = lead.iter().map(|s| s.text.width()).sum();
+    let mut tokens: Vec<(&str, Span)> = vec![("name", span(row.name.clone(), name_style))];
+    if let Some(dot) = unread_dot(mark, row.unread.as_deref(), config) {
+        tokens.push(("unread", dot));
+    }
+    tokens.push(("workspace", span(row.workspace.clone(), muted)));
+    if let Some(questions) = &row.questions {
+        tokens.push(("questions", questions_span(questions, config)));
+    }
+    if let Some(waited) = row.waited {
+        tokens.push(("age", span(age_text(waited), muted)));
+    }
+    let total = |tokens: &[(&str, Span)]| -> usize {
+        let body: usize = tokens.iter().map(|(_, s)| s.text.width()).sum();
+        lead_width + body + tokens.len().saturating_sub(1)
+    };
+    for drop in ["age", "workspace", "questions"] {
+        if total(&tokens) > width {
+            tokens.retain(|(t, _)| *t != drop);
+        }
+    }
+    if total(&tokens) > width {
+        let fixed: usize = total(&tokens) - tokens[0].1.text.width();
+        tokens[0].1.text = cut(&row.name, width.saturating_sub(fixed));
+    }
+    let mut spans = lead;
+    let age = tokens
+        .iter()
+        .position(|(t, _)| *t == "age")
+        .map(|i| tokens.remove(i).1);
+    for (index, (_, piece)) in tokens.into_iter().enumerate() {
+        if index > 0 {
+            spans.push(span(" ", Style::default()));
+        }
+        spans.push(piece);
+    }
+    if let Some(age) = age {
+        let used: usize = spans.iter().map(|s| s.text.width()).sum();
+        let gap = width.saturating_sub(used + age.text.width()).max(1);
+        spans.push(span(" ".repeat(gap), Style::default()));
+        spans.push(age);
+    }
+    let mut out = vec![Line {
+        spans,
+        key: key.clone(),
+        target: Some(focus.clone()),
+    }];
+    if let Some(reason) = &row.reason {
+        // under the name, past the glyph
+        let indent = " ".repeat(lead_width);
+        out.push(Line {
+            spans: vec![
+                span(indent, Style::default()),
+                span(cut(reason, width.saturating_sub(lead_width)), muted),
+            ],
+            key,
+            target: Some(focus),
+        });
+    }
+    out
+}
+
 fn narrow_agent_line(agent: &AgentItem, width: u16, config: &Config, key: String) -> Line {
     let state = config.glyphs.get(agent.meaning);
     let indent = " ".repeat(agent.depth);
     let room = (width as usize).saturating_sub(indent.width() + state.text.width());
-    let style = name_style(agent);
+    let style = name_style(agent.failed, agent.focused, agent.mark);
     let name: String = {
         let mut out = String::new();
         let mut used = 0;
@@ -488,7 +658,7 @@ fn narrow_agent_line(agent: &AgentItem, width: u16, config: &Config, key: String
     Line {
         spans: vec![
             span(indent, Style::default()),
-            span(state.text.clone(), fg(state.color)),
+            span(state.text.clone(), state_style(state.color, agent.mark)),
             span(name, style),
         ],
         key,
@@ -514,6 +684,7 @@ mod tests {
             extras,
             ui: &UiState::default(),
             search: None,
+            attention: true,
         });
         lines(&items, width, &unicode())
     }
@@ -588,6 +759,7 @@ mod tests {
             extras: &extras,
             ui: &UiState::default(),
             search: None,
+            attention: true,
         });
         let focused: Vec<String> = items
             .iter()
@@ -659,5 +831,127 @@ mod tests {
         assert_eq!(cut("abcdef", 4), "abc…");
         assert_eq!(cut("abc", 4), "abc");
         assert_eq!(cut("abc", 0), "");
+    }
+
+    fn render_attention(width: u16, extras: &Extras) -> Vec<Line> {
+        let snapshot = crate::model::fixtures::attention_snapshot();
+        let items = build(&Inputs {
+            snapshot: &snapshot,
+            extras,
+            ui: &UiState::default(),
+            search: None,
+            attention: true,
+        });
+        lines(&items, width, &unicode())
+    }
+
+    fn span_with<'a>(line: &'a Line, text: &str) -> &'a Span {
+        line.spans
+            .iter()
+            .find(|s| s.text == text)
+            .unwrap_or_else(|| panic!("no span {text:?} in {:?}", line.text()))
+    }
+
+    #[test]
+    fn the_attention_section_heads_the_list_two_lines_a_row() {
+        let mut extras = Extras::default();
+        extras.waited.insert("w1:p3".into(), 125);
+        extras
+            .reports
+            .insert("a1".into(), "shipped the parser".into());
+        let lines = render_attention(40, &extras);
+        let text: Vec<String> = lines.iter().map(Line::text).collect();
+        assert_eq!(text[0], "attention 4");
+        assert_eq!(text[1].width(), 40, "{text:?}");
+        assert!(text[1].starts_with(" ●alpha dogfood ?2"), "{text:?}");
+        assert!(text[1].ends_with(" 2m"), "{text:?}");
+        assert_eq!(text[2], "  which db?");
+        assert!(text[3].starts_with(" !beta dogfood"), "{text:?}");
+        assert_eq!(text[4], "  permission");
+        assert!(text[5].starts_with(" ✓cockpit dogfood"), "{text:?}");
+        assert_eq!(text[6], "  merge it");
+        assert!(text[7].starts_with(" ○alpha-one • dogfood"), "{text:?}");
+        assert_eq!(text[8], "  done: shipped the parser");
+        // a dead gap, then the trees as before
+        assert_eq!(text[9], "");
+        assert_eq!(lines[9].target, None);
+        assert!(text[10].starts_with("▾ dogfood"), "{text:?}");
+        assert_eq!(lines[1].key, "attention:w1:p3");
+        assert_eq!(lines[2].target, Some(Target::FocusPane("w1:p3".into())));
+    }
+
+    #[test]
+    fn loud_reverses_the_glyph_and_bolds_the_name_steady_does_not() {
+        let lines = render_attention(40, &Extras::default());
+        let alpha = &lines[1];
+        assert!(span_with(alpha, "●")
+            .style
+            .add_modifier
+            .contains(Modifier::REVERSED));
+        assert!(span_with(alpha, "alpha")
+            .style
+            .add_modifier
+            .contains(Modifier::BOLD));
+        let cockpit = &lines[5];
+        assert!(!span_with(cockpit, "✓")
+            .style
+            .add_modifier
+            .contains(Modifier::REVERSED));
+        assert!(!span_with(cockpit, "cockpit")
+            .style
+            .add_modifier
+            .contains(Modifier::BOLD));
+        // the same marks in the tree
+        let tree_alpha = lines.iter().find(|l| l.key == "pane:w1:p3").unwrap();
+        assert!(span_with(tree_alpha, "●")
+            .style
+            .add_modifier
+            .contains(Modifier::REVERSED));
+        assert!(
+            tree_alpha.text().ends_with("fork-030 ?2"),
+            "{}",
+            tree_alpha.text()
+        );
+    }
+
+    #[test]
+    fn quiet_rows_carry_a_dim_dot_coloured_by_report_kind() {
+        let lines = render_attention(40, &Extras::default());
+        for key in ["attention:w1:p5", "pane:w1:p5"] {
+            let line = lines.iter().find(|l| l.key == key).unwrap();
+            let dot = span_with(line, "•");
+            assert_eq!(dot.style.fg, Some(Color::Cyan), "{key}");
+            assert!(dot.style.add_modifier.contains(Modifier::DIM), "{key}");
+        }
+        assert!(lines
+            .iter()
+            .find(|l| l.key == "pane:w1:p5")
+            .unwrap()
+            .text()
+            .contains("alpha-one •"));
+        // no dot on the loud row, though its report is unread too
+        let alpha = lines.iter().find(|l| l.key == "attention:w1:p3").unwrap();
+        assert!(!alpha.text().contains('•'));
+    }
+
+    #[test]
+    fn narrowing_an_attention_row_drops_age_then_workspace_then_cuts_the_name() {
+        let mut extras = Extras::default();
+        extras.waited.insert("w1:p5".into(), 5);
+        let row = |width: u16| -> String {
+            render_attention(width, &extras)
+                .iter()
+                .find(|l| l.key == "attention:w1:p5")
+                .unwrap()
+                .text()
+        };
+        assert!(row(30).ends_with("5s"));
+        assert_eq!(row(22), " ○alpha-one • dogfood");
+        assert_eq!(row(16), " ○alpha-one •");
+        assert_eq!(row(9), "○alpha-on");
+        assert!(render_attention(9, &extras)
+            .iter()
+            .all(|l| l.text().width() <= 9));
+        assert_eq!(render_attention(9, &extras)[0].text(), "! 4");
     }
 }

@@ -10,7 +10,14 @@ use crate::glyphs::{parse_color, GlyphSet, Glyphs, Meaning};
 
 /// The tokens a row's first line may carry, in the order given.
 pub const LINE1_TOKENS: &[&str] = &[
-    "name", "effort", "task", "ticket", "messages", "source", "age",
+    "name",
+    "effort",
+    "task",
+    "ticket",
+    "messages",
+    "questions",
+    "source",
+    "age",
 ];
 /// The tokens of the dim second line.
 pub const LINE2_TOKENS: &[&str] = &["branch", "ahead_behind", "dirty", "worktree"];
@@ -31,6 +38,8 @@ pub struct Config {
     /// The selected row's background while the sidebar has keyboard focus.
     pub selection: Color,
     pub actions: Vec<(String, Action)>,
+    /// Whether the attention section is drawn (`[sidebar] attention`).
+    pub attention: bool,
     /// Problems found while reading, shown once in the status line.
     pub diagnostics: Vec<String>,
 }
@@ -46,6 +55,7 @@ impl Default for Config {
             // ANSI 8 follows the terminal's light/dark theme
             selection: Color::Indexed(8),
             actions: Vec::new(),
+            attention: true,
             diagnostics: Vec::new(),
         }
     }
@@ -221,8 +231,23 @@ pub fn from_table(table: &toml::Table) -> Config {
             .actions
             .push((name.clone(), Action { command, popup }));
     }
+    match table.get("attention") {
+        None => {}
+        Some(toml::Value::Boolean(on)) => config.attention = *on,
+        Some(_) => diagnostics.push("attention: expected true or false".into()),
+    }
     for key in table.keys() {
-        if !["glyphs", "glyph", "colors", "line1", "line2", "actions"].contains(&key.as_str()) {
+        if ![
+            "glyphs",
+            "glyph",
+            "colors",
+            "line1",
+            "line2",
+            "actions",
+            "attention",
+        ]
+        .contains(&key.as_str())
+        {
             diagnostics.push(format!("[sidebar] {key}: unknown key"));
         }
     }
@@ -261,6 +286,7 @@ mod tests {
         assert!(config.diagnostics.is_empty(), "{:?}", config.diagnostics);
         assert_eq!(config.line1, ["name", "age"]);
         assert!(config.line2.is_empty());
+        assert!(config.attention);
         assert_eq!(config.muted, Color::Rgb(0, 0, 1));
         assert_eq!(config.glyphs.get(Meaning::Idle).text, "o");
         assert_eq!(config.glyphs.get(Meaning::Idle).color, Some(Color::Blue));
@@ -276,12 +302,19 @@ mod tests {
             glyphs = "emoji"
             line1 = ["name", "bogus"]
             actions = { reply = { popup = true } }
+            attention = "no"
             extra = 1
             "#,
         ));
-        assert_eq!(config.diagnostics.len(), 4, "{:?}", config.diagnostics);
+        assert_eq!(config.diagnostics.len(), 5, "{:?}", config.diagnostics);
+        assert!(config.attention);
         assert_eq!(config.line1, ["name"]);
         assert!(config.action("reply").is_none());
+    }
+
+    #[test]
+    fn attention_false_turns_the_section_off() {
+        assert!(!from_table(&table("attention = false")).attention);
     }
 
     #[test]

@@ -19,6 +19,8 @@ pub enum Command {
     Reply,
     Tell,
     Close,
+    /// Mark read: runs `[sidebar.actions] ack`, and nothing without it.
+    Ack,
     OpenUi,
     Menu,
     Escape,
@@ -63,6 +65,7 @@ impl KeyTable {
             KeyCode::Char('r') => Command::Reply,
             KeyCode::Char('t') => Command::Tell,
             KeyCode::Char('c') => Command::Close,
+            KeyCode::Char('a') => Command::Ack,
             KeyCode::Char('p') => Command::OpenUi,
             KeyCode::Char('m') => Command::Menu,
             KeyCode::Esc => Command::Escape,
@@ -93,6 +96,7 @@ mod tests {
             ('r', Command::Reply),
             ('t', Command::Tell),
             ('c', Command::Close),
+            ('a', Command::Ack),
             ('p', Command::OpenUi),
             ('m', Command::Menu),
         ];

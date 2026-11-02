@@ -491,6 +491,58 @@ fn config_check_reports_invalid_config_without_server() {
 }
 
 #[test]
+fn config_check_warns_for_space_repo_tokens_without_failing() {
+    let base = unique_test_dir();
+    let config_home = base.join("config");
+    let runtime_dir = base.join("runtime");
+    let config_dir = config_home.join(app_dir_name());
+    fs::create_dir_all(&config_dir).unwrap();
+    let config_path = config_dir.join("config.toml");
+    let rows = "[ui.sidebar.spaces]\nrows = [[\"workspace\"], [\"branch\", \"git_status\"]]\n";
+    fs::write(&config_path, rows).unwrap();
+
+    let checked = run_named_cli(&config_home, &runtime_dir, &["config", "check"]);
+    assert_eq!(checked.status.code(), Some(0));
+    assert!(checked.stderr.is_empty());
+    let stdout = String::from_utf8_lossy(&checked.stdout);
+    assert!(
+        stdout.starts_with("config: ok\nwarning: ui.sidebar.spaces rows:"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("show nothing on a workspace row"),
+        "{stdout}"
+    );
+
+    fs::write(
+        &config_path,
+        format!("{rows}\n[ui]\nsidebar_min_width = 50\nsidebar_max_width = 30\n"),
+    )
+    .unwrap();
+    let checked = run_named_cli(&config_home, &runtime_dir, &["config", "check"]);
+    assert_eq!(checked.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&checked.stdout);
+    assert!(stdout.starts_with("config: issues found\n"), "{stdout}");
+    assert!(stdout.contains("ui.sidebar_min_width (50)"), "{stdout}");
+    assert!(
+        stdout.contains("\nwarning: ui.sidebar.spaces rows:"),
+        "{stdout}"
+    );
+
+    fs::write(
+        config_dir.join("config.fork.toml"),
+        "[ui.sidebar.spaces]\nrows = [[\"workspace\"]]\n",
+    )
+    .unwrap();
+    fs::write(&config_path, rows).unwrap();
+    let checked = run_named_cli(&config_home, &runtime_dir, &["config", "check"]);
+    assert_eq!(checked.status.code(), Some(0));
+    assert_eq!(String::from_utf8_lossy(&checked.stdout), "config: ok\n");
+
+    cleanup_test_base(&base);
+}
+
+#[test]
 fn config_check_reports_unknown_keys_without_treating_comments_as_keys() {
     let base = unique_test_dir();
     let config_home = base.join("config");

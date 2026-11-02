@@ -32,3 +32,13 @@ Check that loom and the dotfiles sidebar treat `blocked` + `interrupted` sensibl
 [000-map](./000-map.md)
 
 ## Resolution
+
+Draft, pending review of [PR #48](https://github.com/saitonakamura/herdr/pull/48) (`fork/053-restore-settled-status`):
+
+- The snapshot saves `agent_status` (`{status, blocked_reason?}`) per agent pane. A status change schedules a save, and statuses stay out of the layout fingerprint. The field is optional and read leniently.
+- A resumed pane takes it back as an overlay. `blocked(r)` stays `blocked(r)` and `done` stays unseen. `working`, or `awaiting` without a live wait, becomes `blocked`/`interrupted`. A live wait reads awaiting.
+- It clears on a non-idle hook report, a working or blocked screen match, the agent exiting, or the user typing into the pane. The resumed session's own idle report does not clear it.
+- `interrupted` is reserved for restores: detection manifests may not name it. Messages wait for an interrupted pane; `agent prompt` still reaches it. Not reachable from any frozen endpoint codec.
+- herdr-sidebar draws `blocked_interrupted` (magenta `‖`). loom keys on `agent_status` only, so it already treats the pane as blocked. The dotfiles branch `herdr-fork/053-restore-settled-status` updates the loom test stub and adds a held-tell test.
+- Live repro in throwaway session `repro-053-133314`: a sentinel pane restored `blocked`/`question` and a pane stopped mid-turn restored `blocked`/`interrupted`, both after `claude --resume`.
+

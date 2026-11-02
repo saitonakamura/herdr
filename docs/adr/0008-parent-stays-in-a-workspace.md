@@ -39,3 +39,21 @@ Parent, and the sidebar draws it from the annotation.
 - Stock herdr has neither the rule nor annotations, so loom keeps setting
   cross-workspace Parents there. It switches only when the server advertises
   `agent_annotations`.
+
+## Amendment — 2026-10-29: destination root as Parent
+
+[dotfiles 103 effort-root parenting](https://github.com/saitonakamura/dotfiles/blob/master/.issues/loom/103-effort-spawn-under-root.md)
+amends loom's placement policy, not herdr's workspace boundary. When `spawn
+--effort X` lands in a workspace with X's live root (`kind: root`), that root is
+Parent and the cross-workspace caller remains Source. Source and Parent can
+coexist: the tree and sidebar nest the worker under the effort's root, and depth,
+sibling watches, close guards and child rows follow Parent. Leaving the worker
+as a second top-level root hid this relationship.
+
+Reports still reach Source and the effort root, once each; Parent being that
+root does not add another copy. `--handoff` cuts only Source's copy. Closing
+Source never closes the worker. `--root`, an effort with no live root, and stock
+herdr's cross-workspace Parent behavior are unchanged. Same-workspace moves and
+restore preserve both links. No herdr runtime, protocol or sidebar code changes
+are required. This amendment replaces the older Source-implies-no-Parent wording
+in the original decision and fork tracker.

@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-agent-waits
 title: Agent waits with persisted deadlines, node monitors, reader hooks and run supervision
-status: in-progress
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee: saitonakamura
-claimed_by: macos/20882d05-38fc-405c-8a42-17bbe55db2c6
+claimed_by:
 ---
 
 ## Question
@@ -67,7 +67,7 @@ Built 2026-10-29 on `fork/050-agent-waits-readers`. Open for PR4 (run supervisio
 
 ### PR4: run supervision and the wait-for graph
 
-Built 2026-11-02 on `fork/050-agent-waits-run`. This completes the four-PR split; asks and `blocked` joining the graph are left for later, as the spec says. How the build settled the run contract and the graph is in [assets/050-waits-design.md](./assets/050-waits-design.md#changes-made-while-building-pr4-2026-11-02).
+Merged 2026-11-02: [PR #44](https://github.com/saitonakamura/herdr/pull/44) as `3d8539e0`. Built 2026-11-02 on `fork/050-agent-waits-run`. This completes the four-PR split; asks and `blocked` joining the graph are left for later, as the spec says. How the build settled the run contract and the graph is in [assets/050-waits-design.md](./assets/050-waits-design.md#changes-made-while-building-pr4-2026-11-02).
 
 - **Run waits.** `wait_sources` is `["node", "run"]`. `--on run:<pid>:<absolute exit file>` watches a command the waiter started itself (`loom run`, loom 093); herdr never starts or signals it. The run's supervisor writes the exit code to the exit file atomically. `--until exit` (the default) is satisfied by any exit, and `--until success` only by 0, with another code firing to the decider. A pid that is gone (or reused, caught by its start token) without an exit file fires `failed: run <pid> ended without an exit file`. herdr looks at declare, every 2 s, and at once after a load.
 - **Wait-for graph.** The live node waits are its edges. A node wait that would close a loop is refused with `wait_cycle`, naming both agents and the waits on the path.

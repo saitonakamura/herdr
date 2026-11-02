@@ -70,3 +70,23 @@ Merged 2026-10-23: herdr PR #30 as `54f3bdfa` (head `d9afbba9`), dotfiles `6ae7a
   - `restore` writes `source` for every live node whose recorded Parent herdr dropped across workspaces. A new `pane.moved` hook runs the same pass, so a drag in the TUI or a hand `pane move` gets Sources at once. Stock 0.9.4 has the event.
 - **Verification.** Local `just check`: everything passes except the known machine failures (macOS ACL `chmod +a`, `cross_area`, `api_ping`, release tests vs `tag.gpgsign`); CI green on all three OSes. Live smoke on a throwaway headless session: refusal, both move drops, and a cross-workspace Parent planted in `session.json` dropped on server start while a same-workspace one survived. loom `tests/run.sh`: 447 passed, 21 in `test-source.sh` for fork and stock. Mutations that turn the Source path off fail 13 and 5 of them. loom was not smoke-tested with real agents.
 - **On-box.** Nothing beyond pulling dotfiles once both merge. The next `loom restore` on a fork build writes `source` for each cross-workspace Parent herdr drops.
+
+### Amendment — 2026-10-29: destination root as Parent
+
+[dotfiles 103 effort-root parenting](https://github.com/saitonakamura/dotfiles/blob/master/.issues/loom/103-effort-spawn-under-root.md)
+amends the spawn, views and depth rules above. On a fork, `spawn --effort X`
+into X's live root's workspace sets that root (`kind: root`) as Parent and keeps
+the caller as Source. Both links coexist; the worker sits under the root, depth
+counts from there, and sibling watches, close/audience guards, preamble siblings
+and report child rows include it. The root receives one report copy, not a
+Parent copy plus an effort-root copy. Either recipient can still reply or tell,
+and the first reply withdraws the other pending copy.
+
+`--root` and an effort with no live root stay top-level; `--handoff` still cuts
+only Source's copy; closing Source never closes the worker. Same-workspace
+reparenting, pane moves and restore preserve the independent Source alongside
+Parent. A move out of the Parent's workspace must still drop that Parent and
+keeps an existing Source rather than replacing it. Stock herdr is unchanged.
+This is loom policy only; the fork's workspace-bound Parent rule and annotation
+contract do not change. See the dated amendment in [ADR 0008 workspace-bound
+Parent](../../docs/adr/0008-parent-stays-in-a-workspace.md).

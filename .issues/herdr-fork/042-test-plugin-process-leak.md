@@ -7,7 +7,7 @@ labels:
 parent: herdr-fork-map
 blocked_by:
 assignee: saitonakamura
-claimed_by: claude-cloud-trial (dotfiles root 504cf489)
+claimed_by: macos/w1:p1N/ab3a1583-d381-4077-be25-464f623a16da
 ---
 
 ## Question

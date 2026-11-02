@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-restore-settled-status
 title: Save each pane's settled agent status, and restore a cut-off turn as blocked (interrupted)
-status: in-progress
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee: saitonakamura
-claimed_by: macos/w1:p1J/5051dabc-eb59-497c-b5ec-4af8a0564c40
+claimed_by:
 ---
 
 ## Question
@@ -33,7 +33,7 @@ Check that loom and the dotfiles sidebar treat `blocked` + `interrupted` sensibl
 
 ## Resolution
 
-Draft, pending review of [PR #48](https://github.com/saitonakamura/herdr/pull/48) (`fork/053-restore-settled-status`):
+Merged 2026-11-02: [PR #48](https://github.com/saitonakamura/herdr/pull/48) as `312bd9b2`.
 
 - The snapshot saves `agent_status` (`{status, blocked_reason?}`) per agent pane. A status change schedules a save, and statuses stay out of the layout fingerprint. The field is optional and read leniently.
 - A resumed pane takes it back as an overlay. `blocked(r)` stays `blocked(r)` and `done` stays unseen. `working`, or `awaiting` without a live wait, becomes `blocked`/`interrupted`. A live wait reads awaiting.

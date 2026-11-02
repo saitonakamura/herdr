@@ -21,8 +21,9 @@ conventions, detection, vendored libghostty-vt) still applies.
   fork's commits. Never rebase or force-push it.
 - Task worktrees: `../herdr-worktrees/<slug>`. Task branches:
   `fork/<NNN>-<slug>`, where `NNN` is the ticket number.
-- Behaviour changes go through a PR on `saitonakamura/herdr` into `master`. The
-  agent stops at a green PR; the user merges.
+- Behaviour changes go through a PR on `saitonakamura/herdr` into `master`. Once
+  the head is green, the agent merges it with a merge commit
+  (`gh pr merge --merge`) without asking, then pulls `master`.
 - Setup, upstream sync merges and tracker-only edits may go straight to `master`.
 
 ## Syncing upstream

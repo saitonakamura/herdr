@@ -124,6 +124,7 @@ pub enum BlockedReason {
     Question,
     Permission,
     Form,
+    Interrupted,
     #[serde(other)]
     Unknown,
 }

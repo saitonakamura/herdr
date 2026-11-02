@@ -13,6 +13,7 @@ pub enum Meaning {
     BlockedQuestion,
     BlockedPermission,
     BlockedForm,
+    BlockedInterrupted,
     Blocked,
     Unknown,
     OtherPane,
@@ -22,7 +23,7 @@ pub enum Meaning {
 }
 
 impl Meaning {
-    pub const ALL: [Meaning; 13] = [
+    pub const ALL: [Meaning; 14] = [
         Meaning::Idle,
         Meaning::Working,
         Meaning::Awaiting,
@@ -30,6 +31,7 @@ impl Meaning {
         Meaning::BlockedQuestion,
         Meaning::BlockedPermission,
         Meaning::BlockedForm,
+        Meaning::BlockedInterrupted,
         Meaning::Blocked,
         Meaning::Unknown,
         Meaning::OtherPane,
@@ -48,6 +50,7 @@ impl Meaning {
             Meaning::BlockedQuestion => "blocked_question",
             Meaning::BlockedPermission => "blocked_permission",
             Meaning::BlockedForm => "blocked_form",
+            Meaning::BlockedInterrupted => "blocked_interrupted",
             Meaning::Blocked => "blocked",
             Meaning::Unknown => "unknown",
             Meaning::OtherPane => "pane",
@@ -73,6 +76,7 @@ impl Meaning {
                 Some(BlockedReason::Question) => Meaning::BlockedQuestion,
                 Some(BlockedReason::Permission) => Meaning::BlockedPermission,
                 Some(BlockedReason::Form) => Meaning::BlockedForm,
+                Some(BlockedReason::Interrupted) => Meaning::BlockedInterrupted,
                 Some(BlockedReason::Unknown) | None => Meaning::Blocked,
             },
             AgentStatus::Unknown => Meaning::Unknown,
@@ -88,6 +92,7 @@ impl Meaning {
             Meaning::BlockedQuestion => "\u{f059}",
             Meaning::BlockedPermission => "\u{f071}",
             Meaning::BlockedForm => "\u{f044}",
+            Meaning::BlockedInterrupted => "\u{f28c}",
             Meaning::Blocked => "\u{f111}",
             Meaning::Unknown => "\u{f10c}",
             Meaning::OtherPane => "\u{f120}",
@@ -106,6 +111,7 @@ impl Meaning {
             Meaning::BlockedQuestion => "?",
             Meaning::BlockedPermission => "!",
             Meaning::BlockedForm => "✎",
+            Meaning::BlockedInterrupted => "‖",
             Meaning::Blocked => "●",
             Meaning::Unknown => "·",
             Meaning::OtherPane => "›",
@@ -121,7 +127,8 @@ impl Meaning {
             Meaning::Working => Some(Color::Yellow),
             Meaning::Awaiting => Some(Color::Blue),
             Meaning::Done => Some(Color::Cyan),
-            Meaning::BlockedQuestion => Some(Color::Magenta),
+            // Both wait on the user to decide how to go on.
+            Meaning::BlockedQuestion | Meaning::BlockedInterrupted => Some(Color::Magenta),
             Meaning::BlockedPermission | Meaning::BlockedForm | Meaning::Blocked => {
                 Some(Color::Red)
             }
@@ -321,6 +328,11 @@ mod tests {
         let glyphs = Glyphs::new(GlyphSet::Unicode, &[], &[]);
         let question = Meaning::for_state(AgentStatus::Blocked, Some(BlockedReason::Question));
         assert_eq!(glyphs.get(question).color, Some(Color::Magenta));
+        let interrupted =
+            Meaning::for_state(AgentStatus::Blocked, Some(BlockedReason::Interrupted));
+        assert_eq!(interrupted, Meaning::BlockedInterrupted);
+        assert_eq!(glyphs.get(interrupted).text, "‖");
+        assert_eq!(glyphs.get(interrupted).color, Some(Color::Magenta));
         let bare = Meaning::for_state(AgentStatus::Blocked, None);
         assert_eq!(bare, Meaning::Blocked);
         assert_eq!(glyphs.get(bare).color, Some(Color::Red));

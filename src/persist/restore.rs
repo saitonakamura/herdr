@@ -474,6 +474,35 @@ fn unavailable_restored_terminal(
     terminal
 }
 
+/// What a resumed agent's pane shows until a real event replaces it, and whether its
+/// last turn was acknowledged. A turn the restart cut off waits on the user.
+fn resumed_agent_status(
+    saved: Option<&super::snapshot::PaneAgentStatusSnapshot>,
+) -> (Option<crate::terminal::RestoredAgentStatus>, bool) {
+    use crate::api::schema::AgentStatus;
+    use crate::terminal::RestoredAgentStatus;
+    let Some(saved) = saved else {
+        return (None, true);
+    };
+    match saved.status {
+        AgentStatus::Blocked => (
+            Some(RestoredAgentStatus::Blocked(
+                saved.blocked_reason.map(Into::into),
+            )),
+            true,
+        ),
+        AgentStatus::Working => (
+            Some(RestoredAgentStatus::Blocked(Some(
+                crate::detect::BlockedReason::Interrupted,
+            ))),
+            true,
+        ),
+        AgentStatus::Awaiting => (Some(RestoredAgentStatus::Awaiting), true),
+        AgentStatus::Done => (None, false),
+        AgentStatus::Idle | AgentStatus::Unknown => (None, true),
+    }
+}
+
 fn restore_command_input(command: &str) -> bytes::Bytes {
     bytes::Bytes::from(format!("{command}\r"))
 }
@@ -664,7 +693,14 @@ fn restore_tab(
                     std::time::Instant::now(),
                 );
             }
-            panes.insert(*id, PaneState::new(terminal_id));
+            let (restored_status, seen) =
+                resumed_agent_status(saved_pane.and_then(|pane| pane.agent_status.as_ref()));
+            if let Some(status) = restored_status {
+                terminal.restore_agent_status(status, std::time::Instant::now());
+            }
+            let mut pane = PaneState::new(terminal_id);
+            pane.seen = seen;
+            panes.insert(*id, pane);
             terminals.push(terminal);
             continue;
         }
@@ -1580,6 +1616,185 @@ mod tests {
         }
     }
 
+    /// A claude pane under hook authority, settled in `state`, saved and restored with resume on.
+    fn save_and_restore_claude_pane(
+        settle: impl FnOnce(&mut TerminalState),
+        seen: bool,
+    ) -> (crate::app::AppState, TerminalId) {
+        let mut state = crate::app::AppState::test_new();
+        state.workspaces = vec![Workspace::test_new("restart")];
+        state.ensure_test_terminals();
+        state.active = Some(0);
+        let root = state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = state.workspaces[0].tabs[0].panes[&root]
+            .attached_terminal_id
+            .clone();
+        let terminal = state.terminals.get_mut(&terminal_id).unwrap();
+        terminal.cwd = std::env::current_dir().unwrap();
+        terminal.set_detected_state(Some(crate::detect::Agent::Claude), AgentState::Idle);
+        terminal.set_detailed_hook_authority_at(
+            "herdr:claude".into(),
+            "claude".into(),
+            AgentState::Idle,
+            crate::terminal::HookReportDetail::default(),
+            None,
+            crate::agent_resume::AgentSessionRef::id("5051dabc-claude-session"),
+            Some(1),
+            std::time::Instant::now(),
+        );
+        settle(terminal);
+        state.workspaces[0].tabs[0]
+            .panes
+            .get_mut(&root)
+            .unwrap()
+            .seen = seen;
+        state.assert_invariants_for_test();
+
+        let runtimes = crate::terminal::TerminalRuntimeRegistry::new();
+        let saved =
+            crate::persist::capture(&state.workspaces, &state.terminals, &runtimes, Some(0), 0);
+        let saved: SessionSnapshot =
+            serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap();
+        let (events, _event_rx) = mpsc::channel(4);
+        let (workspaces, terminals, _runtimes) = restore(
+            &saved,
+            None,
+            24,
+            80,
+            0,
+            test_restore_shell(),
+            crate::config::ShellModeConfig::NonLogin,
+            true,
+            events,
+            Arc::new(Notify::new()),
+            Arc::new(RenderSignal::new()),
+        );
+        let mut restored = crate::app::AppState::test_new();
+        restored.workspaces = workspaces;
+        restored.terminals = terminals;
+        restored.active = Some(0);
+        restored.assert_invariants_for_test();
+        let root = restored.workspaces[0].tabs[0].root_pane;
+        let terminal_id = restored.workspaces[0].tabs[0].panes[&root]
+            .attached_terminal_id
+            .clone();
+        assert!(
+            restored.terminals[&terminal_id]
+                .pending_agent_resume_plan
+                .is_some(),
+            "the claude session resumes"
+        );
+        (restored, terminal_id)
+    }
+
+    fn report(
+        terminal: &mut TerminalState,
+        state: AgentState,
+        detail: crate::terminal::HookReportDetail,
+        seq: u64,
+    ) {
+        terminal.set_detailed_hook_authority_at(
+            "herdr:claude".into(),
+            "claude".into(),
+            state,
+            detail,
+            None,
+            crate::agent_resume::AgentSessionRef::id("5051dabc-claude-session"),
+            Some(seq),
+            std::time::Instant::now(),
+        );
+    }
+
+    fn resumed_session_reports_idle(state: &mut crate::app::AppState, terminal_id: &TerminalId) {
+        let terminal = state.terminals.get_mut(terminal_id).unwrap();
+        report(terminal, AgentState::Idle, Default::default(), 100);
+    }
+
+    #[tokio::test]
+    async fn a_question_asked_before_a_restart_still_blocks_after_it() {
+        let (mut restored, terminal_id) = save_and_restore_claude_pane(
+            |terminal| {
+                report(
+                    terminal,
+                    AgentState::Blocked,
+                    crate::terminal::HookReportDetail {
+                        blocked_reason: Some(crate::detect::BlockedReason::Question),
+                        ..Default::default()
+                    },
+                    2,
+                )
+            },
+            true,
+        );
+        resumed_session_reports_idle(&mut restored, &terminal_id);
+
+        let terminal = &restored.terminals[&terminal_id];
+        assert_eq!(terminal.state, AgentState::Blocked);
+        assert_eq!(
+            terminal.blocked_reason(),
+            Some(crate::detect::BlockedReason::Question)
+        );
+        restored.assert_invariants_for_test();
+    }
+
+    #[tokio::test]
+    async fn a_turn_cut_off_by_a_restart_restores_as_interrupted() {
+        let background = crate::terminal::HookReportDetail {
+            background: true,
+            ..Default::default()
+        };
+        for detail in [Default::default(), background] {
+            let (mut restored, terminal_id) = save_and_restore_claude_pane(
+                |terminal| report(terminal, AgentState::Working, detail, 2),
+                true,
+            );
+            resumed_session_reports_idle(&mut restored, &terminal_id);
+
+            let terminal = &restored.terminals[&terminal_id];
+            assert_eq!(terminal.state, AgentState::Blocked, "{detail:?}");
+            assert_eq!(
+                terminal.blocked_reason(),
+                Some(crate::detect::BlockedReason::Interrupted),
+                "{detail:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn an_unacknowledged_finished_turn_stays_done_after_a_restart() {
+        for seen in [false, true] {
+            let (mut restored, terminal_id) = save_and_restore_claude_pane(|_| {}, seen);
+            resumed_session_reports_idle(&mut restored, &terminal_id);
+
+            let root = restored.workspaces[0].tabs[0].root_pane;
+            assert_eq!(restored.terminals[&terminal_id].state, AgentState::Idle);
+            assert_eq!(restored.workspaces[0].tabs[0].panes[&root].seen, seen);
+        }
+    }
+
+    #[test]
+    fn a_saved_status_this_build_cannot_read_restores_as_absent() {
+        let pane: super::super::snapshot::PaneSnapshot =
+            serde_json::from_value(serde_json::json!({
+                "cwd": "/tmp",
+                "restore_command": null,
+                "agent_status": {"status": "blocked", "blocked_reason": "from_the_future"}
+            }))
+            .unwrap();
+        assert!(pane.agent_status.is_none());
+        let pane: super::super::snapshot::PaneSnapshot =
+            serde_json::from_value(serde_json::json!({
+                "cwd": "/tmp",
+                "restore_command": null,
+                "agent_status": {"status": "blocked", "blocked_reason": "interrupted"}
+            }))
+            .unwrap();
+        assert_eq!(
+            pane.agent_status.map(|status| status.blocked_reason),
+            Some(Some(crate::api::schema::AgentBlockedReason::Interrupted))
+        );
+    }
+
     #[tokio::test]
     async fn restore_carries_persisted_agent_session_metadata() {
         let cwd = std::env::current_dir().unwrap();
@@ -1620,6 +1835,7 @@ mod tests {
                             agent_launch: None,
                             agent_home: None,
                             task_status: Some(crate::api::schema::TaskStatus::Complete),
+                            agent_status: None,
                             last_user_input_at_ms: Some(1_700_000_000_123),
                             restore_command: None,
                             annotations: std::collections::BTreeMap::from([(
@@ -1731,6 +1947,7 @@ mod tests {
                             agent_launch: None,
                             agent_home: None,
                             task_status: None,
+                            agent_status: None,
                             last_user_input_at_ms: None,
                             restore_command: Some("npm run dev".into()),
                             annotations: Default::default(),
@@ -1814,6 +2031,7 @@ mod tests {
                                 agent_launch: None,
                                 agent_home: None,
                                 task_status: None,
+                                agent_status: None,
                                 last_user_input_at_ms: None,
                                 restore_command: None,
                                 annotations: Default::default(),
@@ -1835,6 +2053,7 @@ mod tests {
                                 agent_launch: None,
                                 agent_home: None,
                                 task_status: None,
+                                agent_status: None,
                                 last_user_input_at_ms: None,
                                 restore_command: None,
                                 annotations: Default::default(),
@@ -1901,6 +2120,7 @@ mod tests {
                     agent_launch: None,
                     agent_home: None,
                     task_status: None,
+                    agent_status: None,
                     last_user_input_at_ms: None,
                     restore_command: None,
                     annotations: Default::default(),
@@ -1926,6 +2146,7 @@ mod tests {
             agent_launch: None,
             agent_home: None,
             task_status: None,
+            agent_status: None,
             last_user_input_at_ms: None,
             restore_command: None,
             annotations: Default::default(),
@@ -2102,6 +2323,7 @@ mod tests {
                             agent_launch: None,
                             agent_home: None,
                             task_status: None,
+                            agent_status: None,
                             last_user_input_at_ms: None,
                             restore_command: None,
                             annotations: Default::default(),
@@ -2200,6 +2422,7 @@ mod tests {
             agent_id: None,
             parent_agent_id: None,
             task_status: None,
+            agent_status: None,
             last_user_input_at_ms: None,
             restore_command: None,
             annotations: Default::default(),
@@ -2516,6 +2739,7 @@ mod tests {
                 agent_launch: None,
                 agent_home: None,
                 task_status: None,
+                agent_status: None,
                 last_user_input_at_ms: None,
                 restore_command: None,
                 annotations: Default::default(),

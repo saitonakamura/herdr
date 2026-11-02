@@ -1145,4 +1145,6 @@ contains = ["asked"]
     assert!(parse_manifest(&manifest(4, "blocked", "question")).is_err());
     assert!(parse_manifest(&manifest(5, "idle", "question")).is_err());
     assert!(parse_manifest(&manifest(5, "blocked", "guess")).is_err());
+    // Only a restore cuts a turn off; the screen never shows that.
+    assert!(parse_manifest(&manifest(5, "blocked", "interrupted")).is_err());
 }

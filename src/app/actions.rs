@@ -1626,6 +1626,16 @@ impl AppState {
         })
     }
 
+    /// Drops a restarted pane's restored status; never a completion, since the user just acted.
+    pub(crate) fn clear_restored_agent_status(
+        &mut self,
+        pane_id: PaneId,
+    ) -> Option<PaneStateUpdate> {
+        self.update_terminal_state_with_completion_policy(pane_id, true, |terminal| {
+            terminal.clear_restored_agent_status(Instant::now())
+        })
+    }
+
     fn update_terminal_state<F>(&mut self, pane_id: PaneId, update: F) -> Option<PaneStateUpdate>
     where
         F: FnOnce(&mut crate::terminal::TerminalState) -> Option<TerminalStateMutation>,

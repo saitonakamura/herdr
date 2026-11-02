@@ -141,6 +141,13 @@ pub struct PaneSnapshot {
     pub agent_home: Option<crate::agent_resume::AgentHome>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_status: Option<crate::api::schema::TaskStatus>,
+    /// The agent's status when saved; a value this build does not know restores as if absent.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient_agent_status"
+    )]
+    pub agent_status: Option<PaneAgentStatusSnapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_user_input_at_ms: Option<u64>,
     pub restore_command: Option<String>,
@@ -153,6 +160,46 @@ pub struct PaneAgentResumeSnapshot {
     pub source: String,
     pub agent: String,
     pub argv: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaneAgentStatusSnapshot {
+    pub status: crate::api::schema::AgentStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocked_reason: Option<crate::api::schema::AgentBlockedReason>,
+}
+
+impl PaneAgentStatusSnapshot {
+    fn capture(terminal: &crate::terminal::TerminalState, seen: bool) -> Option<Self> {
+        use crate::api::schema::AgentStatus;
+        use crate::detect::AgentState;
+        if !terminal.is_agent_terminal() {
+            return None;
+        }
+        let status = match terminal.state {
+            AgentState::Idle if seen => AgentStatus::Idle,
+            AgentState::Idle => AgentStatus::Done,
+            AgentState::Working => AgentStatus::Working,
+            AgentState::Awaiting => AgentStatus::Awaiting,
+            AgentState::Blocked => AgentStatus::Blocked,
+            AgentState::Unknown => return None,
+        };
+        Some(Self {
+            status,
+            blocked_reason: terminal.blocked_reason().map(Into::into),
+        })
+    }
+}
+
+// A downgrade must not lose the whole session over one status it cannot read.
+fn lenient_agent_status<'de, D>(
+    deserializer: D,
+) -> Result<Option<PaneAgentStatusSnapshot>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    Ok(value.and_then(|value| serde_json::from_value(value).ok()))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -446,6 +493,12 @@ fn capture_tab(
                 agent_launch: terminal.and_then(|terminal| terminal.agent_launch.clone()),
                 agent_home: terminal.and_then(|terminal| terminal.agent_home.clone()),
                 task_status: terminal.and_then(|terminal| terminal.task_status),
+                agent_status: terminal.and_then(|terminal| {
+                    PaneAgentStatusSnapshot::capture(
+                        terminal,
+                        tab.panes.get(id).is_none_or(|pane| pane.seen),
+                    )
+                }),
                 last_user_input_at_ms: terminal.and_then(|terminal| terminal.last_user_input_at_ms),
                 restore_command: terminal.and_then(|terminal| terminal.restore_command.clone()),
                 annotations: terminal
@@ -474,12 +527,28 @@ pub(super) fn layout_fingerprint(snapshot: &SessionSnapshot) -> Option<String> {
     let mut collapsed: Vec<_> = snapshot.collapsed_space_keys.iter().collect();
     collapsed.sort_unstable();
     value["collapsed_space_keys"] = serde_json::to_value(collapsed).ok()?;
-    // Messages, waits and the session pane width are not layout; none may orphan saved
-    // pane history.
+    // Messages, waits, the session pane width and agent statuses are not layout; none may
+    // orphan saved pane history.
     if let Some(object) = value.as_object_mut() {
         object.remove("messages");
         object.remove("waits");
         object.remove("session_pane_width");
+    }
+    for tab in value["workspaces"]
+        .as_array_mut()
+        .into_iter()
+        .flatten()
+        .flat_map(|workspace| workspace["tabs"].as_array_mut().into_iter().flatten())
+    {
+        for pane in tab["panes"]
+            .as_object_mut()
+            .into_iter()
+            .flat_map(|panes| panes.values_mut())
+        {
+            if let Some(pane) = pane.as_object_mut() {
+                pane.remove("agent_status");
+            }
+        }
     }
     let bytes = serde_json::to_vec(&value).ok()?;
     Some(format!("{:x}", Sha256::digest(bytes)))
@@ -726,6 +795,49 @@ mod tests {
     }
 
     #[test]
+    fn agent_statuses_leave_the_layout_fingerprint_alone() {
+        let mut snapshot = parse_snapshot(include_str!(
+            "../../tests/fixtures/session/current-herdr-session.json"
+        ))
+        .unwrap();
+        let without_status = layout_fingerprint(&snapshot).unwrap();
+        let pane = snapshot.workspaces[0].tabs[0]
+            .panes
+            .values_mut()
+            .next()
+            .unwrap();
+        pane.agent_status = Some(PaneAgentStatusSnapshot {
+            status: crate::api::schema::AgentStatus::Blocked,
+            blocked_reason: Some(crate::api::schema::AgentBlockedReason::Question),
+        });
+
+        let restored = parse_snapshot(&serde_json::to_string(&snapshot).unwrap()).unwrap();
+
+        assert_eq!(
+            restored.workspaces[0].tabs[0]
+                .panes
+                .values()
+                .next()
+                .unwrap()
+                .agent_status,
+            pane_status(&snapshot)
+        );
+        assert_eq!(
+            layout_fingerprint(&restored).as_deref(),
+            Some(without_status.as_str())
+        );
+    }
+
+    fn pane_status(snapshot: &SessionSnapshot) -> Option<PaneAgentStatusSnapshot> {
+        snapshot.workspaces[0].tabs[0]
+            .panes
+            .values()
+            .next()
+            .unwrap()
+            .agent_status
+    }
+
+    #[test]
     fn messages_round_trip_and_leave_the_layout_fingerprint_alone() {
         let mut snapshot = parse_snapshot(include_str!(
             "../../tests/fixtures/session/current-herdr-session.json"
@@ -878,6 +990,7 @@ mod tests {
                 agent_launch: None,
                 agent_home: None,
                 task_status: None,
+                agent_status: None,
                 last_user_input_at_ms: None,
                 restore_command: None,
                 annotations: Default::default(),
@@ -899,6 +1012,7 @@ mod tests {
                 agent_launch: None,
                 agent_home: None,
                 task_status: None,
+                agent_status: None,
                 last_user_input_at_ms: None,
                 restore_command: None,
                 annotations: Default::default(),
@@ -1708,6 +1822,7 @@ mod tests {
                 agent_launch: None,
                 agent_home: None,
                 task_status: None,
+                agent_status: None,
                 last_user_input_at_ms: None,
                 restore_command: None,
                 annotations: Default::default(),
@@ -1731,6 +1846,7 @@ mod tests {
                 agent_launch: None,
                 agent_home: None,
                 task_status: None,
+                agent_status: None,
                 last_user_input_at_ms: None,
                 restore_command: None,
                 annotations: Default::default(),

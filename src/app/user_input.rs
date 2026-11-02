@@ -9,9 +9,18 @@ impl App {
             return;
         };
         terminal.last_user_input_at_ms = Some(now_ms());
+        let restored = terminal.restored_agent_status().is_some();
         // Keystrokes must not keep pushing back a save that is already due.
         if self.session_save_deadline.is_none() {
             self.schedule_session_save();
+        }
+        if restored {
+            if let Some(update) = self
+                .pane_for_terminal(terminal_id)
+                .and_then(|(_, pane_id)| self.state.clear_restored_agent_status(pane_id))
+            {
+                self.emit_pane_state_update(&update);
+            }
         }
     }
 
@@ -63,5 +72,33 @@ mod tests {
 
         let at = app.pane_info(0, pane).unwrap().last_user_input_at_ms;
         assert!(at.is_some_and(|at| at > 0), "{at:?}");
+    }
+
+    #[test]
+    fn typing_into_a_restarted_pane_drops_its_restored_status() {
+        use crate::api::schema::{AgentBlockedReason, AgentStatus};
+        let mut app = app();
+        let pane = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.terminal_id_for_pane(0, pane).unwrap();
+        let terminal = app.state.terminals.get_mut(&terminal_id).unwrap();
+        terminal.set_detected_state(
+            Some(crate::detect::Agent::Claude),
+            crate::detect::AgentState::Idle,
+        );
+        terminal.restore_agent_status(
+            crate::terminal::RestoredAgentStatus::Blocked(Some(
+                crate::detect::BlockedReason::Interrupted,
+            )),
+            std::time::Instant::now(),
+        );
+        let info = app.pane_info(0, pane).unwrap();
+        assert_eq!(info.agent_status, AgentStatus::Blocked);
+        assert_eq!(info.blocked_reason, Some(AgentBlockedReason::Interrupted));
+
+        app.note_user_input_in_pane(0, pane);
+
+        let info = app.pane_info(0, pane).unwrap();
+        assert_eq!(info.agent_status, AgentStatus::Idle, "not a completion");
+        assert_eq!(info.blocked_reason, None);
     }
 }

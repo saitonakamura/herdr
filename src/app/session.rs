@@ -177,6 +177,46 @@ mod tests {
     }
 
     #[test]
+    fn an_agent_status_change_schedules_a_save_that_carries_it() {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &crate::config::Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        app.policy.persist_session = true;
+        app.state.workspaces = vec![crate::workspace::Workspace::test_new("status")];
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        let pane = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.terminal_id_for_pane(0, pane).unwrap();
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .set_detected_state(
+                Some(crate::detect::Agent::Claude),
+                crate::detect::AgentState::Idle,
+            );
+        app.session_save_deadline = None;
+
+        let update = app.state.set_declared_wait(pane, true).unwrap();
+        app.emit_pane_state_update(&update);
+
+        assert!(app.session_save_deadline.is_some());
+        let SessionSaveJob::Save { snapshot, .. } = app.capture_session_save_job() else {
+            panic!("expected a save");
+        };
+        let saved = snapshot.workspaces[0].tabs[0].panes[&pane.raw()].agent_status;
+        assert_eq!(
+            saved.map(|saved| saved.status),
+            Some(crate::api::schema::AgentStatus::Awaiting)
+        );
+    }
+
+    #[test]
     fn the_saved_session_keeps_the_waits() {
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
         let mut app = App::new(

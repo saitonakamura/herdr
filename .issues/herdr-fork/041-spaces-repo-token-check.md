@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-spaces-repo-token-check
 title: Fork's spaces repo-token diagnostic fails config check
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee: saitonakamura
-claimed_by:
+claimed_by: macos/w1:p1G/01a19b9d-cc60-74d7-8e3d-065d73dcdd31
 ---
 
 ## Question

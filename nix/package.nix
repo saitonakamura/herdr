@@ -45,6 +45,7 @@ rustPlatform.buildRustPackage {
         ../docs/next/api/herdr-api.schema.json
         ../src
         ../tools/sidebar
+        ../tools/loom
         ../vendor/libghostty-vt
         ../vendor/libghostty-vt.vendor.json
         ../vendor/portable-pty

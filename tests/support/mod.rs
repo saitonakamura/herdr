@@ -9,6 +9,8 @@ use std::time::{Duration, Instant};
 
 use portable_pty::CommandBuilder;
 
+mod processes;
+
 static PID_REGISTRY: OnceLock<Mutex<HashSet<u32>>> = OnceLock::new();
 static RUNTIME_DIR_REGISTRY: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
 static INIT: Once = Once::new();
@@ -108,7 +110,7 @@ pub fn cleanup_test_base(base: &Path) {
     let runtime_dir = base.join("runtime");
     let runtime_dirs = HashSet::from([runtime_dir.clone()]);
 
-    terminate_servers_for_runtime_dirs(&runtime_dirs);
+    terminate_processes_for_runtime_dirs(&runtime_dirs);
     unregister_runtime_dir(&runtime_dir);
     let _ = fs::remove_dir_all(base);
 }
@@ -558,7 +560,7 @@ pub fn cleanup_registered_herdr_pids() {
         runtime_dirs.drain().collect()
     };
 
-    terminate_servers_for_runtime_dirs(&runtime_dirs);
+    terminate_processes_for_runtime_dirs(&runtime_dirs);
     let _ = cleanup_servers_with_missing_runtime_dir();
 }
 
@@ -679,37 +681,37 @@ fn terminate_servers_for_runtime_dirs(runtime_dirs: &HashSet<PathBuf>) {
     }
 }
 
-fn iter_worktree_server_pids() -> std::io::Result<Vec<u32>> {
-    let own_pid = std::process::id();
-    let mut pids = Vec::new();
+/// Servers first, then any process left in their runtime dirs: plugin actions, orphaned handoff imports.
+fn terminate_processes_for_runtime_dirs(runtime_dirs: &HashSet<PathBuf>) {
+    terminate_servers_for_runtime_dirs(runtime_dirs);
+    if runtime_dirs.is_empty() {
+        return;
+    }
 
-    let proc_entries = match fs::read_dir("/proc") {
-        Ok(entries) => entries,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(err) => return Err(err),
+    let Ok(pids) = processes::all_pids() else {
+        return;
     };
 
-    for entry in proc_entries {
-        let entry = entry?;
-        let file_name = entry.file_name();
-        let Some(pid) = file_name.to_str().and_then(|name| name.parse::<u32>().ok()) else {
+    for pid in pids {
+        let Ok(Some(runtime_dir)) = process_runtime_dir(pid) else {
             continue;
         };
 
-        if pid == own_pid {
-            continue;
-        }
-
-        if is_test_herdr_server_process(pid) {
-            pids.push(pid);
+        if runtime_dirs.contains(&runtime_dir) {
+            terminate_pid(pid);
         }
     }
+}
 
-    Ok(pids)
+fn iter_worktree_server_pids() -> std::io::Result<Vec<u32>> {
+    Ok(processes::all_pids()?
+        .into_iter()
+        .filter(|pid| is_test_herdr_server_process(*pid))
+        .collect())
 }
 
 fn is_test_herdr_server_process(pid: u32) -> bool {
-    let Some(exe_path) = proc_link_target(pid, "exe") else {
+    let Some(exe_path) = processes::exe_path(pid) else {
         return false;
     };
 
@@ -717,37 +719,19 @@ fn is_test_herdr_server_process(pid: u32) -> bool {
         return false;
     }
 
-    let Ok(cmdline) = read_cmdline(pid) else {
+    let Ok(cmdline) = processes::argv(pid) else {
         return false;
     };
 
     cmdline.iter().any(|arg| arg == "server")
 }
 
-fn proc_link_target(pid: u32, link: &str) -> Option<PathBuf> {
-    fs::read_link(format!("/proc/{pid}/{link}")).ok()
-}
-
-fn read_cmdline(pid: u32) -> std::io::Result<Vec<String>> {
-    let cmdline = fs::read(format!("/proc/{pid}/cmdline"))?;
-    Ok(cmdline
-        .split(|byte| *byte == 0)
-        .filter(|chunk| !chunk.is_empty())
-        .map(|chunk| String::from_utf8_lossy(chunk).to_string())
-        .collect())
-}
-
 fn process_runtime_dir(pid: u32) -> std::io::Result<Option<PathBuf>> {
-    let environ = fs::read(format!("/proc/{pid}/environ"))?;
+    let environ = processes::environ(pid)?;
 
     let mut socket_path: Option<PathBuf> = None;
 
-    for entry in environ.split(|byte| *byte == 0) {
-        if entry.is_empty() {
-            continue;
-        }
-
-        let kv = String::from_utf8_lossy(entry);
+    for kv in &environ {
         if let Some(value) = kv.strip_prefix("XDG_RUNTIME_DIR=") {
             return Ok(Some(PathBuf::from(value)));
         }
@@ -774,7 +758,7 @@ fn runtime_dir_owner_alive(runtime_dir: &Path) -> bool {
 }
 
 fn is_test_herdr_binary(path: &Path) -> bool {
-    // /proc resolves executable symlinks. Match only this Cargo build, including
+    // /proc and proc_pidpath resolve executable symlinks. Match only this Cargo build, including
     // custom target directories; binary identity alone never grants ownership.
     static TEST_BINARY: OnceLock<Option<PathBuf>> = OnceLock::new();
     TEST_BINARY

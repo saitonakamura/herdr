@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-spaces-repo-token-check
 title: Fork's spaces repo-token diagnostic fails config check
-status: in-progress
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee: saitonakamura
-claimed_by: macos/w1:p1G/01a19b9d-cc60-74d7-8e3d-065d73dcdd31
+claimed_by:
 ---
 
 ## Question
@@ -26,3 +26,11 @@ Decide:
 [000-map](./000-map.md)
 
 ## Resolution
+
+Merged 2026-11-02: [PR #45](https://github.com/saitonakamura/herdr/pull/45) as `9c754d9c` (head `799a32e5`). Built by guarded host pi (`config-warn-041`); the cockpit signed, pushed and opened the PR, since host pi can't sign as the human in a fork.
+
+- **Severity.** The user decided: a note that a configured token renders nothing is a warning, not an error. A new `Config::collect_warnings()` sits beside `collect_diagnostics()`. `config check` prints `warning: …` lines after its usual header, and its exit code still counts only real errors. The spaces repo-token note is the only warning so far.
+- **Pane diagnostics stay errors.** `ui.sidebar.pane` with no program and a zero `pane_collapsed_width` reject invalid values; they are not "renders nothing" notes.
+- **Config.** No dotfiles change needed. The dotfiles `config.fork.toml` already cuts spaces rows to `$effort` and puts repo facts on agent rows, and `scripts/herdr-work-config` already copies it beside the generated work config.
+- **Verified** by the cockpit, because the host-pi gate denies `herdr config`. A config with `rows = [["workspace"], ["branch", "git_status"]]`: stock 0.9.4 `config: ok` exit 0; the fork before this `issues found` exit 1; this branch `config: ok` plus the warning, exit 0. All four live configs pass on all three binaries. CI green on every job.
+- **Host-pi findings** from this run are in dotfiles `.issues/host-pi/assets/herdr-fork-041-gate-findings.md`, filed as host-pi 028 and a note on 019.

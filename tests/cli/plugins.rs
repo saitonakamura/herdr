@@ -545,7 +545,7 @@ fn plugin_update_does_not_resurrect_a_plugin_unlinked_during_build() {
     fs::write(
         plugin_dir.join("herdr-plugin.toml"),
         format!(
-            "id = \"example.race\"\nname = \"Race\"\nversion = \"0.2.0\"\nmin_herdr_version = \"0.6.10\"\n\n[[build]]\ncommand = [\"sh\", \"-c\", \"touch {}; while [ ! -e {} ]; do sleep 0.05; done\"]\n",
+            "id = \"example.race\"\nname = \"Race\"\nversion = \"0.2.0\"\nmin_herdr_version = \"0.6.10\"\n\n[[build]]\ncommand = [\"sh\", \"-c\", \"touch {}; i=0; while [ ! -e {} ] && [ $i -lt 600 ]; do i=$((i + 1)); sleep 0.05; done\"]\n",
             build_started.display(),
             release_build.display()
         ),
@@ -642,7 +642,13 @@ command = ["sh", "./read.sh", "pane"]
     fs::write(source_repo.join("read.sh"), r#"
 kind="$1"
 touch "$HERDR_PLUGIN_ROOT/ready-$kind"
-while [ ! -e "$HERDR_PLUGIN_ROOT/release" ]; do sleep 0.05; done
+i=0
+while [ ! -e "$HERDR_PLUGIN_ROOT/release" ]; do
+  # Bounded, so a failed test cannot leave it spinning after its server is gone.
+  [ -d "$HERDR_PLUGIN_ROOT" ] && [ "$i" -lt 600 ] || exit 1
+  i=$((i + 1))
+  sleep 0.05
+done
 printf '%s:%s' "$(cat version)" "$(cat "$HERDR_PLUGIN_ROOT/version")" > "$HERDR_PLUGIN_ROOT/result-$kind.tmp"
 mv "$HERDR_PLUGIN_ROOT/result-$kind.tmp" "$HERDR_PLUGIN_ROOT/result-$kind"
 "#).unwrap();

@@ -72,6 +72,9 @@ pub const TerminalOptions = extern struct {
     /// If null, the entire screen is formatted.
     selection: ?*const CSelection = null,
 
+    /// Wrap hyperlinked cells in OSC 8 sequences (VT output only).
+    hyperlinks: bool = false,
+
     /// C: GhosttyFormatterTerminalExtra
     pub const Extra = extern struct {
         size: usize = @sizeOf(Extra),
@@ -144,6 +147,7 @@ fn terminal_new_(
         .emit = opts.emit,
         .unwrap = opts.unwrap,
         .trim = opts.trim,
+        .hyperlinks = opts.hyperlinks,
     });
     formatter.extra = opts.extra.toZig();
 

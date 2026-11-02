@@ -3103,6 +3103,7 @@ mod tests {
                 agent_waits: false,
                 wait_sources: Vec::new(),
                 wait_readers: false,
+                pane_read_links: false,
             }),
         };
         let missing_baseline = crate::api::RuntimeStatus {
@@ -3188,6 +3189,7 @@ mod tests {
                     agent_waits: false,
                     wait_sources: Vec::new(),
                     wait_readers: false,
+                    pane_read_links: false,
                 }),
             },
         };
@@ -3457,6 +3459,7 @@ mod tests {
                     agent_waits: false,
                     wait_sources: Vec::new(),
                     wait_readers: false,
+                    pane_read_links: false,
                 }),
             },
         };

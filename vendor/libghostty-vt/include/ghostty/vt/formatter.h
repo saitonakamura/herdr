@@ -116,6 +116,9 @@ typedef struct {
   /** Optional selection to restrict output to a range.
    *  If NULL, the entire screen is formatted. */
   const GhosttySelection *selection;
+
+  /** Wrap hyperlinked cells in OSC 8 sequences. Only affects VT output. */
+  bool hyperlinks;
 } GhosttyFormatterTerminalOptions;
 
 /**

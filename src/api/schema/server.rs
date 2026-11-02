@@ -87,4 +87,7 @@ pub struct ServerCapabilities {
     /// Plugins can add wait source kinds with `[[readers]]`; `plugin.list` shows which.
     #[serde(default)]
     pub wait_readers: bool,
+    /// `pane.read` keeps hyperlinks as OSC 8 in ANSI output when asked (`links`).
+    #[serde(default)]
+    pub pane_read_links: bool,
 }

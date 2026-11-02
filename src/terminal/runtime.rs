@@ -419,6 +419,13 @@ impl TerminalRuntime {
         self.0.recent_unwrapped_ansi_snapshot(lines)
     }
 
+    pub(crate) fn linked_ansi_snapshot(
+        &self,
+        read: crate::pane::LinkedAnsiRead,
+    ) -> crate::pane::TerminalReadSnapshot {
+        self.0.linked_ansi_snapshot(read)
+    }
+
     pub fn snapshot_history(&self) -> Option<String> {
         self.0.snapshot_history()
     }

@@ -604,6 +604,7 @@ fn pane_read(
                 lines,
                 format: crate::api::schema::ReadFormat::Text,
                 strip_ansi,
+                links: false,
                 intent: crate::api::schema::ReadIntent::Passive,
             }),
         },

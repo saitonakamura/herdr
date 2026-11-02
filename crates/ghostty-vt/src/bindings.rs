@@ -3549,11 +3549,13 @@ pub struct GhosttyFormatterTerminalOptions {
     pub extra: GhosttyFormatterTerminalExtra,
     #[doc = " Optional selection to restrict output to a range.\n  If NULL, the entire screen is formatted."]
     pub selection: *const GhosttySelection,
+    #[doc = " Wrap hyperlinked cells in OSC 8 sequences. Only affects VT output."]
+    pub hyperlinks: bool,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
     ["Size of GhosttyFormatterTerminalOptions"]
-        [::std::mem::size_of::<GhosttyFormatterTerminalOptions>() - 56usize];
+        [::std::mem::size_of::<GhosttyFormatterTerminalOptions>() - 64usize];
     ["Alignment of GhosttyFormatterTerminalOptions"]
         [::std::mem::align_of::<GhosttyFormatterTerminalOptions>() - 8usize];
     ["Offset of field: GhosttyFormatterTerminalOptions::size"]
@@ -3568,6 +3570,8 @@ const _: () = {
         [::std::mem::offset_of!(GhosttyFormatterTerminalOptions, extra) - 16usize];
     ["Offset of field: GhosttyFormatterTerminalOptions::selection"]
         [::std::mem::offset_of!(GhosttyFormatterTerminalOptions, selection) - 48usize];
+    ["Offset of field: GhosttyFormatterTerminalOptions::hyperlinks"]
+        [::std::mem::offset_of!(GhosttyFormatterTerminalOptions, hyperlinks) - 56usize];
 };
 impl Default for GhosttyFormatterTerminalOptions {
     fn default() -> Self {

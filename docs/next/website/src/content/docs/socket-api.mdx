@@ -905,6 +905,13 @@ pinned to the bottom regardless of scrolling, and is the one to poll from script
 `.result.read.revision` is the pane's content revision: equal revisions mean no
 output arrived in between.
 
+With `format: "ansi"`, `links: true` (CLI `--links`) also keeps OSC 8
+hyperlinks, so a script can find the links a program printed without their text.
+Each linked run is wrapped in one OSC 8 open and one close, across soft wraps
+and style changes. `detection` never carries links. Servers that support it
+advertise the `pane_read_links` capability; older servers ignore the field and
+return ANSI without links, so check the capability first.
+
 ## Waiting for state
 
 Use waits to coordinate agents and scripts.

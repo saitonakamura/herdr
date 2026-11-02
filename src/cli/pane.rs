@@ -861,8 +861,26 @@ mod tests {
             assert_eq!(params.lines, lines);
             assert_eq!(params.format, format);
             assert_eq!(params.strip_ansi, strip);
+            assert!(!params.links);
             assert_eq!(params.intent, crate::api::schema::ReadIntent::Interactive);
         }
+    }
+
+    #[test]
+    fn pane_read_links_asks_for_ansi() {
+        for values in [
+            vec!["issue-1", "--links"],
+            vec!["issue-1", "--format=text", "--links"],
+            vec!["issue-1", "--links", "--ansi", "--source", "visible"],
+        ] {
+            let Method::PaneRead(params) = request("read", &values).unwrap().method else {
+                panic!()
+            };
+            assert!(params.links, "{values:?}");
+            assert_eq!(params.format, ReadFormat::Ansi, "{values:?}");
+        }
+        let request = serde_json::to_value(request("read", &["issue-1"]).unwrap()).unwrap();
+        assert!(request["params"].get("links").is_none(), "{request}");
     }
 
     #[test]

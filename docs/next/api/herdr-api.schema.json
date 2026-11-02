@@ -3652,6 +3652,10 @@
                 "null"
               ]
             },
+            "links": {
+              "description": "With `format: ansi`: wrap each hyperlinked run in OSC 8. The `detection`\nsource has no links. Servers advertise the `pane_read_links` capability.",
+              "type": "boolean"
+            },
             "pane_id": {
               "type": "string"
             },
@@ -12695,6 +12699,11 @@
               "type": "boolean"
             },
             "live_handoff": {
+              "type": "boolean"
+            },
+            "pane_read_links": {
+              "default": false,
+              "description": "`pane.read` keeps hyperlinks as OSC 8 in ANSI output when asked (`links`).",
               "type": "boolean"
             },
             "pane_restore_command": {

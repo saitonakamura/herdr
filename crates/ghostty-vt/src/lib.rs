@@ -1623,6 +1623,35 @@ impl Terminal {
         )
     }
 
+    /// [`Self::read_ansi_viewport`] with each hyperlinked run wrapped in OSC 8.
+    pub fn read_ansi_viewport_with_links(
+        &self,
+        start: (u16, u32),
+        end: (u16, u32),
+    ) -> Result<String, Error> {
+        self.read_formatted_selection_with_links(
+            ghostty_viewport_point(start.0, start.1),
+            ghostty_viewport_point(end.0, end.1),
+            false,
+            true,
+        )
+    }
+
+    /// [`Self::read_ansi_screen`] with each hyperlinked run wrapped in OSC 8.
+    pub fn read_ansi_screen_with_links(
+        &self,
+        start: (u16, u32),
+        end: (u16, u32),
+        unwrap: bool,
+    ) -> Result<String, Error> {
+        self.read_formatted_selection_with_links(
+            ghostty_screen_point(start.0, start.1),
+            ghostty_screen_point(end.0, end.1),
+            unwrap,
+            true,
+        )
+    }
+
     fn read_formatted_selection(
         &self,
         start: ffi::GhosttyPoint,
@@ -1632,6 +1661,27 @@ impl Terminal {
         unwrap: bool,
         trim: bool,
     ) -> Result<String, Error> {
+        let selection = self.selection_between(start, end, rectangle)?;
+        self.format_selection(&selection, format, unwrap, trim)
+    }
+
+    fn read_formatted_selection_with_links(
+        &self,
+        start: ffi::GhosttyPoint,
+        end: ffi::GhosttyPoint,
+        unwrap: bool,
+        trim: bool,
+    ) -> Result<String, Error> {
+        let selection = self.selection_between(start, end, false)?;
+        self.format_selection_with(&selection, FormatterFormat::Vt, unwrap, trim, true)
+    }
+
+    fn selection_between(
+        &self,
+        start: ffi::GhosttyPoint,
+        end: ffi::GhosttyPoint,
+        rectangle: bool,
+    ) -> Result<ffi::GhosttySelection, Error> {
         let mut start_ref = ffi::GhosttyGridRef {
             size: mem::size_of::<ffi::GhosttyGridRef>(),
             ..Default::default()
@@ -1645,13 +1695,12 @@ impl Terminal {
             ffi::ghostty_terminal_grid_ref(self.raw, end, &mut end_ref).into_result()?;
         }
 
-        let selection = ffi::GhosttySelection {
+        Ok(ffi::GhosttySelection {
             size: mem::size_of::<ffi::GhosttySelection>(),
             start: start_ref,
             end: end_ref,
             rectangle,
-        };
-        self.format_selection(&selection, format, unwrap, trim)
+        })
     }
 
     fn format_selection(
@@ -1660,6 +1709,17 @@ impl Terminal {
         format: FormatterFormat,
         unwrap: bool,
         trim: bool,
+    ) -> Result<String, Error> {
+        self.format_selection_with(selection, format, unwrap, trim, false)
+    }
+
+    fn format_selection_with(
+        &self,
+        selection: &ffi::GhosttySelection,
+        format: FormatterFormat,
+        unwrap: bool,
+        trim: bool,
+        hyperlinks: bool,
     ) -> Result<String, Error> {
         let mut formatter: ffi::GhosttyFormatter = ptr::null_mut();
         let options = ffi::GhosttyFormatterTerminalOptions {
@@ -1676,6 +1736,7 @@ impl Terminal {
                 ..Default::default()
             },
             selection,
+            hyperlinks,
         };
         unsafe {
             ffi::ghostty_formatter_terminal_new(ptr::null(), &mut formatter, self.raw, options)

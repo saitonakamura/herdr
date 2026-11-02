@@ -88,6 +88,7 @@ fn default_capabilities() -> Option<ServerCapabilities> {
             .map(|kind| (*kind).to_owned())
             .collect(),
         wait_readers: true,
+        pane_read_links: true,
     })
 }
 
@@ -1430,6 +1431,7 @@ mod tests {
                 agent_waits: false,
                 wait_sources: Vec::new(),
                 wait_readers: false,
+                pane_read_links: false,
             }),
             None,
             None,

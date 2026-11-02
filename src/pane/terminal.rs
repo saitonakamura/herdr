@@ -178,6 +178,15 @@ pub(crate) struct TerminalReadSnapshot {
     pub truncated: bool,
 }
 
+/// An ANSI read that keeps hyperlinks as OSC 8. Only `pane.read` asks for one, on request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LinkedAnsiRead {
+    Visible,
+    Recent(usize),
+    RecentUnwrapped(usize),
+    Screen(Option<usize>),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TerminalCompressionStep {
     Busy,
@@ -546,6 +555,10 @@ impl PaneTerminal {
 
     pub(crate) fn recent_unwrapped_ansi_snapshot(&self, lines: usize) -> TerminalReadSnapshot {
         self.ghostty.recent_unwrapped_ansi_snapshot(lines)
+    }
+
+    pub(crate) fn linked_ansi_snapshot(&self, read: LinkedAnsiRead) -> TerminalReadSnapshot {
+        self.ghostty.linked_ansi_snapshot(read)
     }
 
     pub fn extract_selection(&self, selection: &crate::selection::Selection) -> Option<String> {
@@ -2291,6 +2304,14 @@ impl GhosttyPaneTerminal {
             .unwrap_or_default()
     }
 
+    pub(crate) fn linked_ansi_snapshot(&self, read: LinkedAnsiRead) -> TerminalReadSnapshot {
+        self.core
+            .lock()
+            .ok()
+            .and_then(|mut core| ghostty_linked_ansi_snapshot(&mut core, read).ok())
+            .unwrap_or_default()
+    }
+
     pub(crate) fn link_regions_at(
         &self,
         col: u16,
@@ -2996,7 +3017,7 @@ fn ghostty_screen_snapshot(
             ghostty_anchored_text_for_terminal(&core.terminal, lines, true)?
         }
         crate::api::schema::ReadFormat::Ansi => {
-            ghostty_anchored_ansi_for_terminal(&core.terminal, lines, false, true)?
+            ghostty_anchored_ansi_for_terminal(&core.terminal, lines, false, true, false)?
         }
     };
     let snapshot = finish_recent_snapshot(core, text, lines, false);
@@ -3075,7 +3096,46 @@ fn ghostty_recent_ansi_for_terminal(
     lines: usize,
     unwrap: bool,
 ) -> Result<String, crate::ghostty::Error> {
-    ghostty_anchored_ansi_for_terminal(terminal, lines, unwrap, false)
+    ghostty_anchored_ansi_for_terminal(terminal, lines, unwrap, false, false)
+}
+
+fn ghostty_linked_ansi_snapshot(
+    core: &mut GhosttyPaneCore,
+    read: LinkedAnsiRead,
+) -> Result<TerminalReadSnapshot, crate::ghostty::Error> {
+    let (lines, unwrap, screen_only) = match read {
+        LinkedAnsiRead::Visible => {
+            let rows = core.terminal.rows()?;
+            let cols = core.terminal.cols()?;
+            if rows == 0 || cols == 0 {
+                return Ok(TerminalReadSnapshot::default());
+            }
+            let text = core.terminal.read_ansi_viewport_with_links(
+                (0, 0),
+                (cols.saturating_sub(1), u32::from(rows.saturating_sub(1))),
+            )?;
+            return Ok(TerminalReadSnapshot {
+                text,
+                truncated: false,
+            });
+        }
+        LinkedAnsiRead::Recent(lines) => (lines, false, false),
+        LinkedAnsiRead::RecentUnwrapped(lines) => (lines, true, false),
+        LinkedAnsiRead::Screen(lines) => {
+            let rows = usize::from(core.terminal.rows()?);
+            let lines = lines.map_or(rows, |lines| lines.min(rows));
+            let text =
+                ghostty_anchored_ansi_for_terminal(&core.terminal, lines, false, true, true)?;
+            let snapshot = finish_recent_snapshot(core, text, lines, false);
+            return Ok(TerminalReadSnapshot {
+                truncated: lines < rows,
+                ..snapshot
+            });
+        }
+    };
+    let text =
+        ghostty_anchored_ansi_for_terminal(&core.terminal, lines, unwrap, screen_only, true)?;
+    Ok(finish_recent_snapshot(core, text, lines, unwrap))
 }
 
 fn ghostty_anchored_ansi_for_terminal(
@@ -3083,17 +3143,17 @@ fn ghostty_anchored_ansi_for_terminal(
     lines: usize,
     unwrap: bool,
     screen_only: bool,
+    links: bool,
 ) -> Result<String, crate::ghostty::Error> {
     let Some((start, end, cols)) = ghostty_anchored_read_range(terminal, lines, screen_only)?
     else {
         return Ok(String::new());
     };
-    terminal.read_ansi_screen(
-        (0, start as u32),
-        (cols.saturating_sub(1), end as u32),
-        false,
-        unwrap,
-    )
+    let (start, end) = ((0, start as u32), (cols.saturating_sub(1), end as u32));
+    if links {
+        return terminal.read_ansi_screen_with_links(start, end, unwrap);
+    }
+    terminal.read_ansi_screen(start, end, false, unwrap)
 }
 
 /// Rows ending at the live screen's last content row; with `screen_only`, never above the
@@ -6055,6 +6115,72 @@ mod tests {
 
         assert_eq!(pane.recent_text(3), "ABCDE\nFGHIJ\n");
         assert_eq!(pane.recent_unwrapped_text(3), "ABCDEFGHIJ");
+    }
+
+    const LINK_OPEN: &str = "\x1b]8;;https://example.com/a\x1b\\";
+    const LINK_CLOSE: &str = "\x1b]8;;\x1b\\";
+
+    fn linked_pane(cols: u16, bytes: &[u8]) -> GhosttyPaneTerminal {
+        let (tx, _rx) = mpsc::channel(4);
+        let mut terminal = crate::ghostty::Terminal::new(cols, 4, 100).unwrap();
+        terminal.write(bytes);
+        GhosttyPaneTerminal::new(terminal, tx).unwrap()
+    }
+
+    #[test]
+    fn linked_ansi_reads_wrap_a_styled_link_once_and_plain_reads_drop_it() {
+        let pane = linked_pane(
+            40,
+            b"see \x1b]8;;https://example.com/a\x1b\\\x1b[1mbold\x1b[22m tail\x1b]8;;\x1b\\ after",
+        );
+
+        for read in [
+            LinkedAnsiRead::Visible,
+            LinkedAnsiRead::Recent(4),
+            LinkedAnsiRead::RecentUnwrapped(4),
+            LinkedAnsiRead::Screen(None),
+        ] {
+            let text = pane.linked_ansi_snapshot(read).text;
+            assert_eq!(text.matches(LINK_OPEN).count(), 1, "{read:?}: {text:?}");
+            assert_eq!(text.matches(LINK_CLOSE).count(), 1, "{read:?}: {text:?}");
+            let open = text.find(LINK_OPEN).unwrap();
+            let close = text.find(LINK_CLOSE).unwrap();
+            assert!(text[open..close].contains("bold"), "{read:?}: {text:?}");
+            assert!(text[open..close].contains("tail"), "{read:?}: {text:?}");
+            assert!(text[close..].contains("after"), "{read:?}: {text:?}");
+            assert!(!text[..open].contains("bold"), "{read:?}: {text:?}");
+        }
+
+        assert!(!pane.visible_ansi().contains("\x1b]8;"));
+        assert!(!pane.recent_ansi(4).contains("\x1b]8;"));
+        assert!(!pane.recent_unwrapped_ansi(4).contains("\x1b]8;"));
+        let screen = pane.screen_snapshot(None, crate::api::schema::ReadFormat::Ansi);
+        assert!(!screen.text.contains("\x1b]8;"));
+    }
+
+    #[test]
+    fn linked_ansi_reads_keep_a_soft_wrapped_link_whole() {
+        let pane = linked_pane(
+            8,
+            b"\x1b]8;;https://example.com/a\x1b\\ABCDEFGHIJKL\x1b]8;;\x1b\\ z",
+        );
+
+        let unwrapped = pane
+            .linked_ansi_snapshot(LinkedAnsiRead::RecentUnwrapped(4))
+            .text;
+        assert!(
+            unwrapped.contains(&format!("{LINK_OPEN}ABCDEFGHIJKL{LINK_CLOSE}")),
+            "{unwrapped:?}"
+        );
+
+        let wrapped = pane.linked_ansi_snapshot(LinkedAnsiRead::Recent(4)).text;
+        assert_eq!(wrapped.matches(LINK_OPEN).count(), 1, "{wrapped:?}");
+        assert_eq!(wrapped.matches(LINK_CLOSE).count(), 1, "{wrapped:?}");
+        let link = &wrapped[wrapped.find(LINK_OPEN).unwrap()..wrapped.find(LINK_CLOSE).unwrap()];
+        assert!(
+            link.contains("ABCDEFGH") && link.contains("IJKL"),
+            "{wrapped:?}"
+        );
     }
 
     #[test]

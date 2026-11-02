@@ -21,6 +21,8 @@ Source: `plugin_updates_preserve_running_consumers_and_failed_activation` in `te
 - **Production.** Check whether a real server that dies uncleanly orphans plugin actions the same way. Status commands get their own process group and a kill guard (`StatusCommandGuard`, `src/platform/unix_common.rs`). Check whether plugin actions get the same.
 - The test is upstream code. Fix it here, fork-only, kept small so upstream merges stay cheap (FORK.md).
 
+- **Handoff servers leak too.** Seen 2026-11-02: six debug `herdr server --handoff-import /tmp/hlh-*/config/herdr-dev/herdr-handoff-*.sock` processes, two each from the `028-gate-probe`, `loom-100-sources-run` and `041-spaces-repo-token-check` worktrees, still running 1.5–3 hours after their `just check` runs (one worktree already deleted). These are the import side of a handoff test, which the harness doesn't track as a spawned pid, so the teardown fix should reap them as well.
+
 ## Parent
 
 [000-map](./000-map.md)

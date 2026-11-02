@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-restore-settled-status
 title: Save each pane's settled agent status, and restore a cut-off turn as blocked (interrupted)
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee: saitonakamura
-claimed_by:
+claimed_by: macos/w1:p1J/5051dabc-eb59-497c-b5ec-4af8a0564c40
 ---
 
 ## Question

@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-pane-read-osc8
 title: Keep OSC 8 links in pane read
-status: in-progress
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee: saitonakamura
-claimed_by: macos/w1:p1H/4897df87-d87a-4835-9984-045f1456ef42
+claimed_by:
 ---
 
 ## Question
@@ -32,7 +32,7 @@ Decide between them:
 
 ## Resolution
 
-Draft, until [saitonakamura/herdr#46](https://github.com/saitonakamura/herdr/pull/46) merges.
+Merged 2026-11-02: [saitonakamura/herdr#46](https://github.com/saitonakamura/herdr/pull/46) as `5406ac7c`, with dotfiles `herdr-fork/040-pane-read-osc8` (`ce93692`).
 
 **A, behind an opt-in flag.** `herdr pane read --links` (API `pane.read` with
 `format: "ansi"`, `links: true`) wraps each hyperlinked run in one OSC 8 open and

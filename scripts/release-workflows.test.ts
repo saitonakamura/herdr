@@ -10,6 +10,18 @@ const release = load("release");
 const adminGate = release.jobs["validate-release-source"].steps[0];
 
 describe("fork tool assets", () => {
+  test("includes every workspace member in Nix build sources", () => {
+    const manifest = readFileSync(new URL("../Cargo.toml", import.meta.url), "utf8");
+    const memberList = manifest.match(/^members\s*=\s*\[([^\]]+)\]/m)?.[1];
+    expect(memberList).toBeDefined();
+    const members = [...memberList!.matchAll(/"([^"]+)"/g)].map((match) => match[1]);
+    const nix = readFileSync(new URL("../nix/package.nix", import.meta.url), "utf8");
+    const included = [...nix.matchAll(/^\s+\.\.\/([\w./-]+)\s*$/gm)].map((match) => match[1]);
+    for (const member of members) {
+      expect(included.some((path) => member === path || member.startsWith(`${path}/`))).toBe(true);
+    }
+  });
+
   test("ships loom beside herdr on all Unix targets, with checksums", () => {
     const fork = load("fork-release");
     const targets = fork.jobs.build.strategy.matrix.include;

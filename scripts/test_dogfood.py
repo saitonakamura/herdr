@@ -9,6 +9,7 @@ import unittest
 SCRIPT = Path(__file__).with_name("dogfood.sh")
 
 
+@unittest.skipIf(os.name == "nt", "dogfood installs Unix fork binaries only")
 class DogfoodTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="herdr-dogfood-test-")

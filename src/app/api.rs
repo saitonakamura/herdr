@@ -735,6 +735,13 @@ impl App {
             self.published_done_panes.remove(&update.pane_id);
         }
 
+        // The saved status follows the live one, without pushing back a save already due.
+        if (previous_agent_status != agent_status
+            || update.previous_presentation.blocked_reason != update.presentation.blocked_reason)
+            && self.session_save_deadline.is_none()
+        {
+            self.schedule_session_save();
+        }
         if previous_agent_status != agent_status
             || update.previous_presentation != update.presentation
         {

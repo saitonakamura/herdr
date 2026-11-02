@@ -1000,6 +1000,12 @@ fn validate_blocked_reason(
             rule.id
         ));
     }
+    if rule.blocked_reason == Some(BlockedReason::Interrupted) {
+        return Err(format!(
+            "rule {} uses blocked_reason = \"interrupted\", which only a restore sets",
+            rule.id
+        ));
+    }
     if min_engine_version.is_some_and(|version| version < BLOCKED_REASON_ENGINE_VERSION) {
         return Err(format!(
             "rule {} uses blocked_reason but min_engine_version is below {}",

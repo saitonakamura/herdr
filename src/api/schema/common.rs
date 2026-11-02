@@ -277,6 +277,8 @@ pub enum AgentBlockedReason {
     Question,
     Permission,
     Form,
+    // A turn a restart cut off; the user decides whether it continues.
+    Interrupted,
 }
 
 impl From<crate::detect::BlockedReason> for AgentBlockedReason {
@@ -285,6 +287,7 @@ impl From<crate::detect::BlockedReason> for AgentBlockedReason {
             crate::detect::BlockedReason::Question => Self::Question,
             crate::detect::BlockedReason::Permission => Self::Permission,
             crate::detect::BlockedReason::Form => Self::Form,
+            crate::detect::BlockedReason::Interrupted => Self::Interrupted,
         }
     }
 }
@@ -295,6 +298,7 @@ impl From<AgentBlockedReason> for crate::detect::BlockedReason {
             AgentBlockedReason::Question => Self::Question,
             AgentBlockedReason::Permission => Self::Permission,
             AgentBlockedReason::Form => Self::Form,
+            AgentBlockedReason::Interrupted => Self::Interrupted,
         }
     }
 }

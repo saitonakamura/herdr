@@ -44,7 +44,8 @@
           "enum": [
             "question",
             "permission",
-            "form"
+            "form",
+            "interrupted"
           ],
           "type": "string"
         },
@@ -1867,7 +1868,8 @@
           "enum": [
             "question",
             "permission",
-            "form"
+            "form",
+            "interrupted"
           ],
           "type": "string"
         },
@@ -7898,7 +7900,8 @@
           "enum": [
             "question",
             "permission",
-            "form"
+            "form",
+            "interrupted"
           ],
           "type": "string"
         },
@@ -8132,7 +8135,8 @@
           "enum": [
             "question",
             "permission",
-            "form"
+            "form",
+            "interrupted"
           ],
           "type": "string"
         },

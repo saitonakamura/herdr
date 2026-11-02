@@ -40,6 +40,8 @@ pub enum BlockedReason {
     Permission,
     /// A form or selection dialog to fill in.
     Form,
+    /// A turn a restart cut off; the user decides whether it continues. Only a restore sets it.
+    Interrupted,
 }
 
 /// Screen-derived agent state plus confidence metadata used for source arbitration.

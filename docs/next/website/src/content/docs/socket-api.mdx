@@ -687,7 +687,8 @@ waits on: `question` (asked in prose, answered in the composer), `permission`
 (a tool permission dialog) or `form` (a form or selection dialog). Agent and
 pane info and `pane.agent_status_changed` events carry it as `blocked_reason`
 while the agent is blocked for that reason; a blocked agent without one omits
-it. With `"state": "working"`, `"background": true` says the turn ended while
+it. They can also carry `interrupted`, which only a server restart sets, for a
+turn the restart cut off. With `"state": "working"`, `"background": true` says the turn ended while
 work the agent started still runs.
 
 Session-only official integrations report native session references with `pane.report_agent_session`. State-reporting integrations can still include native session references in `pane.report_agent`. State-independent session reports do not affect waits, notifications, or rollups.

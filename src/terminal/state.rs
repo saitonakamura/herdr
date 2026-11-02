@@ -57,6 +57,14 @@ pub struct HookReportDetail {
     pub background: bool,
 }
 
+/// A settled status saved before a restart, standing until the agent shows it left its prompt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RestoredAgentStatus {
+    Blocked(Option<BlockedReason>),
+    /// Saved awaiting: a live declared wait keeps it awaiting, otherwise the restart cut it off.
+    Awaiting,
+}
+
 #[cfg(unix)]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct HandoffAgentState {
@@ -217,6 +225,8 @@ pub struct TerminalState {
     pub repo: Option<crate::workspace::PaneRepo>,
     /// The agent has a live declared wait, so an idle turn reads as awaiting; derived from the wait store.
     declared_wait: bool,
+    /// The status saved before a restart; it wins until a real event replaces it.
+    restored_status: Option<RestoredAgentStatus>,
 }
 
 impl TerminalState {
@@ -272,7 +282,51 @@ impl TerminalState {
             restore_error: None,
             repo: None,
             declared_wait: false,
+            restored_status: None,
         }
+    }
+
+    pub(crate) fn restored_agent_status(&self) -> Option<RestoredAgentStatus> {
+        self.restored_status
+    }
+
+    /// Takes up the status a restarted pane's agent had settled in before the restart.
+    pub(crate) fn restore_agent_status(&mut self, status: RestoredAgentStatus, now: Instant) {
+        let previous_agent_label = self.effective_agent_label().map(str::to_string);
+        let previous_known_agent = self.effective_known_agent();
+        let previous_state = self.state;
+        let previous_presentation = self.effective_presentation_for_state_at(previous_state, now);
+        self.restored_status = Some(status);
+        self.recompute_effective_state(
+            previous_agent_label,
+            previous_known_agent,
+            previous_state,
+            previous_presentation,
+            now,
+        );
+    }
+
+    /// Drops a restored status, for an event the terminal cannot see itself: the user typing.
+    pub(crate) fn clear_restored_agent_status(
+        &mut self,
+        now: Instant,
+    ) -> Option<TerminalStateMutation> {
+        self.restored_status?;
+        let previous_agent_label = self.effective_agent_label().map(str::to_string);
+        let previous_known_agent = self.effective_known_agent();
+        let previous_state = self.state;
+        let previous_presentation = self.effective_presentation_for_state_at(previous_state, now);
+        self.restored_status = None;
+        Some(TerminalStateMutation {
+            effective_state_change: self.recompute_effective_state(
+                previous_agent_label,
+                previous_known_agent,
+                previous_state,
+                previous_presentation,
+                now,
+            ),
+            ..TerminalStateMutation::default()
+        })
     }
 
     pub(crate) fn declared_wait(&self) -> bool {
@@ -293,6 +347,9 @@ impl TerminalState {
         let previous_state = self.state;
         let previous_presentation = self.effective_presentation_for_state_at(previous_state, now);
         self.declared_wait = declared;
+        if declared && self.restored_status == Some(RestoredAgentStatus::Awaiting) {
+            self.restored_status = None;
+        }
         Some(TerminalStateMutation {
             effective_state_change: self.recompute_effective_state(
                 previous_agent_label,
@@ -580,6 +637,10 @@ impl TerminalState {
                 },
                 agent,
             );
+        }
+        // The agent left its prompt, or left the pane: what was saved no longer stands.
+        if process_exited || matches!(fallback_state, AgentState::Working | AgentState::Blocked) {
+            self.restored_status = None;
         }
         self.fallback_state = fallback_state;
         self.fallback_visible_blocker = visible_blocker && fallback_state == AgentState::Blocked;
@@ -969,6 +1030,10 @@ impl TerminalState {
         }
         self.persisted_agent_session = None;
         self.hook_dialog_seen = false;
+        // A resumed agent reports idle at its prompt, which a restored status already refines.
+        if state != AgentState::Idle {
+            self.restored_status = None;
+        }
         self.hook_authority = Some(HookAuthority {
             source,
             agent_label,
@@ -1983,6 +2048,7 @@ impl TerminalState {
         self.suppress_current_full_lifecycle_hook_authority(
             FullLifecycleHookSuppressionReason::HookClear,
         );
+        self.restored_status = None;
         if let Some(authority) = self.hook_authority.take() {
             self.forget_reported_resume_of(&authority.source, &authority.agent_label);
         }
@@ -2295,6 +2361,13 @@ impl TerminalState {
         &self,
         now: Instant,
     ) -> (AgentState, Option<BlockedReason>) {
+        match self.restored_status {
+            Some(RestoredAgentStatus::Blocked(reason)) => return (AgentState::Blocked, reason),
+            Some(RestoredAgentStatus::Awaiting) => {
+                return (AgentState::Blocked, Some(BlockedReason::Interrupted))
+            }
+            None => {}
+        }
         match self.reported_effective_state_and_blocked_reason(now) {
             (AgentState::Idle, reason) if self.declared_wait => (AgentState::Awaiting, reason),
             reported => reported,
@@ -2620,6 +2693,7 @@ impl TerminalState {
         self.recent_agent_process_exit = None;
         self.agent_process_acquisition_pending = false;
         self.pending_agent_resume_plan = None;
+        self.restored_status = None;
         self.clear_agent_name();
     }
 
@@ -6583,6 +6657,131 @@ mod tests {
                 .map(|session| session.session_ref.value.as_str()),
             Some("claude-session")
         );
+    }
+
+    fn restored_claude_terminal(status: RestoredAgentStatus) -> TerminalState {
+        let mut terminal = test_terminal();
+        terminal.set_detected_state(Some(Agent::Claude), AgentState::Idle);
+        terminal.restore_agent_status(status, Instant::now());
+        terminal
+    }
+
+    fn report_claude(terminal: &mut TerminalState, state: AgentState, seq: u64) {
+        terminal.set_detailed_hook_authority_at(
+            "herdr:claude".into(),
+            "claude".into(),
+            state,
+            HookReportDetail::default(),
+            None,
+            crate::agent_resume::AgentSessionRef::id("claude-session"),
+            Some(seq),
+            Instant::now(),
+        );
+    }
+
+    #[test]
+    fn a_restored_status_survives_the_resumed_agents_idle_report() {
+        for (restored, expected) in [
+            (
+                RestoredAgentStatus::Blocked(Some(BlockedReason::Question)),
+                BlockedReason::Question,
+            ),
+            (
+                RestoredAgentStatus::Blocked(Some(BlockedReason::Interrupted)),
+                BlockedReason::Interrupted,
+            ),
+            (RestoredAgentStatus::Awaiting, BlockedReason::Interrupted),
+        ] {
+            let mut terminal = restored_claude_terminal(restored);
+            assert_eq!(terminal.state, AgentState::Blocked, "{restored:?}");
+            assert_eq!(terminal.blocked_reason(), Some(expected), "{restored:?}");
+
+            // A resumed session starts at its prompt, which says nothing new.
+            report_claude(&mut terminal, AgentState::Idle, 1);
+
+            assert_eq!(terminal.state, AgentState::Blocked, "{restored:?}");
+            assert_eq!(terminal.blocked_reason(), Some(expected), "{restored:?}");
+        }
+    }
+
+    #[test]
+    fn a_turn_starting_replaces_a_restored_status() {
+        let mut terminal =
+            restored_claude_terminal(RestoredAgentStatus::Blocked(Some(BlockedReason::Question)));
+        report_claude(&mut terminal, AgentState::Idle, 1);
+
+        report_claude(&mut terminal, AgentState::Working, 2);
+
+        assert_eq!(terminal.state, AgentState::Working);
+        assert_eq!(terminal.restored_agent_status(), None);
+        report_claude(&mut terminal, AgentState::Idle, 3);
+        assert_eq!(terminal.state, AgentState::Idle);
+    }
+
+    #[test]
+    fn clearing_a_restored_status_falls_back_to_what_was_reported() {
+        let mut terminal = restored_claude_terminal(RestoredAgentStatus::Blocked(Some(
+            BlockedReason::Interrupted,
+        )));
+        report_claude(&mut terminal, AgentState::Idle, 1);
+
+        let mutation = terminal
+            .clear_restored_agent_status(Instant::now())
+            .expect("clearing changes the state");
+
+        let change = mutation.effective_state_change.expect("state changed");
+        assert_eq!(change.previous_state, AgentState::Blocked);
+        assert_eq!(change.state, AgentState::Idle);
+        assert_eq!(terminal.blocked_reason(), None);
+        assert!(terminal
+            .clear_restored_agent_status(Instant::now())
+            .is_none());
+    }
+
+    #[test]
+    fn a_fresh_screen_match_replaces_a_restored_status_but_an_idle_one_does_not() {
+        let mut terminal =
+            restored_claude_terminal(RestoredAgentStatus::Blocked(Some(BlockedReason::Question)));
+        terminal.set_detected_state(Some(Agent::Claude), AgentState::Idle);
+        assert_eq!(terminal.blocked_reason(), Some(BlockedReason::Question));
+
+        terminal.set_detected_state(Some(Agent::Claude), AgentState::Working);
+
+        assert_eq!(terminal.state, AgentState::Working);
+        assert_eq!(terminal.restored_agent_status(), None);
+    }
+
+    #[test]
+    fn the_agent_exiting_drops_a_restored_status() {
+        let mut terminal =
+            restored_claude_terminal(RestoredAgentStatus::Blocked(Some(BlockedReason::Question)));
+
+        terminal.set_detected_state_with_screen_signals_at(
+            Some(Agent::Claude),
+            AgentState::Idle,
+            false,
+            false,
+            false,
+            true,
+            Instant::now(),
+        );
+
+        assert_eq!(terminal.restored_agent_status(), None);
+        assert_ne!(terminal.state, AgentState::Blocked);
+    }
+
+    #[test]
+    fn a_live_wait_keeps_a_restored_awaiting_pane_awaiting() {
+        let mut terminal = restored_claude_terminal(RestoredAgentStatus::Awaiting);
+        report_claude(&mut terminal, AgentState::Idle, 1);
+
+        terminal.set_declared_wait(true, Instant::now());
+
+        assert_eq!(terminal.state, AgentState::Awaiting);
+        assert_eq!(terminal.restored_agent_status(), None);
+        // The wait ending later is an ordinary idle, not an interrupted turn.
+        terminal.set_declared_wait(false, Instant::now());
+        assert_eq!(terminal.state, AgentState::Idle);
     }
 
     #[test]

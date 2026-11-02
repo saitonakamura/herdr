@@ -221,7 +221,11 @@ impl App {
         };
         let blocked_on_question = if terminal.state == crate::detect::AgentState::Blocked {
             match terminal.blocked_reason() {
-                Some(crate::detect::BlockedReason::Question) => true,
+                // A cut-off turn sits at its composer; prompting it is the caller deciding to go on.
+                Some(
+                    crate::detect::BlockedReason::Question
+                    | crate::detect::BlockedReason::Interrupted,
+                ) => true,
                 Some(crate::detect::BlockedReason::Permission) => {
                     return Err(encode_error(
                         id,

@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-test-plugin-process-leak
 title: Test harness leaks plugin processes
-status: in-progress
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee: saitonakamura
-claimed_by: macos/w1:p1N/ab3a1583-d381-4077-be25-464f623a16da
+claimed_by: macos/ab3a1583-d381-4077-be25-464f623a16da
 ---
 
 ## Question
@@ -29,3 +29,39 @@ Source: `plugin_updates_preserve_running_consumers_and_failed_activation` in `te
 [000-map](./000-map.md)
 
 ## Resolution
+
+Fixed in [PR #49](https://github.com/saitonakamura/herdr/pull/49), merge commit `6cf5523a`
+(change `be94a58b test: reap every process a test server leaves behind, on macos too`), 2026-11-03. Tests only.
+
+- **Root cause.** The harness's process scan read `/proc` only, so on macOS teardown
+  found nothing and reaped nothing beyond the server pid it SIGKILLed. Two leaks
+  followed, both reproduced on the primary mac with the old harness: a forced
+  live_handoff failure left `herdr server --handoff-import /tmp/hlh-…` under launchd,
+  and the `example.live` update test, which fails naturally on macOS after `read.sh`
+  starts, left `sh ./read.sh action` under launchd with cwd in `/private/tmp/hcli-…`.
+- **Teardown, once, in the shared harness.** New `tests/support/processes.rs` gives
+  every pid's exe, argv and environment on Linux (`/proc`) and macOS
+  (`proc_listallpids`, `proc_pidpath`, `KERN_PROCARGS2`). `cleanup_test_base` and
+  `cleanup_registered_herdr_pids` now stop the servers first, then SIGTERM, and
+  after 400 ms SIGKILL, every process whose `XDG_RUNTIME_DIR` or `HERDR_SOCKET_PATH`
+  points into a test's runtime dir: plugin actions, hooks and orphaned handoff imports.
+  The worktree-server scan uses the same table, so it works on macOS too.
+- **The example loop.** `read.sh` exits when its plugin root is gone or after 600
+  iterations (30 s); the `example.race` build loop got the same bound. No other
+  `while … sleep` plugin scripts in `tests/`.
+- **Verified** on the primary mac. After the forced handoff failure, the natural and
+  forced plugin failures and a full `cargo nextest run --no-fail-fast` (4264/4267,
+  the three known local failures), `pgrep -fl` showed nothing left behind. CI was green
+  on all five jobs, macOS included. Untested under host pi's seatbelt, where `sysctl`
+  on other pids may be denied (see [056](./056-live-handoff-pgrep.md)).
+- **Killed by hand.** 14642, 14905, 65910 and 66144 were handoff imports from the
+  `028-gate-probe` worktree binary, orphaned about 1.5 h. 14656 (a handoff import)
+  and 23462 (`sh ./read.sh action`) came from my own baseline runs. Every one was a
+  `herdr-worktrees/*/target/` binary or had cwd in a test temp dir.
+- **Production.** Plugin actions and hooks have no process group, guard or timeout
+  and outlive both clean and unclean server exits; a silent one runs forever. Not a
+  small fix, filed as [054](./054-plugin-actions-outlive-server.md).
+- **Aside.** `tests/cli.rs` is compiled out on macOS
+  (`#![cfg(all(unix, not(target_os = "macos")))]`) and macOS CI excludes
+  `binary(live_handoff)`, so macOS CI never runs the plugin or handoff tests. The leak
+  reproduced only in local runs with the gate lifted.

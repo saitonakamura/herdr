@@ -102,6 +102,8 @@ pub struct MessageInfo {
     pub to_agent_id: String,
     #[serde(default)]
     pub summary: String,
+    #[serde(default)]
+    pub sent_at_ms: Option<u64>,
 }
 
 // Readers tolerate values a newer server adds: they decode as `Unknown`.

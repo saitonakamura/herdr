@@ -870,7 +870,7 @@ mod tests {
         assert_eq!(text[4], "  permission");
         assert!(text[5].starts_with(" ✓cockpit dogfood"), "{text:?}");
         assert_eq!(text[6], "  merge it");
-        assert!(text[7].starts_with(" ○alpha-one • dogfood"), "{text:?}");
+        assert!(text[7].starts_with(" ○alpha-one ✓ dogfood"), "{text:?}");
         assert_eq!(text[8], "  done: shipped the parser");
         // a dead gap, then the trees as before
         assert_eq!(text[9], "");
@@ -915,11 +915,11 @@ mod tests {
     }
 
     #[test]
-    fn quiet_rows_carry_a_dim_dot_coloured_by_report_kind() {
+    fn quiet_rows_carry_a_dim_mark_per_report_kind() {
         let lines = render_attention(40, &Extras::default());
         for key in ["attention:w1:p5", "pane:w1:p5"] {
             let line = lines.iter().find(|l| l.key == key).unwrap();
-            let dot = span_with(line, "•");
+            let dot = span_with(line, "✓");
             assert_eq!(dot.style.fg, Some(Color::Cyan), "{key}");
             assert!(dot.style.add_modifier.contains(Modifier::DIM), "{key}");
         }
@@ -928,10 +928,13 @@ mod tests {
             .find(|l| l.key == "pane:w1:p5")
             .unwrap()
             .text()
-            .contains("alpha-one •"));
-        // no dot on the loud row, though its report is unread too
+            .contains("alpha-one ✓"));
+        // no mark on the loud row, though its report is unread too
         let alpha = lines.iter().find(|l| l.key == "attention:w1:p3").unwrap();
-        assert!(!alpha.text().contains('•'));
+        assert!(!alpha
+            .spans
+            .iter()
+            .any(|s| s.style.add_modifier.contains(Modifier::DIM)));
     }
 
     #[test]
@@ -946,8 +949,8 @@ mod tests {
                 .text()
         };
         assert!(row(30).ends_with("5s"));
-        assert_eq!(row(22), " ○alpha-one • dogfood");
-        assert_eq!(row(16), " ○alpha-one •");
+        assert_eq!(row(22), " ○alpha-one ✓ dogfood");
+        assert_eq!(row(16), " ○alpha-one ✓");
         assert_eq!(row(9), "○alpha-on");
         assert!(render_attention(9, &extras)
             .iter()

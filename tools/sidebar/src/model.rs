@@ -43,6 +43,8 @@ pub struct Extras {
     pub dimmed: HashSet<String>,
     /// The first line of each agent's latest report, by agent id, for agents with an unread report.
     pub reports: HashMap<String, String>,
+    /// Seconds since each agent's latest report was sent, by agent id, for agents with an unread report.
+    pub report_ages: HashMap<String, u64>,
 }
 
 /// How strongly a row asks for the user (052). Ordered as the attention section sorts.
@@ -103,6 +105,15 @@ fn blocked_word(reason: Option<BlockedReason>) -> &'static str {
     }
 }
 
+/// A quiet row has waited since its report was sent, which outlives a sidebar restart;
+/// a wanted row keeps the sidebar's own clock.
+fn quiet_age(pane: &PaneInfo, extras: &Extras) -> Option<u64> {
+    if is_wanted(pane) || unread_kind(pane).is_none() {
+        return None;
+    }
+    extras.report_ages.get(pane.agent_id.as_ref()?).copied()
+}
+
 /// An attention row's second line: loom's reason, else herdr's blocked reason,
 /// else the unread report's kind and first line.
 pub fn reason_line(pane: &PaneInfo, reports: &HashMap<String, String>) -> Option<String> {
@@ -123,6 +134,12 @@ pub fn reason_line(pane: &PaneInfo, reports: &HashMap<String, String>) -> Option
         .as_ref()
         .and_then(|id| reports.get(id))
         .map(|line| line.trim())
+        // loom's report summaries already start with their kind
+        .map(|line| {
+            line.strip_prefix(kind)
+                .and_then(|rest| rest.strip_prefix(':'))
+                .map_or(line, str::trim_start)
+        })
         .filter(|line| !line.is_empty());
     Some(match line {
         Some(line) => format!("{kind}: {line}"),
@@ -766,7 +783,8 @@ fn attention_items(
                     .unwrap_or_else(|| pane.workspace_id.clone()),
                 unread: unread_kind(pane).map(str::to_string),
                 questions: questions(pane),
-                waited: extras.waited.get(&pane.pane_id).copied(),
+                waited: quiet_age(pane, extras)
+                    .or_else(|| extras.waited.get(&pane.pane_id).copied()),
                 reason: reason_line(pane, &extras.reports),
                 focused: pane.focused,
             })
@@ -1460,6 +1478,33 @@ mod tests {
             reason(&extras)[3].as_deref(),
             Some("done: shipped the parser")
         );
+        // loom's summaries already lead with their kind; it isn't repeated
+        extras
+            .reports
+            .insert("a1".into(), "done: 049 done: PR merged".into());
+        assert_eq!(
+            reason(&extras)[3].as_deref(),
+            Some("done: 049 done: PR merged")
+        );
+    }
+
+    #[test]
+    fn a_quiet_row_waits_from_its_report_a_wanted_row_from_the_sidebar_clock() {
+        let snapshot = attention_snapshot();
+        let mut extras = Extras::default();
+        for pane in &snapshot.panes {
+            extras.waited.insert(pane.pane_id.clone(), 5);
+            if let Some(agent) = &pane.agent_id {
+                extras.report_ages.insert(agent.clone(), 518_400);
+            }
+        }
+        let rows = section_rows(&build_attention(&snapshot, &extras, &UiState::default()));
+        let quiet = rows.iter().find(|r| r.mark == Mark::Quiet).unwrap();
+        assert_eq!(quiet.waited, Some(518_400));
+        assert!(rows
+            .iter()
+            .filter(|r| r.mark != Mark::Quiet)
+            .all(|r| r.waited == Some(5)));
     }
 
     #[test]

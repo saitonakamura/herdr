@@ -243,6 +243,7 @@ fn event_loop(
                     app.extras.waited = attention.waited(now);
                     app.extras.dimmed = attention.dimmed();
                     app.extras.reports = reports.refresh(client, &snapshot);
+                    app.extras.report_ages = reports.ages(now);
                     app.extras.pending = pending;
                     let live: std::collections::HashSet<&str> =
                         snapshot.panes.iter().map(|p| p.pane_id.as_str()).collect();
@@ -283,11 +284,16 @@ fn refresh(client: &Client) -> Result<(api::SessionSnapshot, HashMap<String, usi
     Ok((snapshot, pending))
 }
 
-/// The first line of each agent's latest report, for rows with an unread report.
-/// Each agent's is read once, and again after it sends a message.
+/// The first line and send time of each agent's latest report, for rows with an
+/// unread report. Each agent's is read once, and again after it sends a message.
 #[derive(Default)]
 struct ReportLines {
-    lines: HashMap<String, Option<String>>,
+    lines: HashMap<String, Option<LatestReport>>,
+}
+
+struct LatestReport {
+    line: Option<String>,
+    sent_at_ms: Option<u64>,
 }
 
 impl ReportLines {
@@ -322,12 +328,25 @@ impl ReportLines {
                         .filter(|m| m.kind == MessageKind::Report)
                         .max_by_key(|m| m.message_id)
                 })
-                .and_then(|m| m.summary.lines().next().map(str::to_string));
+                .map(|m| LatestReport {
+                    line: m.summary.lines().next().map(str::to_string),
+                    sent_at_ms: m.sent_at_ms,
+                });
             self.lines.insert(agent.to_string(), line);
         }
         self.lines
             .iter()
-            .filter_map(|(agent, line)| Some((agent.clone(), line.clone()?)))
+            .filter_map(|(agent, report)| Some((agent.clone(), report.as_ref()?.line.clone()?)))
+            .collect()
+    }
+
+    fn ages(&self, now: u64) -> HashMap<String, u64> {
+        self.lines
+            .iter()
+            .filter_map(|(agent, report)| {
+                let sent = report.as_ref()?.sent_at_ms? / 1000;
+                Some((agent.clone(), now.saturating_sub(sent)))
+            })
             .collect()
     }
 }

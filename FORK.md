@@ -190,10 +190,14 @@ it draws and does is 018's resolution (`.issues/herdr-fork/018-sidebar-content.m
   empty and while searching. Rows sort loud (wanted, unread; a herdr block with
   no `needs_user`), steady (wanted, read), then quiet (unread only), oldest first;
   the agent keeps its tree row, marked the same way. Loud reverses the state glyph
-  and bolds the name, quiet adds a dim `•` coloured by report kind
-  (`unread_done`, `unread_failed`, … in `[sidebar.colors]`). A row's second line
-  is loom's `reason`, else the blocked reason, else the report kind and the first
-  line of the agent's latest report (`message.list`, read again when it sends one).
+  and bolds the name, quiet adds a dim mark per report kind: done `✓`, failed `✗`,
+  blocked `↑`, asking `?`, handoff `→`, any other `•` (nerd glyphs in the `nerd`
+  set; `unread_done`, `unread_failed`, … in `[sidebar.glyph]` and
+  `[sidebar.colors]`). A row's second line is loom's `reason`, else the blocked
+  reason, else the report kind and the first line of the agent's latest report
+  (`message.list`, read again when it sends one), without the kind loom's summary
+  already leads with. A quiet row's age counts from that report's `sent_at_ms`, so
+  it survives a sidebar restart; a wanted row's is the program's own clock.
   About 10 s of focus draws a loud row as steady until its state next changes;
   that is the program's own memory, and never marks anything read.
 - **State.** Collapsed sections, folds and the scope live in

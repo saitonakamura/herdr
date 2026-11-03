@@ -20,7 +20,7 @@ pub enum Meaning {
     Messages,
     Branch,
     Worktree,
-    /// The dot after a quiet row's name, one colour per report kind.
+    /// The mark after a quiet row's name, one glyph and colour per report kind.
     UnreadDone,
     UnreadFailed,
     UnreadBlocked,
@@ -142,6 +142,11 @@ impl Meaning {
             Meaning::Messages => "\u{f0e0}",
             Meaning::Branch => "\u{e725}",
             Meaning::Worktree => "\u{f126}",
+            Meaning::UnreadDone => "\u{f00c}",
+            Meaning::UnreadFailed => "\u{f00d}",
+            Meaning::UnreadBlocked => "\u{f062}",
+            Meaning::UnreadAsking => "\u{f128}",
+            Meaning::UnreadHandoff => "\u{f0a4}",
             _ => "•",
         }
     }
@@ -162,6 +167,11 @@ impl Meaning {
             Meaning::Messages => "✉",
             Meaning::Branch => "⎇",
             Meaning::Worktree => "⑂",
+            Meaning::UnreadDone => "✓",
+            Meaning::UnreadFailed => "✗",
+            Meaning::UnreadBlocked => "↑",
+            Meaning::UnreadAsking => "?",
+            Meaning::UnreadHandoff => "→",
             _ => "•",
         }
     }
@@ -404,9 +414,20 @@ mod tests {
     }
 
     #[test]
-    fn unread_dots_are_one_cell_and_coloured_by_report_kind() {
+    fn unread_marks_are_one_cell_distinct_and_coloured_by_report_kind() {
+        use unicode_width::UnicodeWidthStr;
+        let kinds = ["done", "failed", "blocked", "asking", "handoff", "progress"];
+        for set in [GlyphSet::Nerd, GlyphSet::Unicode] {
+            let glyphs = Glyphs::new(set, &[], &[]);
+            let texts: std::collections::HashSet<String> = kinds
+                .iter()
+                .map(|kind| glyphs.get(Meaning::for_unread(kind)).text.clone())
+                .collect();
+            assert_eq!(texts.len(), kinds.len(), "{set:?}");
+            assert!(texts.iter().all(|t| t.width() == 1), "{set:?}");
+        }
         let nerd = Glyphs::new(GlyphSet::Nerd, &[], &[]);
-        assert_eq!(nerd.get(Meaning::for_unread("done")).text, "•");
+        assert_eq!(nerd.get(Meaning::for_unread("progress")).text, "•");
         assert_eq!(
             nerd.get(Meaning::for_unread("done")).color,
             Some(Color::Cyan)

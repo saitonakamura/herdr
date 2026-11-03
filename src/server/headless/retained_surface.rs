@@ -352,7 +352,11 @@ impl HeadlessServer {
                 crate::pane::TerminalDirtyPatchOutcome::Patch(mut patch) => {
                     if let Some(refs) = agent_refs.as_mut() {
                         for (_, cells) in &mut patch.rows {
-                            crate::ui::decorate_agent_ref_row(&mut cells[..], refs);
+                            crate::ui::decorate_agent_ref_row(
+                                &mut cells[..],
+                                refs,
+                                workspace_index,
+                            );
                         }
                     }
                     patch

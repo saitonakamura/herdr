@@ -1,6 +1,6 @@
 use super::*;
 
-/// Fork 061: a retained patch decorates the rows it sends exactly as the full
+/// Fork 061, 065: a retained patch decorates the rows it sends exactly as the full
 /// renderer would, so a client's committed surface never depends on which path drew it.
 #[tokio::test]
 async fn retained_rows_carry_the_same_agent_reference_decoration_as_a_full_render() {
@@ -29,10 +29,11 @@ async fn retained_rows_carry_the_same_agent_reference_decoration_as_a_full_rende
         .frame
         .clone();
     let text = frame_text(&retained);
-    assert!(
-        text.contains("the child (8c1ee73d) needs you  asking · w1:p1"),
-        "{text}"
-    );
+    let line = text
+        .lines()
+        .find(|line| line.starts_with("the child (8c1ee73d) needs you"))
+        .expect("the line naming the agent");
+    assert!(line.ends_with("  1 · asking "), "{text}");
     let retained = retained.cells;
 
     server.render_and_stream();

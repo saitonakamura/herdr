@@ -214,10 +214,13 @@ fn workspaces(workspace_count: usize) -> Vec<Workspace> {
 }
 
 fn active_panes(pane_count: usize) -> Vec<Workspace> {
-    let history = history();
+    active_panes_with(pane_count, &history())
+}
+
+fn active_panes_with(pane_count: usize, history: &str) -> Vec<Workspace> {
     let mut workspace = Workspace::test_new("bench");
     let root_pane = workspace.tabs[0].root_pane;
-    workspace.insert_test_runtime(root_pane, runtime(&history));
+    workspace.insert_test_runtime(root_pane, runtime(history));
     let mut pane_ids = vec![root_pane];
 
     for index in 1..pane_count {
@@ -229,11 +232,65 @@ fn active_panes(pane_count: usize) -> Vec<Workspace> {
             Direction::Horizontal
         };
         let pane_id = workspace.test_split(direction);
-        workspace.insert_test_runtime(pane_id, runtime(&history));
+        workspace.insert_test_runtime(pane_id, runtime(history));
         pane_ids.push(pane_id);
     }
 
     vec![workspace]
+}
+
+fn bench_agent_id(index: usize) -> String {
+    format!("1{index:07x}")
+}
+
+/// Every line names two live agents, the worst case for agent references.
+fn agent_id_history(agent_count: usize) -> String {
+    (0..2_000)
+        .map(|line| {
+            format!(
+                "report from {} done, waiting on {}\r\n",
+                bench_agent_id(line % agent_count),
+                bench_agent_id((line + 1) % agent_count)
+            )
+        })
+        .collect()
+}
+
+/// Fork 061: agent ids are scanned and decorated in the full renderer, once per
+/// visible pane row. `off` is the baseline with ids on screen; `on, no ids` is
+/// the scan alone; `on, ids` adds the agent index and the decoration.
+fn print_agent_reference_profiles() {
+    println!("agent references (active panes): server pane surface, every pane an agent");
+    println!("       count  mode         median_us  p95_us  max_us");
+    for count in [1, 15] {
+        for (mode, enabled, ids) in [
+            ("off", false, true),
+            ("on, no ids", true, false),
+            ("on, ids", true, true),
+        ] {
+            let history = if ids {
+                agent_id_history(count)
+            } else {
+                history()
+            };
+            let mut pipeline = RenderPipeline::new(active_panes_with(count, &history));
+            pipeline.app.state.ensure_test_terminals();
+            for (index, terminal) in pipeline.app.state.terminals.values_mut().enumerate() {
+                terminal.agent_id = crate::terminal::AgentId::parse(&bench_agent_id(index));
+                terminal.task_status = Some(if index % 2 == 0 {
+                    crate::api::schema::TaskStatus::NeedsUser
+                } else {
+                    crate::api::schema::TaskStatus::Running
+                });
+            }
+            pipeline.app.state.agent_references.enabled = enabled;
+            let stats = profile_pipeline(pipeline).server;
+            println!(
+                "  {count:>10}  {mode:<11}  {:>9}  {:>6}  {:>6}",
+                stats.median_us, stats.p95_us, stats.max_us
+            );
+        }
+    }
 }
 
 fn summarize(mut samples: Vec<Duration>) -> StageStats {
@@ -719,6 +776,7 @@ async fn render_scale_profile() {
     print_profiles("active panes (one workspace)", active_panes);
     print_snapshot_encoding_profiles("active panes", active_panes);
     print_token_rule_profiles();
+    print_agent_reference_profiles();
     print_surface_reuse_profiles();
     print_surface_damage_profiles();
 }

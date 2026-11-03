@@ -497,12 +497,16 @@ pub(super) fn render_panes(
         return;
     };
 
+    let mut agent_refs = super::AgentRefs::new(app);
     for info in pane_infos {
         if let Some(rt) = app.runtime_for_pane_in_workspace(terminal_runtimes, ws_idx, info.id) {
             let show_cursor = info.is_focused
                 && !pane_is_scrolled_back(rt)
                 && app.pane_exposes_host_cursor(ws_idx, info.id);
             rt.render(frame, info.inner_rect, show_cursor);
+            if let Some(refs) = agent_refs.as_mut() {
+                super::agent_refs::decorate_area(frame.buffer_mut(), info.inner_rect, refs);
+            }
             render_pane_scrollbar(app, frame, info, rt);
         } else if let Some(reason) = ws
             .tabs

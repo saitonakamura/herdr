@@ -3021,7 +3021,14 @@ impl HeadlessServer {
             _ => {}
         }
 
-        let mut changed = metadata_expired | api::request_changes_ui(&msg.request);
+        // Fork 061: a task status or an agent id is drawn wherever an agent id is on screen.
+        let changes_agent_references = self.app.state.agent_references.enabled
+            && matches!(
+                &msg.request.method,
+                api::schema::Method::AgentSetTaskStatus(_) | api::schema::Method::AgentAnnotate(_)
+            );
+        let mut changed =
+            metadata_expired | api::request_changes_ui(&msg.request) | changes_agent_references;
         let skip_default_workspace = skip_default_workspace_for_request
             || matches!(
                 &msg.request.method,

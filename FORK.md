@@ -248,6 +248,26 @@ it draws and does is 018's resolution (`.issues/herdr-fork/018-sidebar-content.m
   unix targets beside `herdr`, in `SHA256SUMS`; `scripts/dogfood.sh` installs it
   beside `herdr`. Windows builds only a stub and keeps the native sidebar.
 
+## Agent references
+
+An agent id on screen (a loom node id, bare, `loom:<id>` or `[<id>]`) is drawn in
+its agent's status colour, and the line's trailing blank cells say what it is
+doing, dimmed: `asking · w1:p2`, `working`, `done`, `closed`
+(`.issues/herdr-fork/061-live-node-references.md`). Ctrl+hover underlines it and
+Ctrl+click focuses its pane, through the same `pane.link.resolve` and
+`pane.link.activate` as URLs, which win where both match.
+
+- **Render only.** The server decorates the cells it renders, so the terminal
+  grid, copy, selection and `pane read` (`--ansi` included) never see it. A
+  full line is recoloured only.
+- **Words.** Loom's task status where it says more than herdr's agent status:
+  `asking` (needs_user), `blocked` (herdr blocked, or needs_parent), `failed`,
+  `done` (complete), `closed`; otherwise herdr's `working`, `awaiting`, `idle`,
+  `done`. The pane follows the word only while the agent wants someone.
+- **closed** covers agents closed since the server started, the last 256.
+- **Colours** are the sidebar's meanings, and `[sidebar.colors]` overrides apply.
+- **Off:** `[ui] agent_references = false` in `config.fork.toml`.
+
 ## Dogfooding
 
 On the primary mac, real work in the fork runs in a side session named `fork`.

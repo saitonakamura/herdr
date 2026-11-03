@@ -308,6 +308,7 @@ impl HeadlessServer {
             success!("all_recipients_deferred");
         }
 
+        let mut agent_refs = crate::ui::AgentRefs::new(&self.app.state);
         let mut collected = Vec::with_capacity(pty_sources.len());
         for source in pty_sources {
             let mut public_pane_id = None;
@@ -346,7 +347,16 @@ impl HeadlessServer {
                     crate::render_prof::event("retained_surface.pane_clean");
                     crate::pane::TerminalDirtyPatch { rows: Vec::new() }
                 }
-                crate::pane::TerminalDirtyPatchOutcome::Patch(patch) => patch,
+                // Only dirty rows are scanned; clean rows keep the decoration the
+                // client already holds until a full render redraws them.
+                crate::pane::TerminalDirtyPatchOutcome::Patch(mut patch) => {
+                    if let Some(refs) = agent_refs.as_mut() {
+                        for (_, cells) in &mut patch.rows {
+                            crate::ui::decorate_agent_ref_row(&mut cells[..], refs);
+                        }
+                    }
+                    patch
+                }
                 crate::pane::TerminalDirtyPatchOutcome::Fallback => {
                     fallback!("terminal_patch");
                 }

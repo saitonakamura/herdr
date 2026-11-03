@@ -645,6 +645,12 @@ impl AppState {
                 continue;
             };
             self.agent_identities_dirty |= terminal.agent_id.is_some();
+            if let Some(agent_id) = terminal.agent_id {
+                if self.closed_agent_ids.len() == crate::ui::CLOSED_AGENT_MEMORY {
+                    self.closed_agent_ids.pop_front();
+                }
+                self.closed_agent_ids.push_back(agent_id);
+            }
             if !self.terminal_runtime_shutdowns.contains(&terminal_id) {
                 self.terminal_runtime_shutdowns.push(terminal_id);
             }

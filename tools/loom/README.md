@@ -28,14 +28,20 @@ readers through `cockpit read` at work or `homebase read` in personal. A missing
 reader is a server refusal, never a silent local polling fallback.
 
 A reader wait is declared only once the server has read its source. The server
-reads it at once, and `loom wait` waits up to 40 s for that read to land. A failed
-read, a reader refusal, or no read at all cancels the wait, and `loom wait` exits
-1 with the reader's error. The server runs the reader with its own environment,
-not the declaring pane's, so a ref that `loom check` reads from a pane can still
-be unreadable to herdr (loom 110: cockpit's glab had no `GITLAB_TOKEN` and read
-every private MR as a 404). Once the first read has landed, the declare prints
-the state it found, and `wait list` shows each wait's last read or its run of
-failed reads.
+reads it at once, and `loom wait` waits up to 40 s for a read to land. A server
+that advertises `wait_read_retries` reads a failed first read again a few seconds
+later, and `loom wait` waits those re-reads out, so one blip does not refuse the
+wait (loom 113). Failed reads past the re-reads, a reader refusal, or no read at
+all cancel the wait, and `loom wait` exits 1 saying what failed: a timeout, a
+reader that gave no reason, or the reader's error. The server runs the reader
+with its own environment, not the declaring pane's, so a ref that `loom check`
+reads from a pane can still be unreadable to herdr (loom 110: cockpit's glab had
+no `GITLAB_TOKEN` and read every private MR as a 404); the refusal says so for an
+auth-shaped error. A reader that names its kind's `states` also gets an `--until`
+outside them refused, with a hint when the state belongs to a related kind
+(`passed` on a `pr:` is a `ci:` state). Once the first read has landed, the
+declare prints the state it found, and `wait list` shows each wait's last read
+or its run of failed reads.
 
 `--summary` overrides the generated description. `--json` emits the API result
 inside a `result` envelope. Lists include only the caller's waits, live by

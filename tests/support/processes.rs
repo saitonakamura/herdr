@@ -13,6 +13,18 @@ pub(super) fn exe_path(pid: u32) -> Option<PathBuf> {
     imp::exe_path(pid)
 }
 
+#[cfg(target_os = "macos")]
+pub(super) fn children_with_executable(
+    parent: u32,
+    exe: &std::path::Path,
+) -> std::io::Result<Vec<u32>> {
+    let exe = std::fs::canonicalize(exe)?;
+    Ok(imp::child_pids(parent)?
+        .into_iter()
+        .filter(|pid| exe_path(*pid).is_some_and(|path| path == exe))
+        .collect())
+}
+
 pub(super) fn argv(pid: u32) -> std::io::Result<Vec<String>> {
     imp::argv(pid)
 }
@@ -70,6 +82,29 @@ mod imp {
 #[cfg(target_os = "macos")]
 mod imp {
     use std::path::PathBuf;
+
+    pub(super) fn child_pids(parent: u32) -> std::io::Result<Vec<u32>> {
+        const PROC_PPID_ONLY: u32 = 6;
+        let mut capacity = 16;
+        loop {
+            let mut pids = vec![0 as libc::pid_t; capacity];
+            let bytes = (pids.len() * std::mem::size_of::<libc::pid_t>()) as libc::c_int;
+            let returned = unsafe {
+                libc::proc_listpids(PROC_PPID_ONLY, parent, pids.as_mut_ptr().cast(), bytes)
+            };
+            if returned < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            if returned < bytes {
+                pids.truncate(returned as usize / std::mem::size_of::<libc::pid_t>());
+                return Ok(pids
+                    .into_iter()
+                    .filter_map(|pid| u32::try_from(pid).ok().filter(|pid| *pid > 0))
+                    .collect());
+            }
+            capacity *= 2;
+        }
+    }
 
     pub(super) fn all_pids() -> std::io::Result<Vec<u32>> {
         let count = unsafe { libc::proc_listallpids(std::ptr::null_mut(), 0) };
@@ -197,6 +232,46 @@ mod imp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn child_lookup_requires_parent_and_executable() {
+        struct ChildGuard(std::process::Child);
+        impl Drop for ChildGuard {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+        let child = ChildGuard(
+            std::process::Command::new("/bin/sleep")
+                .arg("30")
+                .spawn()
+                .expect("spawn sleep"),
+        );
+        let pid = child.0.id();
+        let exe = std::fs::canonicalize("/bin/sleep").expect("sleep executable");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut found = Vec::new();
+        while std::time::Instant::now() < deadline {
+            found = children_with_executable(std::process::id(), &exe).expect("list children");
+            if found.contains(&pid) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let wrong_parent = children_with_executable(pid, &exe).expect("list grandchildren");
+        let wrong_exe = children_with_executable(
+            std::process::id(),
+            &std::env::current_exe().expect("test executable"),
+        )
+        .expect("filter executable");
+        drop(child);
+
+        assert!(found.contains(&pid), "child pid {pid} missing: {found:?}");
+        assert!(!wrong_parent.contains(&pid));
+        assert!(!wrong_exe.contains(&pid));
+    }
 
     #[test]
     fn process_table_sees_a_child_with_its_args_and_env() {

@@ -106,6 +106,11 @@ pub fn herdr_server_pids_for_runtime_dir(runtime_dir: &Path) -> std::io::Result<
     Ok(pids)
 }
 
+#[cfg(target_os = "macos")]
+pub fn herdr_child_pids(parent: u32) -> std::io::Result<Vec<u32>> {
+    processes::children_with_executable(parent, Path::new(env!("CARGO_BIN_EXE_herdr")))
+}
+
 pub fn cleanup_test_base(base: &Path) {
     let runtime_dir = base.join("runtime");
     let runtime_dirs = HashSet::from([runtime_dir.clone()]);

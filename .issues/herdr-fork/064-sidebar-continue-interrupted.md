@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-sidebar-continue-interrupted
 title: herdr-sidebar offers continue on an interrupted agent and says why it is waiting
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee: saitonakamura
-claimed_by:
+claimed_by: macos/w1:p24/caa3e259-cb44-4dc4-96f6-92adbdda799a
 ---
 
 ## Question

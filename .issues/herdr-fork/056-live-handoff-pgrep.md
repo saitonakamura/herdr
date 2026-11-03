@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-live-handoff-pgrep
 title: live_handoff finds the replacement server with pgrep on macOS
-status: in-progress
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee: saitonakamura
-claimed_by: macos/w1:p1T/207451d4
+claimed_by:
 ---
 
 ## Question
@@ -50,6 +50,10 @@ without reading anyone's argv:
 
 Done: both tests pass under host pi's seatbelt with one `localSockets`
 escalation, and unsandboxed, with no `pgrep`/`ps` in `tests/`.
+
+## Resolution
+
+Fixed by [PR #52](https://github.com/saitonakamura/herdr/pull/52) (`b172955f`, merge `e436c016`), done by guarded host pi (loom `207451d4`), committed by the cockpit. Tests only: on macOS the replacement is the old server's child from `proc_listpids(PROC_PPID_ONLY)`, filtered by `proc_pidpath` against the herdr under test. The handoff response comes only after the hand-over, so a wrapper passed as `import_exe` SIGSTOPs the old server and execs herdr; the test finds the child, and an RAII guard resumes the old server (killing it on panic). Linux keeps its `/proc` lookup; no `pgrep`/`ps` left in `tests/`. Asking the server for its pid was not needed. Verified: live_handoff 26/26 inside the seatbelt (only `localSockets` needed, SIGSTOP/SIGCONT asked nothing) and unsandboxed, 40/40 in a serial stress loop.
 
 ## Parent
 

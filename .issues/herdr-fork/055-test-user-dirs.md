@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-test-user-dirs
 title: Plugin tests write the user's real herdr-dev config and state dirs
-status: in-progress
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee: saitonakamura
-claimed_by: macos/w1:p1S/004127b1
+claimed_by:
 ---
 
 ## Question
@@ -60,6 +60,10 @@ change small so merges stay cheap (FORK.md). Done: the 31 pass with `~/.config/h
 `~/.local/state/herdr-dev` read-only, and a run leaves both unchanged (compare a
 listing before and after). The existing `example.*` leftovers can be deleted by
 hand once nothing writes them.
+
+## Resolution
+
+Fixed by [PR #51](https://github.com/saitonakamura/herdr/pull/51) (`02694e0c`, merge `db66f13c`), done by guarded host pi (loom `004127b1`), committed by the cockpit. Chose the `#[cfg(test)]` default: unit-test builds fall back to config and state dirs under a per-process temp root when `XDG_CONFIG_HOME`/`XDG_STATE_HOME` are unset; explicit overrides still win and normal builds are unchanged. The helpers and the affected tests are upstream, so the change stays in `src/config/io.rs` with one regression test. It covers plain `cargo test` too, which a nextest setup script would miss. Verified: the affected group went from 31 failures to 61/61 inside the seatbelt; unsandboxed, sorted listings of `~/.config/herdr-dev` and `~/.local/state/herdr-dev` were identical before and after `just check`. The leftover `example.*` dirs (21 config, 28 state) are left for the user to delete.
 
 ## Parent
 

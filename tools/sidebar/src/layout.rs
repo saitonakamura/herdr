@@ -111,6 +111,7 @@ pub fn lines(items: &[Item], width: u16, config: &Config) -> Vec<Line> {
     let narrow = width < NARROW_BELOW;
     let mut out = Vec::new();
     let mut in_section = false;
+    let mut seen_header = false;
     for item in items {
         let key = item.key();
         let section_item = matches!(item, Item::AttentionHeader(_) | Item::Attention(_));
@@ -123,6 +124,17 @@ pub fn lines(items: &[Item], width: u16, config: &Config) -> Vec<Line> {
             });
         }
         in_section = section_item;
+        if matches!(item, Item::Header(_)) {
+            if seen_header {
+                // a dead row between one effort's tree and the next
+                out.push(Line {
+                    spans: Vec::new(),
+                    key: "gap".into(),
+                    target: None,
+                });
+            }
+            seen_header = true;
+        }
         match item {
             Item::AttentionHeader(count) => {
                 let label = if narrow { "!" } else { "attention" };
@@ -712,6 +724,36 @@ mod tests {
             "{text:?}"
         );
         assert_eq!(text.last().unwrap(), " + new");
+    }
+
+    #[test]
+    fn a_blank_row_separates_one_effort_from_the_next() {
+        let header = |id: &str| {
+            Item::Header(HeaderItem {
+                workspace_id: id.into(),
+                label: id.into(),
+                effort: None,
+                collapsed: true,
+                focused: false,
+                counts: Vec::new(),
+            })
+        };
+        let lines = lines(
+            &[header("one"), header("two"), header("three")],
+            30,
+            &unicode(),
+        );
+        let rows: Vec<(String, String)> = lines.iter().map(|l| (l.key.clone(), l.text())).collect();
+        let keys: Vec<&str> = rows.iter().map(|(key, _)| key.as_str()).collect();
+        assert_eq!(
+            keys,
+            ["ws:one", "gap", "ws:two", "gap", "ws:three"],
+            "{rows:?}"
+        );
+        assert!(rows
+            .iter()
+            .filter(|(key, _)| key == "gap")
+            .all(|(_, text)| text.is_empty()));
     }
 
     #[test]

@@ -112,11 +112,7 @@ pub fn subject(
                 .iter()
                 .find(|p| &p.pane_id == id)
                 .ok_or_else(|| format!("no pane {id}"))?;
-            let tab_labels = snapshot
-                .tabs
-                .iter()
-                .map(|t| (t.tab_id.as_str(), t.label.as_str()))
-                .collect();
+            let tab_labels = model::Names::new(snapshot);
             Ok(Subject::Agent {
                 pane_id: pane.pane_id.clone(),
                 agent_id: pane.agent_id.clone(),

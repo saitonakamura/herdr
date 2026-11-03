@@ -324,14 +324,64 @@ fn agent_key(pane: &PaneInfo) -> String {
         .unwrap_or_else(|| pane.pane_id.clone())
 }
 
+/// Tab labels, and each tab's host: its first agent, the one the tab's name is for.
+pub struct Names<'a> {
+    labels: HashMap<&'a str, &'a str>,
+    hosts: HashMap<&'a str, &'a str>,
+}
+
+impl<'a> Names<'a> {
+    pub fn new(snapshot: &'a SessionSnapshot) -> Self {
+        let labels = snapshot
+            .tabs
+            .iter()
+            .map(|tab| (tab.tab_id.as_str(), tab.label.as_str()))
+            .collect();
+        let mut hosts: HashMap<&str, &PaneInfo> = HashMap::new();
+        for pane in snapshot.panes.iter().filter(|p| is_agent(p)) {
+            let host = hosts.entry(pane.tab_id.as_str()).or_insert(pane);
+            if creation_number(&pane.pane_id) < creation_number(&host.pane_id) {
+                *host = pane;
+            }
+        }
+        let hosts = hosts
+            .into_iter()
+            .map(|(tab, pane)| (tab, pane.pane_id.as_str()))
+            .collect();
+        Names { labels, hosts }
+    }
+
+    /// The tab's first agent, when it is not `pane` itself.
+    fn host_of(&self, pane: &PaneInfo) -> Option<&'a str> {
+        self.hosts
+            .get(pane.tab_id.as_str())
+            .copied()
+            .filter(|host| *host != pane.pane_id)
+    }
+}
+
 /// What a row calls the agent: its tab's name, else the pane's label or the harness.
-pub fn agent_name(pane: &PaneInfo, tab_labels: &HashMap<&str, &str>) -> String {
-    tab_labels
+/// A second agent in a tab goes by its own label or terminal title instead, since the
+/// tab's name belongs to the first.
+pub fn agent_name(pane: &PaneInfo, names: &Names) -> String {
+    let own = || {
+        pane.label
+            .clone()
+            .or_else(|| pane.terminal_title_stripped.clone())
+            .or_else(|| pane.title.clone())
+            .filter(|title| !title.trim().is_empty())
+    };
+    let tab = names
+        .labels
         .get(pane.tab_id.as_str())
         .map(|label| label.to_string())
-        .filter(|label| !label.is_empty())
-        .or_else(|| pane.label.clone())
-        .or_else(|| pane.agent.clone())
+        .filter(|label| !label.is_empty());
+    let name = if names.host_of(pane).is_some() {
+        own().or(tab)
+    } else {
+        tab.or_else(|| pane.label.clone())
+    };
+    name.or_else(|| pane.agent.clone())
         .unwrap_or_else(|| pane.pane_id.clone())
 }
 
@@ -407,7 +457,7 @@ struct Section<'a> {
     roots: Vec<&'a PaneInfo>,
 }
 
-fn section<'a>(panes: &[&'a PaneInfo]) -> Section<'a> {
+fn section<'a>(panes: &[&'a PaneInfo], names: &Names) -> Section<'a> {
     let mut agents: Vec<&PaneInfo> = panes.iter().copied().filter(|p| is_agent(p)).collect();
     let mut others: Vec<&PaneInfo> = panes.iter().copied().filter(|p| !is_agent(p)).collect();
     agents.sort_by_key(|p| creation_number(&p.pane_id));
@@ -423,7 +473,14 @@ fn section<'a>(panes: &[&'a PaneInfo]) -> Section<'a> {
             Some(parent) if ids.contains(parent) && Some(parent) != pane.agent_id.as_deref() => {
                 children.entry(parent.to_string()).or_default().push(pane)
             }
-            _ => roots.push(*pane),
+            // an unparented second agent in a tab hangs under the tab's first
+            _ => match names
+                .host_of(pane)
+                .and_then(|host| agents.iter().find(|p| p.pane_id == host))
+            {
+                Some(host) => children.entry(agent_key(host)).or_default().push(pane),
+                None => roots.push(*pane),
+            },
         }
     }
     // A Parent cycle has no root; its members are drawn as roots rather than lost.
@@ -498,11 +555,7 @@ pub fn scope_is_live(snapshot: &SessionSnapshot, scope: &Scope) -> bool {
 
 pub fn build(inputs: &Inputs) -> Vec<Item> {
     let snapshot = inputs.snapshot;
-    let tab_labels: HashMap<&str, &str> = snapshot
-        .tabs
-        .iter()
-        .map(|tab| (tab.tab_id.as_str(), tab.label.as_str()))
-        .collect();
+    let tab_labels = Names::new(snapshot);
     let live_agents: HashMap<&str, &PaneInfo> = snapshot
         .panes
         .iter()
@@ -558,7 +611,7 @@ pub fn build(inputs: &Inputs) -> Vec<Item> {
             }
             _ => None,
         };
-        let section = section(&panes);
+        let section = section(&panes, &tab_labels);
         let name_of = |pane: &PaneInfo| agent_name(pane, &tab_labels);
 
         // Under a search, a node stays while it or something below it matches.
@@ -686,7 +739,7 @@ struct Node<'a> {
 struct Ctx<'a, 'b> {
     section: &'b Section<'a>,
     inputs: &'b Inputs<'b>,
-    tab_labels: &'b HashMap<&'b str, &'b str>,
+    tab_labels: &'b Names<'b>,
     live_agents: &'b HashMap<&'b str, &'b PaneInfo>,
     keep: Option<&'b HashSet<String>>,
     folds_apply: bool,
@@ -786,11 +839,7 @@ fn push_agent(items: &mut Vec<Item>, node: Node, ctx: &Ctx, seen: &mut HashSet<S
 
 /// The attention section: every wanted agent and every agent with an unread report,
 /// loud, steady then quiet, oldest first within each. Empty when there are none.
-fn attention_items(
-    snapshot: &SessionSnapshot,
-    extras: &Extras,
-    tab_labels: &HashMap<&str, &str>,
-) -> Vec<Item> {
+fn attention_items(snapshot: &SessionSnapshot, extras: &Extras, tab_labels: &Names) -> Vec<Item> {
     let workspaces: HashMap<&str, &str> = snapshot
         .workspaces
         .iter()
@@ -848,7 +897,7 @@ pub fn subtree_ids(snapshot: &SessionSnapshot, agent: &str) -> Vec<String> {
         .iter()
         .filter(|p| p.workspace_id == root.workspace_id)
         .collect();
-    let section = section(&panes);
+    let section = section(&panes, &Names::new(snapshot));
     let mut out = Vec::new();
     let mut stack = vec![root];
     let mut seen = HashSet::new();
@@ -1153,6 +1202,28 @@ mod tests {
             search,
             attention: true,
         })
+    }
+
+    #[test]
+    fn a_second_agent_in_a_tab_hangs_under_the_first_and_goes_by_its_own_title() {
+        let mut snapshot = snapshot();
+        // a pi split into beta's tab, started by hand: no Parent, no label
+        let mut mate = agent("w1:p6", "mate", None, AgentStatus::Working);
+        mate.tab_id = "w1:t4".into();
+        mate.agent = Some("pi".into());
+        mate.terminal_title_stripped = Some("approval-denial test".into());
+        snapshot.panes.push(mate);
+        let items = build(&Inputs {
+            snapshot: &snapshot,
+            extras: &Extras::default(),
+            ui: &UiState::default(),
+            search: None,
+            attention: false,
+        });
+        let names = names(&items);
+        let beta = names.iter().position(|n| n == "  beta").unwrap();
+        assert_eq!(names[beta + 1], "    approval-denial test", "{names:?}");
+        assert_eq!(names.iter().filter(|n| n.trim() == "beta").count(), 1);
     }
 
     #[test]

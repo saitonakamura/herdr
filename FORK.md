@@ -154,6 +154,10 @@ it draws and does is 018's resolution (`.issues/herdr-fork/018-sidebar-content.m
   annotations (`effort`, `ticket`, `source`); it never reads loom's files. Its
   types are a subset of herdr's schema types, and its tests check them, and every
   request it sends, against `docs/next/api/herdr-api.schema.json`.
+- **Tabs with two agents.** A row is named after its tab. A second agent in a
+  tab with no Parent (a pi split in beside a child, say) hangs under the tab's
+  first agent and goes by its own label or terminal title, since the tab's name
+  belongs to the first.
 - **What herdr doesn't know.** Age is the time in the current state as the
   program saw it, since herdr records no creation time; it updates only on
   redraws. The dirty count is herdr's, which runs `git status` only while a

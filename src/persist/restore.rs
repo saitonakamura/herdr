@@ -475,28 +475,38 @@ fn unavailable_restored_terminal(
 }
 
 /// What a resumed agent's pane shows until a real event replaces it, and whether its
-/// last turn was acknowledged. A turn the restart cut off waits on the user.
+/// last turn was acknowledged. A turn the restart cut off waits on the user, and so does
+/// a block whose prompt lived in the old process.
 fn resumed_agent_status(
     saved: Option<&super::snapshot::PaneAgentStatusSnapshot>,
+    session: Option<&super::snapshot::PaneAgentSessionSnapshot>,
 ) -> (Option<crate::terminal::RestoredAgentStatus>, bool) {
     use crate::api::schema::AgentStatus;
+    use crate::detect::BlockedReason;
     use crate::terminal::RestoredAgentStatus;
     let Some(saved) = saved else {
         return (None, true);
     };
+    let interrupted = Some(RestoredAgentStatus::Blocked(Some(
+        BlockedReason::Interrupted,
+    )));
     match saved.status {
-        AgentStatus::Blocked => (
-            Some(RestoredAgentStatus::Blocked(
-                saved.blocked_reason.map(Into::into),
-            )),
-            true,
-        ),
-        AgentStatus::Working => (
-            Some(RestoredAgentStatus::Blocked(Some(
-                crate::detect::BlockedReason::Interrupted,
-            ))),
-            true,
-        ),
+        AgentStatus::Blocked => {
+            let reason = saved.blocked_reason.map(Into::into);
+            // Only a prose question outlives the process: the resumed transcript still shows
+            // it. A dialog does not come back, and a full-lifecycle hook agent's screen is never
+            // re-read, so nothing would correct a block it no longer shows.
+            let hook_lifecycle = session.is_some_and(|session| {
+                crate::detect::full_lifecycle_hook_authority(&session.source, &session.agent)
+            });
+            let status = if reason == Some(BlockedReason::Question) && !hook_lifecycle {
+                Some(RestoredAgentStatus::Blocked(reason))
+            } else {
+                interrupted
+            };
+            (status, true)
+        }
+        AgentStatus::Working => (interrupted, true),
         AgentStatus::Awaiting => (Some(RestoredAgentStatus::Awaiting), true),
         AgentStatus::Done => (None, false),
         AgentStatus::Idle | AgentStatus::Unknown => (None, true),
@@ -693,8 +703,10 @@ fn restore_tab(
                     std::time::Instant::now(),
                 );
             }
-            let (restored_status, seen) =
-                resumed_agent_status(saved_pane.and_then(|pane| pane.agent_status.as_ref()));
+            let (restored_status, seen) = resumed_agent_status(
+                saved_pane.and_then(|pane| pane.agent_status.as_ref()),
+                saved_agent_session,
+            );
             if let Some(status) = restored_status {
                 terminal.restore_agent_status(status, std::time::Instant::now());
             }
@@ -1616,8 +1628,53 @@ mod tests {
         }
     }
 
+    /// An integration reporting a pane's state through lifecycle hooks.
+    #[derive(Clone, Copy)]
+    struct HookIntegration {
+        source: &'static str,
+        label: &'static str,
+        agent: crate::detect::Agent,
+        session: &'static str,
+    }
+
+    const CLAUDE: HookIntegration = HookIntegration {
+        source: "herdr:claude",
+        label: "claude",
+        agent: crate::detect::Agent::Claude,
+        session: "5051dabc-claude-session",
+    };
+
+    /// Full lifecycle authority: herdr never reads its screen for state.
+    const PI: HookIntegration = HookIntegration {
+        source: "herdr:pi",
+        label: "pi",
+        agent: crate::detect::Agent::Pi,
+        session: "restore-pi.jsonl",
+    };
+
+    impl HookIntegration {
+        fn session_ref(self) -> Option<crate::agent_resume::AgentSessionRef> {
+            if self.agent == crate::detect::Agent::Pi {
+                // pi names its session by file.
+                let path = std::env::current_dir().unwrap().join(self.session);
+                return crate::agent_resume::AgentSessionRef::path(path.display().to_string());
+            }
+            crate::agent_resume::AgentSessionRef::id(self.session)
+        }
+    }
+
     /// A claude pane under hook authority, settled in `state`, saved and restored with resume on.
     fn save_and_restore_claude_pane(
+        settle: impl FnOnce(&mut TerminalState),
+        seen: bool,
+    ) -> (crate::app::AppState, TerminalId) {
+        save_and_restore_hook_pane(CLAUDE, settle, seen)
+    }
+
+    /// A pane under `integration`'s hook authority, settled in `state`, saved and restored
+    /// with resume on.
+    fn save_and_restore_hook_pane(
+        integration: HookIntegration,
         settle: impl FnOnce(&mut TerminalState),
         seen: bool,
     ) -> (crate::app::AppState, TerminalId) {
@@ -1631,16 +1688,19 @@ mod tests {
             .clone();
         let terminal = state.terminals.get_mut(&terminal_id).unwrap();
         terminal.cwd = std::env::current_dir().unwrap();
-        terminal.set_detected_state(Some(crate::detect::Agent::Claude), AgentState::Idle);
-        terminal.set_detailed_hook_authority_at(
-            "herdr:claude".into(),
-            "claude".into(),
+        terminal.set_detected_state(Some(integration.agent), AgentState::Idle);
+        // A full-lifecycle hook is only taken from the session the pane is anchored to.
+        terminal.set_persisted_agent_session(crate::agent_resume::PersistedAgentSession {
+            source: integration.source.into(),
+            agent: integration.label.into(),
+            session_ref: integration.session_ref().unwrap(),
+        });
+        report_as(
+            integration,
+            terminal,
             AgentState::Idle,
-            crate::terminal::HookReportDetail::default(),
-            None,
-            crate::agent_resume::AgentSessionRef::id("5051dabc-claude-session"),
-            Some(1),
-            std::time::Instant::now(),
+            Default::default(),
+            1,
         );
         settle(terminal);
         state.workspaces[0].tabs[0]
@@ -1682,7 +1742,8 @@ mod tests {
             restored.terminals[&terminal_id]
                 .pending_agent_resume_plan
                 .is_some(),
-            "the claude session resumes"
+            "the {} session resumes",
+            integration.label
         );
         (restored, terminal_id)
     }
@@ -1693,21 +1754,52 @@ mod tests {
         detail: crate::terminal::HookReportDetail,
         seq: u64,
     ) {
+        report_as(CLAUDE, terminal, state, detail, seq);
+    }
+
+    fn report_as(
+        integration: HookIntegration,
+        terminal: &mut TerminalState,
+        state: AgentState,
+        detail: crate::terminal::HookReportDetail,
+        seq: u64,
+    ) {
         terminal.set_detailed_hook_authority_at(
-            "herdr:claude".into(),
-            "claude".into(),
+            integration.source.into(),
+            integration.label.into(),
             state,
             detail,
             None,
-            crate::agent_resume::AgentSessionRef::id("5051dabc-claude-session"),
+            integration.session_ref(),
             Some(seq),
             std::time::Instant::now(),
         );
     }
 
     fn resumed_session_reports_idle(state: &mut crate::app::AppState, terminal_id: &TerminalId) {
+        resumed_session_reports_idle_as(CLAUDE, state, terminal_id);
+    }
+
+    fn resumed_session_reports_idle_as(
+        integration: HookIntegration,
+        state: &mut crate::app::AppState,
+        terminal_id: &TerminalId,
+    ) {
         let terminal = state.terminals.get_mut(terminal_id).unwrap();
-        report(terminal, AgentState::Idle, Default::default(), 100);
+        report_as(
+            integration,
+            terminal,
+            AgentState::Idle,
+            Default::default(),
+            100,
+        );
+    }
+
+    fn blocked(reason: Option<crate::detect::BlockedReason>) -> crate::terminal::HookReportDetail {
+        crate::terminal::HookReportDetail {
+            blocked_reason: reason,
+            ..Default::default()
+        }
     }
 
     #[tokio::test]
@@ -1757,6 +1849,54 @@ mod tests {
                 Some(crate::detect::BlockedReason::Interrupted),
                 "{detail:?}"
             );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_dialog_open_before_a_restart_restores_as_interrupted() {
+        use crate::detect::BlockedReason;
+        // A resumed claude shows the dialog as rejected or declined, not open (herdr-fork 063).
+        for reason in [
+            Some(BlockedReason::Permission),
+            Some(BlockedReason::Form),
+            None,
+        ] {
+            let (mut restored, terminal_id) = save_and_restore_claude_pane(
+                |terminal| report(terminal, AgentState::Blocked, blocked(reason), 2),
+                true,
+            );
+            resumed_session_reports_idle(&mut restored, &terminal_id);
+
+            let terminal = &restored.terminals[&terminal_id];
+            assert_eq!(terminal.state, AgentState::Blocked, "{reason:?}");
+            assert_eq!(
+                terminal.blocked_reason(),
+                Some(BlockedReason::Interrupted),
+                "{reason:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_full_lifecycle_hook_block_restores_as_interrupted() {
+        use crate::detect::BlockedReason;
+        for reason in [None, Some(BlockedReason::Question)] {
+            let (mut restored, terminal_id) = save_and_restore_hook_pane(
+                PI,
+                |terminal| report_as(PI, terminal, AgentState::Blocked, blocked(reason), 2),
+                true,
+            );
+            resumed_session_reports_idle_as(PI, &mut restored, &terminal_id);
+
+            let terminal = &restored.terminals[&terminal_id];
+            assert!(terminal.full_lifecycle_hook_authority_active());
+            assert_eq!(terminal.state, AgentState::Blocked, "{reason:?}");
+            assert_eq!(
+                terminal.blocked_reason(),
+                Some(BlockedReason::Interrupted),
+                "{reason:?}"
+            );
+            restored.assert_invariants_for_test();
         }
     }
 

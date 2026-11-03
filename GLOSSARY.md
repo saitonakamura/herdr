@@ -50,7 +50,7 @@ Focusing a done agent's pane while the outer terminal has focus. One acknowledge
 _Avoid_: seen, read, ack
 
 **Blocked reason**:
-What a blocked agent waits on: a `question` asked in prose, a tool `permission`, a `form` to fill in, or a decision on a turn a restart `interrupted`.
+What a blocked agent waits on: a `question` asked in prose, a tool `permission`, a `form` to fill in, or a decision on a turn or prompt a restart `interrupted`.
 _Avoid_: block type, blocker
 
 **Wanted**:

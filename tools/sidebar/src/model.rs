@@ -128,7 +128,7 @@ fn blocked_word(reason: Option<BlockedReason>) -> &'static str {
         Some(BlockedReason::Question) => "question",
         Some(BlockedReason::Permission) => "permission",
         Some(BlockedReason::Form) => "form",
-        Some(BlockedReason::Interrupted) => "interrupted",
+        Some(BlockedReason::Interrupted) => "interrupted by restart",
         Some(BlockedReason::Unknown) | None => "blocked",
     }
 }
@@ -1587,6 +1587,28 @@ mod tests {
             reason(&extras)[3].as_deref(),
             Some("done: 049 done: PR merged")
         );
+    }
+
+    #[test]
+    fn an_interrupted_turn_says_a_restart_cut_it_off_unless_loom_says_why() {
+        let mut snapshot = attention_snapshot();
+        let b = pane_mut(&mut snapshot, "b");
+        b.blocked_reason = Some(BlockedReason::Interrupted);
+        let reason = |snapshot: &SessionSnapshot| {
+            section_rows(&build_attention(
+                snapshot,
+                &Extras::default(),
+                &UiState::default(),
+            ))
+            .into_iter()
+            .find(|r| r.agent_id.as_deref() == Some("b"))
+            .and_then(|r| r.reason)
+        };
+        assert_eq!(reason(&snapshot).as_deref(), Some("interrupted by restart"));
+        pane_mut(&mut snapshot, "b")
+            .annotations
+            .insert("reason".into(), "pick a db".into());
+        assert_eq!(reason(&snapshot).as_deref(), Some("pick a db"));
     }
 
     #[test]

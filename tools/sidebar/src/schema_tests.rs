@@ -174,7 +174,7 @@ fn assert_request(schema: &Value, method: &str, params: &Value) {
 fn requests_match_herdrs_methods_and_params() {
     use crate::app::{App, Effect};
     use crate::config::from_table;
-    use crate::menu::tests::{agent, menu, press as menu_press, typed, Stub, LOOM};
+    use crate::menu::tests::{agent, interrupted, menu, press as menu_press, typed, Stub, LOOM};
     use crate::menu::{Exit, Subject};
     use crate::model::{fixtures::snapshot, UiState};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -218,6 +218,7 @@ fn requests_match_herdrs_methods_and_params() {
         (agent(None), "", "cy"),
         (agent(None), "", "p"),
         (agent(Some("done")), LOOM, "co"),
+        (interrupted(), "", "C"),
         (ws(), "", "rx\n"),
         (ws(), "", "cy"),
         (ws(), "", "wfeat\n"),
@@ -261,6 +262,7 @@ fn requests_match_herdrs_methods_and_params() {
     for expected in [
         "workspace.focus",
         "pane.focus",
+        "agent.prompt",
         "workspace.create",
         "plugin.pane.open",
         "message.send",

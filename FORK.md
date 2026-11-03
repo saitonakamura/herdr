@@ -199,9 +199,12 @@ it draws and does is 018's resolution (`.issues/herdr-fork/018-sidebar-content.m
   latest report's first line, and one entry per action with its key; the key, j/k
   and Enter, or a click runs one, and Esc closes it, giving keyboard focus back to
   the sidebar when it held it.
-  - Agent: **open report** (`o`; closing it acks an unread one), **ack** (`a`,
-    while a report is unread), **reply** (`r`), **tell** (`t`), **close** (`c`),
-    **scope to subtree** (`f`), **open in loom ui** (`p`).
+  - Agent: **continue** (`C`, only while it is blocked on a turn a restart
+    interrupted, 053: it types "continue" through `agent.prompt`, which reaches
+    that pane where messages wait, and closes the popup), **open report** (`o`;
+    closing it acks an unread one), **ack** (`a`, while a report is unread),
+    **reply** (`r`), **tell** (`t`), **close** (`c`), **scope to subtree** (`f`),
+    **open in loom ui** (`p`).
   - The report screen (060) has the name, the kind's glyph in its colour, the kind
     and the report's age as its header, then the report as loom wrote it. That
     text comes from the herdr message, not loom's files: its summary without the
@@ -248,7 +251,7 @@ it draws and does is 018's resolution (`.issues/herdr-fork/018-sidebar-content.m
   acked, where the task status settled, muted (complete `✓`, failed `✗`,
   needs_parent `↑`). `unread_done`, `unread_failed`, … in `[sidebar.glyph]` and
   `[sidebar.colors]` set them. The mark makes the `task` token redundant. A row's second line is loom's `reason`, else the blocked
-  reason, else the report kind and the first line of the agent's latest report
+  reason (`interrupted by restart` for a turn a restart cut off), else the report kind and the first line of the agent's latest report
   (`message.list`, read again when it sends one), without the kind loom's summary
   already leads with. A quiet row's age counts from that report's `sent_at_ms`, so
   it survives a sidebar restart; a wanted row's is the program's own clock.

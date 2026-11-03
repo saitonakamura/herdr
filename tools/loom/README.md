@@ -27,6 +27,16 @@ reader supports it. The plugin manifest declares `mr`, `pr`, `ci` and `issues`
 readers through `cockpit read` at work or `homebase read` in personal. A missing
 reader is a server refusal, never a silent local polling fallback.
 
+A reader wait is declared only once the server has read its source. The server
+reads it at once, and `loom wait` waits up to 40 s for that read to land. A failed
+read, a reader refusal, or no read at all cancels the wait, and `loom wait` exits
+1 with the reader's error. The server runs the reader with its own environment,
+not the declaring pane's, so a ref that `loom check` reads from a pane can still
+be unreadable to herdr (loom 110: cockpit's glab had no `GITLAB_TOKEN` and read
+every private MR as a 404). Once the first read has landed, the declare prints
+the state it found, and `wait list` shows each wait's last read or its run of
+failed reads.
+
 `--summary` overrides the generated description. `--json` emits the API result
 inside a `result` envelope. Lists include only the caller's waits, live by
 default; `--all` selects all states, not all agents. Every invocation probes

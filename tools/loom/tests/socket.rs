@@ -191,6 +191,11 @@ fn a_reader_source_round_trips_with_normalized_shorthand() {
                 "wait.declare",
                 json!({"wait":{"wait_id":10,"state":"live"}}),
             ),
+            ("wait.get", json!({"wait":{"wait_id":10,"state":"live"}})),
+            (
+                "wait.get",
+                json!({"wait":{"wait_id":10,"state":"live","last_ok_at_ms":1,"last_state":"open"}}),
+            ),
         ],
     );
     assert!(
@@ -198,6 +203,92 @@ fn a_reader_source_round_trips_with_normalized_shorthand() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        value["result"]["wait"]["last_state"], "open",
+        "the declare answers once the server's first read has landed"
+    );
+}
+
+fn reader_declare(exchanges: Vec<(&'static str, Value)>) -> std::process::Output {
+    let mut all = vec![
+        (
+            "ping",
+            json!({"capabilities":{"agent_waits":true,"wait_sources":["node","run"],"wait_readers":true}}),
+        ),
+        (
+            "wait.declare",
+            json!({"wait":{"wait_id":10,"state":"live"}}),
+        ),
+    ];
+    all.extend(exchanges);
+    run(
+        &[
+            "wait",
+            "--on",
+            "mr:group/project!7",
+            "--until",
+            "merged",
+            "--deadline",
+            "1h",
+            "--then",
+            "self",
+        ],
+        all,
+    )
+}
+
+#[test]
+fn a_reader_wait_whose_first_read_fails_is_refused_and_cancelled() {
+    // 110: the work server's reader had no GITLAB_TOKEN, every read was a 404, and the wait sat live
+    let output = reader_declare(vec![
+        (
+            "wait.get",
+            json!({"wait":{"wait_id":10,"state":"live","errors":1,
+                "last_error":"glab MR gl:group/project!7 failed: 404 Project Not Found"}}),
+        ),
+        (
+            "wait.cancel",
+            json!({"wait":{"wait_id":10,"state":"cancelled"}}),
+        ),
+    ]);
+    assert!(
+        !output.status.success(),
+        "a wait the server cannot read is not live"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("404 Project Not Found"), "{stderr}");
+    assert!(stderr.contains("cancelled"), "{stderr}");
+    assert!(output.stdout.is_empty(), "nothing reads as declared");
+}
+
+#[test]
+fn a_reader_wait_the_reader_refuses_is_refused() {
+    let output = reader_declare(vec![(
+        "wait.get",
+        json!({"wait":{"wait_id":10,"state":"fired","errors":1,"last_error":"pr: bad ref",
+            "fired":{"reason":"failed: the reader cannot read this source","to":[]}}}),
+    )]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("pr: bad ref"), "{stderr}");
+}
+
+#[test]
+fn a_reader_wait_settled_by_its_first_read_says_so() {
+    let output = reader_declare(vec![(
+        "wait.get",
+        json!({"wait":{"wait_id":10,"state":"satisfied","summary":"mr:gl:group/project!7 reaches merged",
+            "last_ok_at_ms":1,"last_state":"merged","deadline_at_ms":2,"then":"self","extensions":0}}),
+    )]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("10 satisfied"), "{stdout}");
+    assert!(stdout.contains("last read merged"), "{stdout}");
 }
 
 #[test]

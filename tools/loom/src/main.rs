@@ -68,8 +68,17 @@ fn run() -> Result<(), String> {
         request.params["on"]["target"] =
             runs::resolve(caller.as_deref().ok_or("LOOM_NODE is required")?, name)?.into();
     }
+    let reader = request.method == "wait.declare"
+        && !["node", "run"].contains(&request.params["on"]["kind"].as_str().unwrap_or("node"));
     // Monitoring, persistence, cycle checks and the two-extension budget stay server-owned.
-    let result = socket::call(&path, request.method, request.params)?;
+    let mut result = socket::call(&path, request.method, request.params)?;
+    if reader {
+        result["wait"] = first_read(
+            &path,
+            caller.as_deref().unwrap_or_default(),
+            &result["wait"],
+        )?;
+    }
     if request.json {
         println!("{}", serde_json::json!({"result":result}));
     } else if let Some(waits) = result["waits"].as_array() {
@@ -87,10 +96,73 @@ fn run() -> Result<(), String> {
     Ok(())
 }
 
+/// How long the server's first read may take to land: its 30 s read timeout and a margin.
+#[cfg(unix)]
+const FIRST_READ: std::time::Duration = std::time::Duration::from_secs(40);
+
+/// A reader wait counts as declared only once the server has read its source, which it does at
+/// once: a reader that works in the caller's pane can still fail in the server's env (110).
+#[cfg(unix)]
+fn first_read(
+    path: &std::path::Path,
+    caller: &str,
+    declared: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let id = declared["wait_id"]
+        .as_u64()
+        .ok_or("declare returned no wait id")?;
+    let started = std::time::Instant::now();
+    let refuse = |why: String| {
+        let cancelled = socket::call(
+            path,
+            "wait.cancel",
+            serde_json::json!({"wait_id": id, "by": caller}),
+        );
+        let after = match cancelled {
+            Ok(_) => format!("wait {id} cancelled"),
+            Err(err) => {
+                format!("cancelling wait {id} failed too ({err}); run loom wait cancel {id}")
+            }
+        };
+        Err(format!("refused: the server cannot read this source: {why}; {after}. herdr reads it with the server's env, not this pane's"))
+    };
+    loop {
+        let wait =
+            socket::call(path, "wait.get", serde_json::json!({"wait_id": id}))?["wait"].clone();
+        let error = wait["last_error"].as_str().unwrap_or("no read landed");
+        match wait["state"].as_str() {
+            Some("live") if wait["last_ok_at_ms"].is_u64() => return Ok(wait),
+            Some("live") if wait["errors"].as_u64().unwrap_or(0) > 0 => {
+                return refuse(error.to_owned())
+            }
+            Some("live") => {}
+            Some("fired") => {
+                return Err(format!(
+                    "refused: {} ({error}); wait {id} already fired",
+                    wait["fired"]["reason"].as_str().unwrap_or("the wait fired")
+                ))
+            }
+            _ => return Ok(wait),
+        }
+        if started.elapsed() >= FIRST_READ {
+            return refuse(format!("no read landed within {}s", FIRST_READ.as_secs()));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+}
+
 #[cfg(unix)]
 fn print_wait(wait: &serde_json::Value) {
+    let read = match (wait["errors"].as_u64(), wait["last_state"].as_str()) {
+        (Some(errors), _) if errors > 0 => format!(
+            ", {errors} failed reads in a row: {}",
+            wait["last_error"].as_str().unwrap_or("unknown error")
+        ),
+        (_, Some(state)) => format!(", last read {state}"),
+        _ => String::new(),
+    };
     println!(
-        "{} {} — {} (deadline {} ms, then {}, extensions {})",
+        "{} {} — {} (deadline {} ms, then {}, extensions {}{read})",
         wait["wait_id"],
         wait["state"].as_str().unwrap_or("unknown"),
         wait["summary"].as_str().unwrap_or("agent wait"),

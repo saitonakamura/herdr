@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-restore-dead-blocks-as-interrupted
 title: A restart restores a block whose prompt died with the old process as interrupted
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee: saitonakamura
-claimed_by:
+claimed_by: macos/w1:p23/52dbb064-5732-49f0-93df-694474c707a8
 ---
 
 ## Question

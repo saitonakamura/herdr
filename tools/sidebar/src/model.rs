@@ -75,7 +75,7 @@ pub fn unread_kind(pane: &PaneInfo) -> Option<&str> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LoomMark {
     pub meaning: Meaning,
-    /// Coloured while the report is unread, muted once read.
+    /// Coloured while the report is unread, muted once acked.
     pub unread: bool,
 }
 

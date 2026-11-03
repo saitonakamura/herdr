@@ -167,12 +167,14 @@ fn assert_request(schema: &Value, method: &str, params: &Value) {
     }
 }
 
-/// Every request the sidebar sends: those the app builds, driven through it,
-/// and the runner's own.
+/// Every request the sidebar and its menu send: those the app and the menu
+/// build, driven through them, and the runners' own.
 #[test]
 fn requests_match_herdrs_methods_and_params() {
     use crate::app::{App, Effect};
     use crate::config::from_table;
+    use crate::menu::tests::{agent, menu, press as menu_press, typed, Stub, LOOM};
+    use crate::menu::{Exit, Subject};
     use crate::model::{fixtures::snapshot, UiState};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -180,20 +182,12 @@ fn requests_match_herdrs_methods_and_params() {
         ("session.snapshot".into(), json!({})),
         ("message.list".into(), json!({ "pending": true })),
         ("message.list".into(), json!({ "from": "a" })),
-        (
-            "message.send".into(),
-            json!({ "to": "a", "summary": "s", "kind": "reply", "reply_to": 1 }),
-        ),
         ("session_pane.unfocus".into(), json!({})),
+        ("session_pane.focus".into(), json!({})),
         (
-            "agent.close".into(),
-            json!({ "targets": ["a"], "dry_run": true }),
+            "popup.open".into(),
+            json!({ "argv": ["herdr-sidebar", "menu", "pane", "w1:p3"], "env": { "HERDR_SOCKET_PATH": "/s" }, "width": "60%", "height": "60%" }),
         ),
-        (
-            "agent.close".into(),
-            json!({ "targets": ["a"], "force": true }),
-        ),
-        ("popup.open".into(), json!({ "argv": ["loom"] })),
         ("events.subscribe".into(), json!({ "subscriptions": [] })),
     ];
     let mut app = App::new(from_table(&toml::Table::new()), UiState::default());
@@ -210,28 +204,38 @@ fn requests_match_herdrs_methods_and_params() {
         app.selected = Some(key.into());
         collect(press(&mut app, KeyCode::Enter));
     }
-    app.selected = Some("pane:w1:p3".into());
-    collect(press(&mut app, KeyCode::Char('p')));
-    press(&mut app, KeyCode::Char('t'));
-    press(&mut app, KeyCode::Char('x'));
-    collect(press(&mut app, KeyCode::Enter));
-    // the header menu: rename, then new worktree
-    for down in [0, 2] {
-        app.selected = Some("ws:w1".into());
-        press(&mut app, KeyCode::Char('m'));
-        for _ in 0..down {
-            press(&mut app, KeyCode::Char('j'));
+
+    // the menu, through a stub that records its requests
+    let mut stub = Stub::default();
+    let ws = || Subject::Workspace {
+        workspace_id: "w1".into(),
+        label: "dogfood".into(),
+    };
+    let scripts: Vec<(Subject, &str, &str)> = vec![
+        (agent(None), "", "rgo on\n"),
+        (agent(None), "", "thi\n"),
+        (agent(None), "", "cy"),
+        (agent(None), "", "p"),
+        (agent(Some("done")), LOOM, "co"),
+        (ws(), "", "rx\n"),
+        (ws(), "", "cy"),
+        (ws(), "", "wfeat\n"),
+    ];
+    for (subject, config, keys) in scripts {
+        let mut m = menu(subject, config);
+        for c in keys.chars() {
+            if c == '\n' {
+                menu_press(&mut m, KeyCode::Enter);
+            } else {
+                typed(&mut m, &c.to_string());
+            }
+            m.work(&mut stub);
         }
-        press(&mut app, KeyCode::Enter);
-        press(&mut app, KeyCode::Char('x'));
-        collect(press(&mut app, KeyCode::Enter));
+        if let Some(Exit::After(method, params)) = m.exit.take() {
+            sent.push((method.to_string(), params));
+        }
     }
-    app.selected = Some("ws:w1".into());
-    press(&mut app, KeyCode::Char('m'));
-    press(&mut app, KeyCode::Char('j'));
-    press(&mut app, KeyCode::Enter);
-    let effects = press(&mut app, KeyCode::Char('y'));
-    collect(effects);
+    sent.extend(stub.calls);
 
     let methods: Vec<&str> = sent.iter().map(|(m, _)| m.as_str()).collect();
     for expected in [
@@ -239,6 +243,8 @@ fn requests_match_herdrs_methods_and_params() {
         "pane.focus",
         "workspace.create",
         "plugin.pane.open",
+        "message.send",
+        "agent.close",
         "workspace.rename",
         "worktree.create",
         "workspace.close",

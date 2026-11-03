@@ -380,52 +380,27 @@ fn execute(app: &mut App, client: &Client, paths: &Paths, effect: Effect) -> boo
             }
             false
         }
-        Effect::Reply { agent_id, summary } => {
-            let reply_to = client
-                .call("message.list", json!({ "from": agent_id }))
-                .ok()
-                .and_then(|result| {
-                    api::messages_from_result(&result)
-                        .into_iter()
-                        .filter(|m| m.kind == MessageKind::Report)
-                        .map(|m| m.message_id)
-                        .max()
-                });
-            let mut params = json!({ "to": agent_id, "summary": summary, "kind": "reply" });
-            if let Some(id) = reply_to {
-                params["reply_to"] = json!(id);
+        Effect::Menu { target, refocus } => {
+            let exe = std::env::current_exe()
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_else(|_| "herdr-sidebar".into());
+            let mut argv = vec![exe, "menu".to_string()];
+            argv.extend(target.args());
+            if refocus {
+                argv.push("--refocus".into());
             }
-            if let Err(err) = client.call("message.send", params) {
-                app.set_status(format!("reply: {err}"));
+            // the popup's own environment comes from the server; these pin it to this session and config
+            let mut env = serde_json::Map::new();
+            env.insert("HERDR_SOCKET_PATH".into(), json!(client.socket));
+            env.insert("HERDR_CONFIG_PATH".into(), json!(paths.config));
+            if let Ok(session) = std::env::var("HERDR_SESSION") {
+                env.insert("HERDR_SESSION".into(), json!(session));
             }
-            true
-        }
-        Effect::ClosePreview { agent_id, name } => {
-            let result = client
-                .call(
-                    "agent.close",
-                    json!({ "targets": [agent_id], "dry_run": true }),
-                )
-                .map(|result| closed_names(&result));
-            app.close_preview(agent_id, name, result);
+            let params = json!({ "argv": argv, "env": env, "width": "70%", "height": "60%" });
+            if let Err(err) = client.call("popup.open", params) {
+                app.set_status(format!("menu: {err}"));
+            }
             false
-        }
-        Effect::Close {
-            agent_id,
-            name,
-            force,
-        } => {
-            match client.call(
-                "agent.close",
-                json!({ "targets": [agent_id], "force": force }),
-            ) {
-                Ok(result) => app.set_status(format!(
-                    "closed {name}: {} pane(s)",
-                    closed_names(&result).len()
-                )),
-                Err(err) => app.close_failed(agent_id, name, force, err),
-            }
-            true
         }
         Effect::Run { argv, popup } => {
             if popup {
@@ -447,27 +422,7 @@ fn execute(app: &mut App, client: &Client, paths: &Paths, effect: Effect) -> boo
     }
 }
 
-fn closed_names(result: &serde_json::Value) -> Vec<String> {
-    result
-        .get("agents")
-        .and_then(|agents| agents.as_array())
-        .map(|agents| {
-            agents
-                .iter()
-                .map(|agent| {
-                    agent["name"]
-                        .as_str()
-                        .or(agent["agent_id"].as_str())
-                        .or(agent["pane_id"].as_str())
-                        .unwrap_or("?")
-                        .to_string()
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn spawn_detached(argv: &[String]) -> std::io::Result<()> {
+pub(crate) fn spawn_detached(argv: &[String]) -> std::io::Result<()> {
     use std::os::unix::process::CommandExt;
     let mut child = Process::new(&argv[0])
         .args(&argv[1..])

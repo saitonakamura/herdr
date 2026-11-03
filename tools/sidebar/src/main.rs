@@ -10,7 +10,10 @@ mod config;
 mod glyphs;
 mod keys;
 mod layout;
+mod menu;
 mod model;
+#[cfg(unix)]
+mod popup;
 #[cfg(unix)]
 mod run;
 #[cfg(test)]
@@ -21,6 +24,10 @@ const USAGE: &str = "\
 usage: herdr-sidebar [run]                the sidebar, as the sidebar pane runs it
        herdr-sidebar ctl fold [<pane>]    fold or unfold that pane's node (default: the focused pane)
        herdr-sidebar ctl scope [<pane>]   scope to that pane's subtree, or clear the scope
+       herdr-sidebar ctl collapse-others [<pane>|<workspace>]
+                                          collapse every workspace but that one
+       herdr-sidebar menu pane <pane> | workspace <workspace> [--refocus]
+                                          a row's menu, as the sidebar opens it in a popup
        herdr-sidebar glyphs               print the glyph table in use
        herdr-sidebar --version";
 
@@ -43,9 +50,20 @@ fn main() {
             );
             0
         }
-        ["ctl", verb @ ("fold" | "scope"), rest @ ..] if rest.len() <= 1 => {
+        ["ctl", verb @ ("fold" | "scope" | "collapse-others"), rest @ ..] if rest.len() <= 1 => {
             ctl(verb, rest.first().copied())
         }
+        ["menu", kind, id, rest @ ..] if rest.is_empty() || rest == ["--refocus"] => {
+            match menu::Target::parse(kind, id) {
+                Some(target) => menu(target, !rest.is_empty()),
+                None => {
+                    eprintln!("{USAGE}");
+                    2
+                }
+            }
+        }
+        // the menu's request that has to wait for its popup to close
+        ["after-popup", method, params] => after_popup(method, params),
         [] | ["run"] => run(),
         _ => {
             eprintln!("{USAGE}");
@@ -64,6 +82,38 @@ fn ctl(verb: &str, pane: Option<&str>) -> i32 {
             1
         }
     }
+}
+
+#[cfg(unix)]
+fn menu(target: menu::Target, refocus: bool) -> i32 {
+    match popup::show(target, refocus) {
+        Ok(code) => code,
+        Err(err) => {
+            eprintln!("herdr-sidebar: menu: {err}");
+            1
+        }
+    }
+}
+
+#[cfg(unix)]
+fn after_popup(method: &str, params: &str) -> i32 {
+    match popup::after_popup(method, params) {
+        Ok(()) => 0,
+        Err(err) => {
+            eprintln!("herdr-sidebar: after-popup {method}: {err}");
+            1
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn menu(_target: menu::Target, _refocus: bool) -> i32 {
+    run()
+}
+
+#[cfg(not(unix))]
+fn after_popup(_method: &str, _params: &str) -> i32 {
+    run()
 }
 
 #[cfg(unix)]

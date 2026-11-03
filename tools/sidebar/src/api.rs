@@ -103,6 +103,8 @@ pub struct MessageInfo {
     #[serde(default)]
     pub summary: String,
     #[serde(default)]
+    pub body: Option<String>,
+    #[serde(default)]
     pub sent_at_ms: Option<u64>,
 }
 

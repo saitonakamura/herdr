@@ -180,10 +180,35 @@ it draws and does is 018's resolution (`.issues/herdr-fork/018-sidebar-content.m
 
   Actions are `reply`, `tell`, `close`, `ack`, `ui`, `rename`, `close_workspace`,
   `new_worktree` and `new_workspace`; `{agent_id}`, `{pane_id}`, `{workspace_id}`
-  and `{name}` are filled in. `popup = true` runs the command through the
-  fork-only `popup.open`, otherwise detached. Without an override `ui` opens loom's
-  `ui` plugin popup, and `ack` (the `a` key, mark read) does nothing: herdr has no
-  unread reports of its own.
+  and `{name}` are filled in. Started from the menu, `popup = true` runs the
+  command in the menu's own popup, otherwise detached (`new_workspace`, on the
+  `+ new` row, goes through `popup.open`). Without an override `ui` opens loom's
+  `ui` plugin popup once the menu's has closed, and `ack` says it is not
+  configured: herdr has no unread reports of its own. `ack` and `close` run inside
+  the menu, which waits for them and shows what they print.
+- **Keys and the menu** (059). Navigation, `h`/`l` and `za` folding, `f` scope,
+  `/` search and Enter (focus the row's pane) are the sidebar's own keys. A row's
+  actions live in its menu: `m` or a right-click on an agent row, an attention row
+  or a workspace header opens `herdr-sidebar menu pane|workspace <id>` through
+  `popup.open`, which reads what it shows through the API and reaches the
+  sidebar's scope and sections through `ctl`. The popup shows the name and the
+  latest report's first line, and one entry per action with its key; the key, j/k
+  and Enter, or a click runs one, and Esc closes it, giving keyboard focus back to
+  the sidebar when it held it.
+  - Agent: **open report** (`o`, the latest report's summary and body; closing it
+    acks an unread one), **ack** (`a`, while a report is unread), **reply** (`r`),
+    **tell** (`t`), **close** (`c`), **scope to subtree** (`f`), **open in loom
+    ui** (`p`).
+  - Workspace: **rename** (`r`), **close** (`c`), **new worktree** (`w`),
+    **collapse others** (`o`).
+  - With `[sidebar.actions] close`, close asks for an outcome, ok or struggled
+    (with a why), and runs the override with `--outcome <it>` (and `--why`)
+    appended, loom's flags. When it refuses, the menu offers `--force`; when
+    unread reports are all that hold it (every line loom names a node on reads
+    `[<id>] unseen:`), it also offers **ack and close**, listing each report's
+    first line before acking them through `ack`. Without the override, close is herdr's
+    `agent.close`: the panes it would take, a confirm, and `--force` on
+    `agent_subtree_busy`.
 - **Attention** (052). A section pinned above the trees lists, session-wide
   whatever the scope, every wanted agent (task status `needs_user`, or blocked) and
   every agent with an unread report (loom's `unseen` annotation). It is hidden when
@@ -193,7 +218,7 @@ it draws and does is 018's resolution (`.issues/herdr-fork/018-sidebar-content.m
   and bolds the name. Every row carries at most one loom mark after its name: the
   unread report's kind in its colour (done `✓`, failed `✗`, blocked `↑`, asking
   `?`, handoff `→`, any other `•`; nerd glyphs in the `nerd` set), else, once
-  read, where the task status settled, muted (complete `✓`, failed `✗`,
+  acked, where the task status settled, muted (complete `✓`, failed `✗`,
   needs_parent `↑`). `unread_done`, `unread_failed`, … in `[sidebar.glyph]` and
   `[sidebar.colors]` set them. The mark makes the `task` token redundant. A row's second line is loom's `reason`, else the blocked
   reason, else the report kind and the first line of the agent's latest report
@@ -201,12 +226,13 @@ it draws and does is 018's resolution (`.issues/herdr-fork/018-sidebar-content.m
   already leads with. A quiet row's age counts from that report's `sent_at_ms`, so
   it survives a sidebar restart; a wanted row's is the program's own clock.
   About 10 s of focus draws a loud row as steady until its state next changes;
-  that is the program's own memory, and never marks anything read.
+  that is the program's own memory, and never acks anything.
 - **State.** Collapsed sections, folds and the scope live in
-  `$XDG_STATE_HOME/herdr/sidebar/<session>.json`. `herdr-sidebar ctl fold|scope
-  [<pane>]` talks to the running program over `<HERDR_SOCKET_PATH>.sidebar`, so
-  a keybind in any pane of the session reaches it; without a pane it acts on the
-  focused one.
+  `$XDG_STATE_HOME/herdr/sidebar/<session>.json`. `herdr-sidebar ctl
+  fold|scope|collapse-others [<pane>]` talks to the running program over
+  `<HERDR_SOCKET_PATH>.sidebar`, so a keybind in any pane of the session, or the
+  menu, reaches it; without a pane it acts on the focused one, and
+  `collapse-others` also takes a workspace id.
 - **Shipping.** `fork-release.yml` builds `herdr-sidebar-<os>-<arch>` for the four
   unix targets beside `herdr`, in `SHA256SUMS`; `scripts/dogfood.sh` installs it
   beside `herdr`. Windows builds only a stub and keeps the native sidebar.

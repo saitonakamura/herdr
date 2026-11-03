@@ -23,8 +23,6 @@ pub enum Target {
     ToggleFold(String),
     NewWorkspace,
     ClearScope,
-    /// An entry of the open inline menu.
-    Menu(usize),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -320,7 +318,7 @@ fn state_style(color: Option<Color>, mark: Option<Mark>) -> Style {
     }
 }
 
-/// The loom mark after a row's name: coloured while its report is unread, muted once read.
+/// The loom mark after a row's name: coloured while its report is unread, muted once acked.
 fn loom_mark_span(mark: Option<LoomMark>, config: &Config) -> Option<Span> {
     let mark = mark?;
     let glyph = config.glyphs.get(mark.meaning);

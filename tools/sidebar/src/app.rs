@@ -1,36 +1,28 @@
-//! The interactive sidebar: selection, modes, menus and actions. It never does
-//! IO itself; it returns `Effect`s for the runner and takes results back.
+//! The interactive sidebar: selection, search, folding and scope. A row's actions
+//! live in its menu, a herdr popup (`menu`). It never does IO itself; it returns
+//! `Effect`s for the runner and takes results back.
 
+use crate::api::SessionSnapshot;
+use crate::config::Config;
+use crate::keys::{Command, KeyTable};
+use crate::layout::{self, cut, Line, Target};
+use crate::menu;
+use crate::model::{self, Extras, Item, Scope, UiState};
 use crossterm::event::{
     KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use ratatui::buffer::Buffer;
 use ratatui::style::{Modifier, Style};
 use serde_json::json;
-use unicode_width::UnicodeWidthStr;
-
-use crate::api::{ApiError, SessionSnapshot};
-use crate::config::Config;
-use crate::keys::{Command, KeyTable};
-use crate::layout::{self, cut, Line, Span, Target};
-use crate::model::{self, Extras, Item, Scope, UiState};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Effect {
     /// A request whose only outcome worth showing is an error.
     Call(&'static str, serde_json::Value),
-    Reply {
-        agent_id: String,
-        summary: String,
-    },
-    ClosePreview {
-        agent_id: String,
-        name: String,
-    },
-    Close {
-        agent_id: String,
-        name: String,
-        force: bool,
+    /// Open the row's menu in a popup; `refocus` when the sidebar holds keyboard focus.
+    Menu {
+        target: menu::Target,
+        refocus: bool,
     },
     /// Hand keyboard focus back to the focused pane.
     Unfocus,
@@ -42,44 +34,10 @@ pub enum Effect {
     Persist,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PromptKind {
-    Reply { agent_id: String, name: String },
-    Tell { agent_id: String, name: String },
-    Rename { workspace_id: String },
-    Worktree { workspace_id: String },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum MenuAction {
-    Rename(String),
-    CloseWorkspace(String, String),
-    NewWorktree(String),
-    CollapseOthers(String),
-    Reply(String, String),
-    Tell(String, String),
-    CloseSubtree(String, String),
-    Scope(String),
-    OpenUi(String, String),
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum Mode {
     Normal,
     Search,
-    Prompt {
-        kind: PromptKind,
-        input: String,
-    },
-    Confirm {
-        lines: Vec<String>,
-        on_yes: Box<Effect>,
-    },
-    Menu {
-        key: String,
-        entries: Vec<(String, MenuAction)>,
-        selected: usize,
-    },
 }
 
 /// What a screen row shows: a line of the list, or a line of the bottom overlay.
@@ -227,59 +185,6 @@ impl App {
         }
     }
 
-    fn reply(&mut self, agent_id: String, name: String) -> Vec<Effect> {
-        let vars = [("agent_id", agent_id.as_str()), ("name", name.as_str())];
-        let effects = self.action("reply", &vars, Vec::new);
-        if effects.is_empty() {
-            self.mode = Mode::Prompt {
-                kind: PromptKind::Reply { agent_id, name },
-                input: String::new(),
-            };
-        }
-        effects
-    }
-
-    fn tell(&mut self, agent_id: String, name: String) -> Vec<Effect> {
-        let vars = [("agent_id", agent_id.as_str()), ("name", name.as_str())];
-        let effects = self.action("tell", &vars, Vec::new);
-        if effects.is_empty() {
-            self.mode = Mode::Prompt {
-                kind: PromptKind::Tell { agent_id, name },
-                input: String::new(),
-            };
-        }
-        effects
-    }
-
-    fn close(&mut self, agent_id: String, name: String) -> Vec<Effect> {
-        let vars = [("agent_id", agent_id.as_str()), ("name", name.as_str())];
-        self.action("close", &vars, || {
-            vec![Effect::ClosePreview {
-                agent_id: agent_id.clone(),
-                name: name.clone(),
-            }]
-        })
-    }
-
-    /// Mark read has no built-in: herdr doesn't know loom's unread reports.
-    fn mark_read(&mut self, agent_id: &str, pane_id: &str, name: &str) -> Vec<Effect> {
-        let vars = [("agent_id", agent_id), ("pane_id", pane_id), ("name", name)];
-        let effects = self.action("ack", &vars, Vec::new);
-        if effects.is_empty() {
-            self.status = Some("mark read: no [sidebar.actions] ack configured".into());
-        }
-        effects
-    }
-
-    fn open_ui(&self, agent_id: &str, name: &str) -> Vec<Effect> {
-        self.action("ui", &[("agent_id", agent_id), ("name", name)], || {
-            vec![Effect::Call(
-                "plugin.pane.open",
-                json!({ "plugin_id": "loom", "entrypoint": "ui", "placement": "popup", "focus": true }),
-            )]
-        })
-    }
-
     fn toggle_scope(&mut self, scope: Scope) -> Vec<Effect> {
         self.ui.scope = if self.ui.scope.as_ref() == Some(&scope) {
             None
@@ -413,42 +318,17 @@ impl App {
             (Command::ToggleScope, Item::Pane(p)) => {
                 self.toggle_scope(Scope::Workspace(p.workspace_id))
             }
-            (Command::Reply, Item::Agent(a)) => match a.agent_id {
-                Some(id) => self.reply(id, a.name),
-                None => Vec::new(),
-            },
-            (Command::Tell, Item::Agent(a)) => match a.agent_id {
-                Some(id) => self.tell(id, a.name),
-                None => Vec::new(),
-            },
-            (Command::Close, Item::Agent(a)) => self.close(a.agent_id.unwrap_or(a.pane_id), a.name),
-            (Command::Ack, Item::Agent(a)) => self.mark_read(
-                a.agent_id.as_deref().unwrap_or(&a.pane_id),
-                &a.pane_id,
-                &a.name,
-            ),
-            (Command::OpenUi, Item::Agent(a)) => {
-                self.open_ui(a.agent_id.as_deref().unwrap_or(&a.pane_id), &a.name)
-            }
-            (Command::Menu, item) => {
-                self.open_menu(&item);
-                Vec::new()
-            }
+            (Command::Menu, item) => self.open_menu(&item),
             _ => Vec::new(),
         }
     }
 
-    /// An attention row acts on its agent as the tree row does; folding and scope
-    /// belong to the trees.
+    /// An attention row focuses its agent and opens its menu as the tree row does;
+    /// folding and scope belong to the trees.
     fn attention_command(&mut self, command: Command, row: &model::AttentionItem) -> Vec<Effect> {
-        let id = row.agent_id.clone().unwrap_or_else(|| row.pane_id.clone());
         match command {
             Command::Activate => vec![focus_pane(&row.pane_id)],
-            Command::Ack => self.mark_read(&id, &row.pane_id, &row.name),
-            Command::Close => self.close(id, row.name.clone()),
-            Command::Reply if row.agent_id.is_some() => self.reply(id, row.name.clone()),
-            Command::Tell if row.agent_id.is_some() => self.tell(id, row.name.clone()),
-            Command::OpenUi => self.open_ui(&id, &row.name),
+            Command::Menu => self.menu_effect(menu::Target::Pane(row.pane_id.clone())),
             _ => Vec::new(),
         }
     }
@@ -476,150 +356,23 @@ impl App {
         })
     }
 
-    fn open_menu(&mut self, item: &Item) {
-        let entries: Vec<(String, MenuAction)> = match item {
-            Item::Header(h) => vec![
-                ("rename".into(), MenuAction::Rename(h.workspace_id.clone())),
-                (
-                    "close".into(),
-                    MenuAction::CloseWorkspace(h.workspace_id.clone(), h.label.clone()),
-                ),
-                (
-                    "new worktree".into(),
-                    MenuAction::NewWorktree(h.workspace_id.clone()),
-                ),
-                (
-                    "collapse others".into(),
-                    MenuAction::CollapseOthers(h.workspace_id.clone()),
-                ),
-            ],
-            Item::Agent(a) => {
-                let id = a.agent_id.clone().unwrap_or_else(|| a.pane_id.clone());
-                let mut entries = Vec::new();
-                if a.agent_id.is_some() {
-                    entries.push((
-                        "reply".into(),
-                        MenuAction::Reply(id.clone(), a.name.clone()),
-                    ));
-                    entries.push(("tell".into(), MenuAction::Tell(id.clone(), a.name.clone())));
-                }
-                entries.push((
-                    "close subtree".into(),
-                    MenuAction::CloseSubtree(id.clone(), a.name.clone()),
-                ));
-                if a.agent_id.is_some() {
-                    entries.push(("scope to subtree".into(), MenuAction::Scope(id.clone())));
-                }
-                entries.push((
-                    "open in loom ui".into(),
-                    MenuAction::OpenUi(id, a.name.clone()),
-                ));
-                entries
-            }
-            _ => return,
+    fn menu_effect(&self, target: menu::Target) -> Vec<Effect> {
+        vec![Effect::Menu {
+            target,
+            refocus: self.focused,
+        }]
+    }
+
+    /// Agent rows and workspace headers have a menu; it opens in a herdr popup.
+    fn open_menu(&mut self, item: &Item) -> Vec<Effect> {
+        let target = match item {
+            Item::Header(h) => menu::Target::Workspace(h.workspace_id.clone()),
+            Item::Agent(a) => menu::Target::Pane(a.pane_id.clone()),
+            Item::Attention(a) => menu::Target::Pane(a.pane_id.clone()),
+            _ => return Vec::new(),
         };
         self.selected = Some(item.key());
-        self.mode = Mode::Menu {
-            key: item.key(),
-            entries,
-            selected: 0,
-        };
-    }
-
-    fn menu_choose(&mut self, action: MenuAction) -> Vec<Effect> {
-        self.mode = Mode::Normal;
-        match action {
-            MenuAction::Rename(workspace_id) => {
-                let label = self
-                    .snapshot
-                    .workspaces
-                    .iter()
-                    .find(|w| w.workspace_id == workspace_id)
-                    .map(|w| w.label.clone())
-                    .unwrap_or_default();
-                let effects = self.action(
-                    "rename",
-                    &[("workspace_id", &workspace_id), ("name", &label)],
-                    Vec::new,
-                );
-                if effects.is_empty() {
-                    self.mode = Mode::Prompt {
-                        kind: PromptKind::Rename { workspace_id },
-                        input: label,
-                    };
-                }
-                effects
-            }
-            MenuAction::CloseWorkspace(workspace_id, label) => {
-                let vars = [
-                    ("workspace_id", workspace_id.as_str()),
-                    ("name", label.as_str()),
-                ];
-                let effects = self.action("close_workspace", &vars, Vec::new);
-                if effects.is_empty() {
-                    self.mode = Mode::Confirm {
-                        lines: vec![format!("close workspace {label}?")],
-                        on_yes: Box::new(Effect::Call(
-                            "workspace.close",
-                            json!({ "workspace_id": workspace_id }),
-                        )),
-                    };
-                }
-                effects
-            }
-            MenuAction::NewWorktree(workspace_id) => {
-                let effects =
-                    self.action("new_worktree", &[("workspace_id", &workspace_id)], Vec::new);
-                if effects.is_empty() {
-                    self.mode = Mode::Prompt {
-                        kind: PromptKind::Worktree { workspace_id },
-                        input: String::new(),
-                    };
-                }
-                effects
-            }
-            MenuAction::CollapseOthers(workspace_id) => {
-                self.ui.collapsed = self
-                    .snapshot
-                    .workspaces
-                    .iter()
-                    .map(|w| w.workspace_id.clone())
-                    .filter(|id| *id != workspace_id)
-                    .collect();
-                self.ui.collapsed.remove(&workspace_id);
-                vec![Effect::Persist]
-            }
-            MenuAction::Reply(id, name) => self.reply(id, name),
-            MenuAction::Tell(id, name) => self.tell(id, name),
-            MenuAction::CloseSubtree(id, name) => self.close(id, name),
-            MenuAction::Scope(id) => self.toggle_scope(Scope::Subtree(id)),
-            MenuAction::OpenUi(id, name) => self.open_ui(&id, &name),
-        }
-    }
-
-    fn submit_prompt(&mut self, kind: PromptKind, input: String) -> Vec<Effect> {
-        let text = input.trim().to_string();
-        if text.is_empty() {
-            return Vec::new();
-        }
-        match kind {
-            PromptKind::Reply { agent_id, .. } => vec![Effect::Reply {
-                agent_id,
-                summary: text,
-            }],
-            PromptKind::Tell { agent_id, .. } => vec![Effect::Call(
-                "message.send",
-                json!({ "to": agent_id, "summary": text, "kind": "tell" }),
-            )],
-            PromptKind::Rename { workspace_id } => vec![Effect::Call(
-                "workspace.rename",
-                json!({ "workspace_id": workspace_id, "label": text }),
-            )],
-            PromptKind::Worktree { workspace_id } => vec![Effect::Call(
-                "worktree.create",
-                json!({ "workspace_id": workspace_id, "branch": text, "focus": true }),
-            )],
-        }
+        self.menu_effect(target)
     }
 
     pub fn key(&mut self, key: KeyEvent) -> Vec<Effect> {
@@ -665,50 +418,6 @@ impl App {
                 self.selected = None;
                 self.ensure_selection();
             }
-            Mode::Prompt { kind, mut input } => match key.code {
-                KeyCode::Esc => {}
-                KeyCode::Enter => return self.submit_prompt(kind, input),
-                KeyCode::Backspace => {
-                    input.pop();
-                    self.mode = Mode::Prompt { kind, input };
-                }
-                KeyCode::Char('u') if ctrl => {
-                    input.clear();
-                    self.mode = Mode::Prompt { kind, input };
-                }
-                KeyCode::Char(c) if !ctrl => {
-                    input.push(c);
-                    self.mode = Mode::Prompt { kind, input };
-                }
-                _ => self.mode = Mode::Prompt { kind, input },
-            },
-            Mode::Confirm { on_yes, .. } => {
-                if matches!(key.code, KeyCode::Char('y') | KeyCode::Char('Y')) {
-                    return vec![*on_yes];
-                }
-            }
-            Mode::Menu {
-                key: row,
-                entries,
-                selected,
-            } => {
-                let last = entries.len().saturating_sub(1);
-                let selected = match key.code {
-                    KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('m') => return Vec::new(),
-                    KeyCode::Enter => {
-                        let action = entries[selected.min(last)].1.clone();
-                        return self.menu_choose(action);
-                    }
-                    KeyCode::Char('j') | KeyCode::Down => (selected + 1).min(last),
-                    KeyCode::Char('k') | KeyCode::Up => selected.saturating_sub(1),
-                    _ => selected,
-                };
-                self.mode = Mode::Menu {
-                    key: row,
-                    entries,
-                    selected,
-                };
-            }
         }
         Vec::new()
     }
@@ -734,28 +443,15 @@ impl App {
             return Vec::new();
         };
         let line = self.lines[index].clone();
-        let in_menu = matches!(self.mode, Mode::Menu { .. });
-        if let Some(Target::Menu(choice)) = line.target_at(event.column) {
-            if let Mode::Menu { entries, .. } = std::mem::replace(&mut self.mode, Mode::Normal) {
-                if let Some((_, action)) = entries.get(choice) {
-                    return self.menu_choose(action.clone());
-                }
-            }
-            return Vec::new();
-        }
-        if in_menu || matches!(self.mode, Mode::Confirm { .. }) {
-            self.mode = Mode::Normal;
-            return Vec::new();
-        }
         // a spacer row belongs to no item and does nothing
         if line.target.is_none() && line.spans.iter().all(|s| s.target.is_none()) {
             return Vec::new();
         }
         if right {
-            if let Some(item) = self.item(&line.key) {
-                self.open_menu(&item);
-            }
-            return Vec::new();
+            return match self.item(&line.key) {
+                Some(item) => self.open_menu(&item),
+                None => Vec::new(),
+            };
         }
         self.selected = Some(line.key.clone());
         match line.target_at(event.column) {
@@ -774,12 +470,23 @@ impl App {
                 self.ui.scope = None;
                 vec![Effect::Persist]
             }
-            Some(Target::Menu(_)) | None => Vec::new(),
+            None => Vec::new(),
         }
     }
 
-    /// `herdr-sidebar ctl fold|scope [<pane>]`.
+    /// `herdr-sidebar ctl fold|scope|collapse-others [<pane>]`. collapse-others
+    /// also takes a workspace id, and keeps that workspace (or the pane's) open.
     pub fn ctl(&mut self, verb: &str, pane: Option<&str>) -> Result<Vec<Effect>, String> {
+        if verb == "collapse-others" {
+            if let Some(ws) = pane.filter(|id| {
+                self.snapshot
+                    .workspaces
+                    .iter()
+                    .any(|w| w.workspace_id == *id)
+            }) {
+                return Ok(self.collapse_others(ws));
+            }
+        }
         let pane_id = pane
             .map(str::to_string)
             .or_else(|| self.snapshot.focused_pane_id.clone())
@@ -808,47 +515,22 @@ impl App {
                 Some(agent) => self.toggle_scope(Scope::Subtree(agent)),
                 None => self.toggle_scope(Scope::Workspace(pane.workspace_id.clone())),
             }),
-            other => Err(format!("unknown ctl verb {other}; expected fold or scope")),
+            "collapse-others" => Ok(self.collapse_others(&pane.workspace_id)),
+            other => Err(format!(
+                "unknown ctl verb {other}; expected fold, scope or collapse-others"
+            )),
         }
     }
 
-    pub fn close_preview(
-        &mut self,
-        agent_id: String,
-        name: String,
-        result: Result<Vec<String>, ApiError>,
-    ) {
-        match result {
-            Ok(names) => {
-                let mut lines = vec![format!("close {name}: {} pane(s)", names.len())];
-                lines.extend(names.into_iter().map(|n| format!("  {n}")));
-                lines.push("[y/N]".into());
-                self.mode = Mode::Confirm {
-                    lines,
-                    on_yes: Box::new(Effect::Close {
-                        agent_id,
-                        name,
-                        force: false,
-                    }),
-                };
-            }
-            Err(err) => self.close_failed(agent_id, name, false, err),
-        }
-    }
-
-    pub fn close_failed(&mut self, agent_id: String, name: String, forced: bool, err: ApiError) {
-        if err.code == "agent_subtree_busy" && !forced {
-            self.mode = Mode::Confirm {
-                lines: vec![err.message, "still busy; close with --force? [y/N]".into()],
-                on_yes: Box::new(Effect::Close {
-                    agent_id,
-                    name,
-                    force: true,
-                }),
-            };
-        } else {
-            self.status = Some(format!("close {name}: {err}"));
-        }
+    fn collapse_others(&mut self, workspace_id: &str) -> Vec<Effect> {
+        self.ui.collapsed = self
+            .snapshot
+            .workspaces
+            .iter()
+            .map(|w| w.workspace_id.clone())
+            .filter(|id| id != workspace_id)
+            .collect();
+        vec![Effect::Persist]
     }
 
     pub fn set_status(&mut self, text: impl Into<String>) {
@@ -856,44 +538,15 @@ impl App {
     }
 
     fn overlay(&self, width: usize) -> Vec<(String, Style)> {
-        let bold = Style::default().add_modifier(Modifier::BOLD);
         match &self.mode {
-            Mode::Prompt { kind, input } => {
-                let label = match kind {
-                    PromptKind::Reply { name, .. } => format!("reply {name}"),
-                    PromptKind::Tell { name, .. } => format!("tell {name}"),
-                    PromptKind::Rename { .. } => "rename".into(),
-                    PromptKind::Worktree { .. } => "branch".into(),
-                };
-                // show the end of a long input, where the cursor is
-                let prompt = format!("{label}> ");
-                let room = width.saturating_sub(prompt.width() + 1);
-                let shown: String = {
-                    let chars: Vec<char> = input.chars().collect();
-                    let mut start = chars.len();
-                    let mut used = 0;
-                    while start > 0 {
-                        let w =
-                            unicode_width::UnicodeWidthChar::width(chars[start - 1]).unwrap_or(0);
-                        if used + w > room {
-                            break;
-                        }
-                        used += w;
-                        start -= 1;
-                    }
-                    chars[start..].iter().collect()
-                };
-                vec![(format!("{prompt}{shown}▏"), bold)]
-            }
-            Mode::Confirm { lines, .. } => lines.iter().map(|l| (cut(l, width), bold)).collect(),
             Mode::Search => vec![(
                 cut(
                     &format!("/{}▏", self.search.as_deref().unwrap_or("")),
                     width,
                 ),
-                bold,
+                Style::default().add_modifier(Modifier::BOLD),
             )],
-            _ => self
+            Mode::Normal => self
                 .status
                 .iter()
                 .map(|s| (cut(s, width), Style::default().add_modifier(Modifier::DIM)))
@@ -907,37 +560,7 @@ impl App {
         self.height = area.height;
         let width = area.width as usize;
         let items = self.items();
-        let mut lines = layout::lines(&items, area.width, &self.config);
-        if let Mode::Menu {
-            key,
-            entries,
-            selected,
-        } = &self.mode
-        {
-            if let Some(at) = lines.iter().rposition(|l| &l.key == key) {
-                let menu: Vec<Line> = entries
-                    .iter()
-                    .enumerate()
-                    .map(|(index, (label, _))| {
-                        let style = if index == *selected {
-                            Style::default().add_modifier(Modifier::REVERSED)
-                        } else {
-                            Style::default().add_modifier(Modifier::BOLD)
-                        };
-                        Line {
-                            spans: vec![Span {
-                                text: cut(&format!("  › {label}"), width),
-                                style,
-                                target: Some(Target::Menu(index)),
-                            }],
-                            key: key.clone(),
-                            target: Some(Target::Menu(index)),
-                        }
-                    })
-                    .collect();
-                lines.splice(at + 1..at + 1, menu);
-            }
-        }
+        let lines = layout::lines(&items, area.width, &self.config);
         let overlay = self.overlay(width);
         let list_height = (area.height as usize).saturating_sub(overlay.len());
 
@@ -946,7 +569,7 @@ impl App {
             Some(key) => lines
                 .iter()
                 .enumerate()
-                .filter(|(_, l)| &l.key == key && !matches!(l.target, Some(Target::Menu(_))))
+                .filter(|(_, l)| &l.key == key)
                 .map(|(i, _)| i)
                 .collect(),
             None => Vec::new(),
@@ -954,15 +577,10 @@ impl App {
         let max_scroll = lines.len().saturating_sub(list_height);
         if self.follow {
             if let (Some(first), Some(last)) = (selected_lines.first(), selected_lines.last()) {
-                let menu_end = if let Mode::Menu { entries, .. } = &self.mode {
-                    last + entries.len()
-                } else {
-                    *last
-                };
                 if *first < self.scroll {
                     self.scroll = *first;
-                } else if menu_end >= self.scroll + list_height {
-                    self.scroll = (menu_end + 1).saturating_sub(list_height).min(*first);
+                } else if *last >= self.scroll + list_height {
+                    self.scroll = (last + 1).saturating_sub(list_height).min(*first);
                 }
             }
         }
@@ -1028,6 +646,7 @@ mod tests {
     use crate::config::from_table;
     use crate::model::fixtures::snapshot;
     use crossterm::event::KeyModifiers;
+    use unicode_width::UnicodeWidthStr;
 
     fn app(config: &str) -> App {
         let mut app = App::new(from_table(&config.parse().unwrap()), UiState::default());
@@ -1123,109 +742,16 @@ mod tests {
     }
 
     #[test]
-    fn reply_prompts_then_sends_through_the_runner() {
-        let mut app = app("");
-        app.selected = Some("pane:w1:p3".into());
-        assert!(press(&mut app, KeyCode::Char('r')).is_empty());
-        typed(&mut app, "go on");
-        let lines = draw(&mut app, 30, 12);
-        assert_eq!(lines[11], "reply alpha> go on▏");
-        assert_eq!(
-            press(&mut app, KeyCode::Enter),
-            [Effect::Reply {
-                agent_id: "a".into(),
-                summary: "go on".into()
-            }]
-        );
-        assert_eq!(app.mode, Mode::Normal);
-    }
-
-    #[test]
-    fn tell_sends_a_tell_as_the_user() {
-        let mut app = app("");
-        app.selected = Some("pane:w1:p4".into());
-        press(&mut app, KeyCode::Char('t'));
-        typed(&mut app, "hi");
-        assert_eq!(
-            press(&mut app, KeyCode::Enter),
-            [Effect::Call(
-                "message.send",
-                json!({ "to": "b", "summary": "hi", "kind": "tell" })
-            )]
-        );
-    }
-
-    #[test]
-    fn close_previews_confirms_and_offers_force_when_busy() {
-        let mut app = app("");
-        app.selected = Some("pane:w1:p3".into());
-        assert_eq!(
-            press(&mut app, KeyCode::Char('c')),
-            [Effect::ClosePreview {
-                agent_id: "a".into(),
-                name: "alpha".into()
-            }]
-        );
-        app.close_preview(
-            "a".into(),
-            "alpha".into(),
-            Ok(vec!["alpha-one".into(), "alpha".into()]),
-        );
-        let lines = draw(&mut app, 30, 12);
-        assert_eq!(lines[11], "[y/N]");
-        assert_eq!(
-            press(&mut app, KeyCode::Char('y')),
-            [Effect::Close {
-                agent_id: "a".into(),
-                name: "alpha".into(),
-                force: false
-            }]
-        );
-        app.close_failed(
-            "a".into(),
-            "alpha".into(),
-            false,
-            ApiError {
-                code: "agent_subtree_busy".into(),
-                message: "alpha-one working".into(),
-            },
-        );
-        assert_eq!(
-            press(&mut app, KeyCode::Char('y')),
-            [Effect::Close {
-                agent_id: "a".into(),
-                name: "alpha".into(),
-                force: true
-            }]
-        );
-        // anything but y declines
-        app.close_preview("a".into(), "alpha".into(), Ok(vec![]));
-        assert!(press(&mut app, KeyCode::Char('n')).is_empty());
-        assert_eq!(app.mode, Mode::Normal);
-    }
-
-    #[test]
     fn action_overrides_replace_the_builtin() {
-        let mut app = app(
-            r#"actions = { close = { command = ["loom", "close", "{agent_id}"], popup = true } }"#,
-        );
-        app.selected = Some("pane:w1:p3".into());
+        let mut app =
+            app(r#"actions = { new_workspace = { command = ["mk", "ws"], popup = true } }"#);
+        app.selected = Some("new".into());
         assert_eq!(
-            press(&mut app, KeyCode::Char('c')),
+            press(&mut app, KeyCode::Enter),
             [Effect::Run {
-                argv: vec!["loom".into(), "close".into(), "a".into()],
+                argv: vec!["mk".into(), "ws".into()],
                 popup: true
             }]
-        );
-    }
-
-    #[test]
-    fn the_default_ui_action_opens_looms_popup() {
-        let mut app = app("");
-        app.selected = Some("pane:w1:p3".into());
-        let effects = press(&mut app, KeyCode::Char('p'));
-        assert!(
-            matches!(&effects[..], [Effect::Call("plugin.pane.open", params)] if params["plugin_id"] == "loom")
         );
     }
 
@@ -1282,45 +808,47 @@ mod tests {
     }
 
     #[test]
-    fn right_click_opens_an_inline_menu_whose_entries_click() {
+    fn right_click_opens_the_rows_menu_in_a_popup() {
         let mut app = app("glyphs = \"unicode\"");
+        app.focused = false;
         let lines = draw(&mut app, 40, 20);
         let alpha = lines
             .iter()
             .position(|l| l.contains("alpha fork-030"))
             .unwrap();
-        click(&mut app, 3, alpha as u16, MouseButton::Right);
-        let lines = draw(&mut app, 40, 20);
-        assert_eq!(lines[alpha + 1].trim(), "› reply");
-        let scope = lines
-            .iter()
-            .position(|l| l.trim() == "› scope to subtree")
-            .unwrap();
         assert_eq!(
-            click(&mut app, 3, scope as u16, MouseButton::Left),
-            [Effect::Persist]
+            click(&mut app, 3, alpha as u16, MouseButton::Right),
+            [Effect::Menu {
+                target: menu::Target::Pane("w1:p3".into()),
+                refocus: false
+            }]
         );
-        assert_eq!(app.ui.scope, Some(Scope::Subtree("a".into())));
-        let lines = draw(&mut app, 40, 20);
-        assert!(lines[0].starts_with("◎ scope: alpha"));
+        assert_eq!(app.selected.as_deref(), Some("pane:w1:p3"));
+        assert_eq!(
+            click(&mut app, 3, 0, MouseButton::Right),
+            [Effect::Menu {
+                target: menu::Target::Workspace("w1".into()),
+                refocus: false
+            }]
+        );
+        // the list draws no menu of its own
+        assert_eq!(draw(&mut app, 40, 20), lines);
     }
 
     #[test]
-    fn header_menu_renames_through_a_prefilled_prompt() {
+    fn m_opens_the_menu_and_hands_focus_back_after_it() {
         let mut app = app("");
         app.selected = Some("ws:w2".into());
-        press(&mut app, KeyCode::Char('m'));
-        assert!(matches!(app.mode, Mode::Menu { .. }));
-        press(&mut app, KeyCode::Enter);
-        assert!(matches!(&app.mode, Mode::Prompt { input, .. } if input == "elsewhere"));
-        press(&mut app, KeyCode::Backspace);
         assert_eq!(
-            press(&mut app, KeyCode::Enter),
-            [Effect::Call(
-                "workspace.rename",
-                json!({ "workspace_id": "w2", "label": "elsewher" })
-            )]
+            press(&mut app, KeyCode::Char('m')),
+            [Effect::Menu {
+                target: menu::Target::Workspace("w2".into()),
+                refocus: true
+            }]
         );
+        // a shell pane's row has no menu
+        app.selected = Some("pane:w1:p2".into());
+        assert!(press(&mut app, KeyCode::Char('m')).is_empty());
     }
 
     #[test]
@@ -1354,6 +882,10 @@ mod tests {
         assert_eq!(app.ui.scope, None);
         app.ctl("scope", Some("w1:p2")).unwrap();
         assert_eq!(app.ui.scope, Some(Scope::Workspace("w1".into())));
+        app.ctl("collapse-others", Some("w2")).unwrap();
+        assert_eq!(app.ui.collapsed, ["w1".to_string()].into());
+        app.ctl("collapse-others", Some("w1:p3")).unwrap();
+        assert_eq!(app.ui.collapsed, ["w2".to_string()].into());
         assert!(app.ctl("zoom", None).is_err());
         assert!(app.ctl("fold", Some("w9:p1")).is_err());
     }
@@ -1378,28 +910,20 @@ mod tests {
     const ACK: &str = r#"actions = { ack = { command = ["loom", "ack", "{agent_id}"] } }"#;
 
     #[test]
-    fn a_marks_read_through_the_ack_action_and_does_nothing_without_it() {
+    fn the_menus_letters_do_nothing_at_the_top_level() {
         let mut app = app(ACK);
         app.selected = Some("pane:w1:p3".into());
-        assert_eq!(
-            press(&mut app, KeyCode::Char('a')),
-            [Effect::Run {
-                argv: vec!["loom".into(), "ack".into(), "a".into()],
-                popup: false
-            }]
-        );
-        let mut bare = self::app("");
-        bare.selected = Some("pane:w1:p3".into());
-        assert!(press(&mut bare, KeyCode::Char('a')).is_empty());
-        let status = bare.status.clone().unwrap();
-        assert!(status.starts_with("mark read"), "{status}");
+        for key in ['r', 't', 'c', 'a', 'p'] {
+            assert!(press(&mut app, KeyCode::Char(key)).is_empty(), "{key}");
+            assert_eq!(app.mode, Mode::Normal);
+        }
         // z a is still the fold chord
-        typed(&mut bare, "za");
-        assert!(bare.ui.folded.contains("a"));
+        typed(&mut app, "za");
+        assert!(app.ui.folded.contains("a"));
     }
 
     #[test]
-    fn attention_rows_focus_mark_read_and_close_like_tree_rows() {
+    fn attention_rows_focus_and_open_the_menu_like_tree_rows() {
         let mut app = attention_app(ACK);
         app.ensure_selection();
         // the header is skipped; the first row is the oldest loud one
@@ -1410,17 +934,10 @@ mod tests {
             [Effect::Call("pane.focus", json!({ "pane_id": "w1:p3" }))]
         );
         assert_eq!(
-            press(&mut app, KeyCode::Char('a')),
-            [Effect::Run {
-                argv: vec!["loom".into(), "ack".into(), "a".into()],
-                popup: false
-            }]
-        );
-        assert_eq!(
-            press(&mut app, KeyCode::Char('c')),
-            [Effect::ClosePreview {
-                agent_id: "a".into(),
-                name: "alpha".into()
+            press(&mut app, KeyCode::Char('m')),
+            [Effect::Menu {
+                target: menu::Target::Pane("w1:p3".into()),
+                refocus: true
             }]
         );
         // folding and scope belong to the trees

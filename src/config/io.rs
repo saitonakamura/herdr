@@ -43,7 +43,32 @@ pub fn state_dir() -> PathBuf {
     platform_state_dir()
 }
 
-#[cfg(windows)]
+#[cfg(test)]
+fn test_user_dir(kind: &str) -> PathBuf {
+    static ROOT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    // Share one isolated root across calls, without changing process-wide XDG overrides.
+    ROOT.get_or_init(|| {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("herdr-test-{}-{nanos}", std::process::id()))
+    })
+    .join(kind)
+    .join(app_dir_name())
+}
+
+#[cfg(test)]
+fn platform_config_dir() -> PathBuf {
+    test_user_dir("config")
+}
+
+#[cfg(test)]
+fn platform_state_dir() -> PathBuf {
+    test_user_dir("state")
+}
+
+#[cfg(all(windows, not(test)))]
 fn platform_config_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("APPDATA") {
         return PathBuf::from(dir).join(app_dir_name());
@@ -60,7 +85,7 @@ fn platform_config_dir() -> PathBuf {
     std::env::temp_dir().join(app_dir_name())
 }
 
-#[cfg(not(windows))]
+#[cfg(all(not(windows), not(test)))]
 fn platform_config_dir() -> PathBuf {
     if let Ok(home) = std::env::var("HOME") {
         PathBuf::from(home).join(format!(".config/{}", app_dir_name()))
@@ -69,7 +94,7 @@ fn platform_config_dir() -> PathBuf {
     }
 }
 
-#[cfg(windows)]
+#[cfg(all(windows, not(test)))]
 fn platform_state_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("LOCALAPPDATA") {
         return PathBuf::from(dir).join(app_dir_name());
@@ -86,7 +111,7 @@ fn platform_state_dir() -> PathBuf {
     std::env::temp_dir().join(format!("{}-state", app_dir_name()))
 }
 
-#[cfg(not(windows))]
+#[cfg(all(not(windows), not(test)))]
 fn platform_state_dir() -> PathBuf {
     if let Ok(home) = std::env::var("HOME") {
         PathBuf::from(home).join(format!(".local/state/{}", app_dir_name()))
@@ -835,6 +860,46 @@ fn upsert_section_raw(content: &str, section: &str, key: &str, value: &str) -> S
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_directory_defaults_are_temporary_and_xdg_overrides_win() {
+        let _guard = crate::config::test_config_env_lock().lock().unwrap();
+        let previous_config = std::env::var_os("XDG_CONFIG_HOME");
+        let previous_state = std::env::var_os("XDG_STATE_HOME");
+        std::env::remove_var("XDG_CONFIG_HOME");
+        std::env::remove_var("XDG_STATE_HOME");
+        let default_config = config_dir();
+        let default_state = state_dir();
+        let repeated = (config_dir(), state_dir());
+
+        let explicit_root = std::env::temp_dir().join("herdr-explicit-xdg");
+        std::env::set_var("XDG_CONFIG_HOME", explicit_root.join("config"));
+        std::env::set_var("XDG_STATE_HOME", explicit_root.join("state"));
+        let explicit = (config_dir(), state_dir());
+        for (key, previous) in [
+            ("XDG_CONFIG_HOME", previous_config),
+            ("XDG_STATE_HOME", previous_state),
+        ] {
+            match previous {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
+        }
+
+        assert!(default_config.starts_with(std::env::temp_dir()));
+        assert!(default_state.starts_with(std::env::temp_dir()));
+        assert_ne!(default_config, default_state);
+        assert!(default_config.ends_with(Path::new("config").join(app_dir_name())));
+        assert!(default_state.ends_with(Path::new("state").join(app_dir_name())));
+        assert_eq!(repeated, (default_config, default_state));
+        assert_eq!(
+            explicit,
+            (
+                explicit_root.join("config").join(app_dir_name()),
+                explicit_root.join("state").join(app_dir_name()),
+            )
+        );
+    }
 
     fn overlay_test_dir(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(

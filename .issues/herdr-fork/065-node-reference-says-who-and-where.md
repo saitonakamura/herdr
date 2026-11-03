@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-node-reference-says-who-and-where
 title: A decorated agent id names the agent and its effort, right-aligned
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee: saitonakamura
-claimed_by:
+claimed_by: macos/w1:p27/47cc25f3-f977-461d-a34e-b20e8215042a
 ---
 
 ## Question

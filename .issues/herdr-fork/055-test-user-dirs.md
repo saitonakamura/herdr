@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-test-user-dirs
 title: Plugin tests write the user's real herdr-dev config and state dirs
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee: saitonakamura
-claimed_by:
+claimed_by: macos/w1:p1S/004127b1
 ---
 
 ## Question

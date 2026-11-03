@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-readable-report-view
 title: herdr-sidebar's open report shows the report itself, readably
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee: saitonakamura
-claimed_by:
+claimed_by: macos/w1:p1W/a020bfec-075c-4171-b000-41c629bc47db
 ---
 
 ## Question

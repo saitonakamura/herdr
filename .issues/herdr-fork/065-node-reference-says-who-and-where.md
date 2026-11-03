@@ -1,7 +1,7 @@
 ---
 id: herdr-fork-node-reference-says-who-and-where
 title: A decorated agent id names the agent and its effort, right-aligned
-status: in-progress
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
@@ -32,7 +32,7 @@ Talked through and not chosen: inserting the text inline (herdr only paints cell
 
 ## Resolution
 
-Draft, pending review: [saitonakamura/herdr#60](https://github.com/saitonakamura/herdr/pull/60). No wire, snapshot or API-shape change. `FORK.md` § Agent references documents it.
+Merged 2026-11-03: [saitonakamura/herdr#60](https://github.com/saitonakamura/herdr/pull/60) as `c0c0e86f` (head `8a3bae69`). Ubuntu, Windows and the ConPTY package passed in CI. GitHub never acquired a macOS runner (three attempts, each cancelled after 15 minutes in the queue), so the merge rests on the local macOS arm64 `just check`, which failed only where this box is known to. No wire, snapshot or API-shape change. `FORK.md` § Agent references documents it.
 
 Built as decided. The build settled these points:
 

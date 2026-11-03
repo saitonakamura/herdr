@@ -230,6 +230,8 @@ pub struct AgentItem {
     pub repo: Option<RepoLine>,
     pub folded: bool,
     pub hidden_below: usize,
+    /// Children are drawn under it, so its line 2 carries their guide down.
+    pub has_kids: bool,
     pub focused: bool,
     pub mark: Option<Mark>,
     pub loom_mark: Option<LoomMark>,
@@ -753,6 +755,7 @@ fn push_agent(items: &mut Vec<Item>, node: Node, ctx: &Ctx, seen: &mut HashSet<S
         repo: repo_line(pane),
         folded,
         hidden_below,
+        has_kids: !folded && !kids.is_empty(),
         focused: pane.focused,
         mark: mark(pane, &ctx.inputs.extras.dimmed),
         loom_mark: loom_mark(pane),

@@ -515,12 +515,17 @@ fn agent_lines(agent: &AgentItem, width: u16, config: &Config, key: String) -> V
             // line 2 sits under the name, past the guides and glyphs
             let indent = format!(" {}", continuation(agent));
             let state_width = state.text.width() + brand.as_ref().map_or(0, |b| b.text.width() + 1);
-            let pad = " ".repeat(state_width);
+            // the guide down to this row's children starts under its glyph
+            let pad = if agent.has_kids {
+                format!("│{}", " ".repeat(state_width.saturating_sub(1)))
+            } else {
+                " ".repeat(state_width)
+            };
             let room = width.saturating_sub(indent.width() + pad.width());
             out.push(Line {
                 spans: vec![
                     span(indent, muted),
-                    span(pad, Style::default()),
+                    span(pad, muted),
                     span(
                         cut(&parts.join(" "), room),
                         muted.add_modifier(Modifier::DIM),
@@ -710,6 +715,8 @@ mod tests {
         assert!(text[1].starts_with(" ✓✻ cockpit pt:herdr-fork"), "{text:?}");
         assert!(text[1].ends_with(" 2m"), "{text:?}");
         assert!(text[2].contains("⎇master ↑1 ±2"), "{text:?}");
+        // the cockpit's children hang off a guide that runs through its line 2
+        assert!(text[2].starts_with(" │  ⎇"), "{text:?}");
         assert!(
             text.iter().any(|l| l.starts_with(" ├ ●✻ alpha fork-030")),
             "{text:?}"

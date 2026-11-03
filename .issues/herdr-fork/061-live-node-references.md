@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-live-node-references
 title: A loom node id on screen renders its live state, the way GitLab renders !57 (merged)
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee: saitonakamura
-claimed_by:
+claimed_by: macos/w1:p1Y/9944e3bd-13b6-46cd-82bc-21bc2342b84d
 ---
 
 ## Question

@@ -270,19 +270,28 @@ it draws and does is 018's resolution (`.issues/herdr-fork/018-sidebar-content.m
 ## Agent references
 
 An agent id on screen (a loom node id, bare, `loom:<id>` or `[<id>]`) is drawn in
-its agent's status colour, and the line's trailing blank cells say what it is
-doing, dimmed: `asking · w1:p2`, `working`, `done`, `closed`
-(`.issues/herdr-fork/061-live-node-references.md`). Ctrl+hover underlines it and
+its agent's status colour, and the line's trailing blank cells say who it is and
+what it is doing, dimmed and right-aligned to the pane's last column:
+`main-tracker · idle`, `pimig-002 · pi-migration · asking`, `closed`
+(`.issues/herdr-fork/061-live-node-references.md`,
+`065-node-reference-says-who-and-where.md`). Ctrl+hover underlines it and
 Ctrl+click focuses its pane, through the same `pane.link.resolve` and
 `pane.link.activate` as URLs, which win where both match.
 
 - **Render only.** The server decorates the cells it renders, so the terminal
-  grid, copy, selection and `pane read` (`--ansi` included) never see it. A
-  full line is recoloured only.
+  grid, copy, selection and `pane read` (`--ansi` included) never see it.
+- **Name** is what herdr-sidebar calls the agent's row: its tab's name, or for a
+  tab's second agent its own label or terminal title. The workspace's label
+  follows it only for an agent in another workspace than the pane drawn.
+- **Fit.** At least two blank cells stay between the line's text and the
+  annotation. Short of room it drops the workspace, then the name, keeping the
+  word; a line with no room for the word is recoloured only. Several ids get one
+  segment each, in line order, right-aligned together; the first that does not
+  fit ends the text.
 - **Words.** Loom's task status where it says more than herdr's agent status:
   `asking` (needs_user), `blocked` (herdr blocked, or needs_parent), `failed`,
   `done` (complete), `closed`; otherwise herdr's `working`, `awaiting`, `idle`,
-  `done`. The pane follows the word only while the agent wants someone.
+  `done`.
 - **closed** covers agents closed since the server started, the last 256.
 - **Colours** are the sidebar's meanings, and `[sidebar.colors]` overrides apply.
 - **Off:** `[ui] agent_references = false` in `config.fork.toml`.

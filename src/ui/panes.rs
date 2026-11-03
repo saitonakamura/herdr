@@ -505,7 +505,7 @@ pub(super) fn render_panes(
                 && app.pane_exposes_host_cursor(ws_idx, info.id);
             rt.render(frame, info.inner_rect, show_cursor);
             if let Some(refs) = agent_refs.as_mut() {
-                super::agent_refs::decorate_area(frame.buffer_mut(), info.inner_rect, refs);
+                super::agent_refs::decorate_area(frame.buffer_mut(), info.inner_rect, refs, ws_idx);
             }
             render_pane_scrollbar(app, frame, info, rt);
         } else if let Some(reason) = ws

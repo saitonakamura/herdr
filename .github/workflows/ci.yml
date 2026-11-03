@@ -63,7 +63,7 @@ jobs:
           - os: windows-latest
             kind: windows
     runs-on: ${{ matrix.os }}
-    # macOS checks take 10-13 min on a green run; 15 cancelled healthy runs on slow runners.
+    # macOS checks take 10-13 min on a green run, too close to a 15-min cap.
     timeout-minutes: 25
     steps:
       - name: Checkout

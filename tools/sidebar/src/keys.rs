@@ -16,12 +16,7 @@ pub enum Command {
     ToggleFold,
     ToggleScope,
     Search,
-    Reply,
-    Tell,
-    Close,
-    /// Mark read: runs `[sidebar.actions] ack`, and nothing without it.
-    Ack,
-    OpenUi,
+    /// The row's menu, in a herdr popup; its actions have no top-level keys.
     Menu,
     Escape,
 }
@@ -62,11 +57,6 @@ impl KeyTable {
             KeyCode::Char('l') | KeyCode::Right => Command::Unfold,
             KeyCode::Char('f') => Command::ToggleScope,
             KeyCode::Char('/') => Command::Search,
-            KeyCode::Char('r') => Command::Reply,
-            KeyCode::Char('t') => Command::Tell,
-            KeyCode::Char('c') => Command::Close,
-            KeyCode::Char('a') => Command::Ack,
-            KeyCode::Char('p') => Command::OpenUi,
             KeyCode::Char('m') => Command::Menu,
             KeyCode::Esc => Command::Escape,
             _ => return None,
@@ -93,11 +83,6 @@ mod tests {
             ('l', Command::Unfold),
             ('f', Command::ToggleScope),
             ('/', Command::Search),
-            ('r', Command::Reply),
-            ('t', Command::Tell),
-            ('c', Command::Close),
-            ('a', Command::Ack),
-            ('p', Command::OpenUi),
             ('m', Command::Menu),
         ];
         for (key, command) in single {
@@ -109,6 +94,14 @@ mod tests {
         assert_eq!(press(&mut t, KeyCode::Char('g')), Some(Command::Top));
         assert_eq!(press(&mut t, KeyCode::Char('z')), None);
         assert_eq!(press(&mut t, KeyCode::Char('a')), Some(Command::ToggleFold));
+    }
+
+    #[test]
+    fn the_menus_letters_are_not_top_level_keys() {
+        let mut t = KeyTable::default();
+        for key in ['r', 't', 'c', 'a', 'p'] {
+            assert_eq!(press(&mut t, KeyCode::Char(key)), None, "{key}");
+        }
     }
 
     #[test]

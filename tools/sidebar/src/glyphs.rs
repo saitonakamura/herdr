@@ -20,10 +20,17 @@ pub enum Meaning {
     Messages,
     Branch,
     Worktree,
+    /// The dot after a quiet row's name, one colour per report kind.
+    UnreadDone,
+    UnreadFailed,
+    UnreadBlocked,
+    UnreadAsking,
+    UnreadHandoff,
+    Unread,
 }
 
 impl Meaning {
-    pub const ALL: [Meaning; 14] = [
+    pub const ALL: [Meaning; 20] = [
         Meaning::Idle,
         Meaning::Working,
         Meaning::Awaiting,
@@ -38,6 +45,12 @@ impl Meaning {
         Meaning::Messages,
         Meaning::Branch,
         Meaning::Worktree,
+        Meaning::UnreadDone,
+        Meaning::UnreadFailed,
+        Meaning::UnreadBlocked,
+        Meaning::UnreadAsking,
+        Meaning::UnreadHandoff,
+        Meaning::Unread,
     ];
 
     /// The key in `[sidebar.glyph]` and `[sidebar.colors]`.
@@ -57,7 +70,37 @@ impl Meaning {
             Meaning::Messages => "messages",
             Meaning::Branch => "branch",
             Meaning::Worktree => "worktree",
+            Meaning::UnreadDone => "unread_done",
+            Meaning::UnreadFailed => "unread_failed",
+            Meaning::UnreadBlocked => "unread_blocked",
+            Meaning::UnreadAsking => "unread_asking",
+            Meaning::UnreadHandoff => "unread_handoff",
+            Meaning::Unread => "unread",
         }
+    }
+
+    /// The dot for an unread report of this kind (loom's report kinds).
+    pub fn for_unread(kind: &str) -> Meaning {
+        match kind {
+            "done" => Meaning::UnreadDone,
+            "failed" => Meaning::UnreadFailed,
+            "blocked" => Meaning::UnreadBlocked,
+            "asking" => Meaning::UnreadAsking,
+            "handoff" => Meaning::UnreadHandoff,
+            _ => Meaning::Unread,
+        }
+    }
+
+    fn is_unread(self) -> bool {
+        matches!(
+            self,
+            Meaning::UnreadDone
+                | Meaning::UnreadFailed
+                | Meaning::UnreadBlocked
+                | Meaning::UnreadAsking
+                | Meaning::UnreadHandoff
+                | Meaning::Unread
+        )
     }
 
     pub fn from_key(key: &str) -> Option<Meaning> {
@@ -99,6 +142,7 @@ impl Meaning {
             Meaning::Messages => "\u{f0e0}",
             Meaning::Branch => "\u{e725}",
             Meaning::Worktree => "\u{f126}",
+            _ => "•",
         }
     }
 
@@ -118,6 +162,7 @@ impl Meaning {
             Meaning::Messages => "✉",
             Meaning::Branch => "⎇",
             Meaning::Worktree => "⑂",
+            _ => "•",
         }
     }
 
@@ -133,7 +178,15 @@ impl Meaning {
                 Some(Color::Red)
             }
             Meaning::Unknown => Some(Color::DarkGray),
-            Meaning::OtherPane | Meaning::Messages | Meaning::Branch | Meaning::Worktree => None,
+            Meaning::UnreadDone => Some(Color::Cyan),
+            Meaning::UnreadFailed => Some(Color::Red),
+            Meaning::UnreadBlocked | Meaning::UnreadAsking => Some(Color::Magenta),
+            Meaning::UnreadHandoff => Some(Color::Yellow),
+            Meaning::OtherPane
+            | Meaning::Messages
+            | Meaning::Branch
+            | Meaning::Worktree
+            | Meaning::Unread => None,
         }
     }
 }
@@ -180,13 +233,13 @@ impl Glyphs {
                     .find(|(m, _)| *m == meaning)
                     .map(|(_, color)| *color)
                     .or_else(|| meaning.color());
-                (
-                    meaning,
-                    Glyph {
-                        text: pad(set, &base),
-                        color,
-                    },
-                )
+                // the dot is a plain character in either set, so kitty draws it one cell wide
+                let text = if meaning.is_unread() {
+                    base
+                } else {
+                    pad(set, &base)
+                };
+                (meaning, Glyph { text, color })
             })
             .collect();
         let brands = [
@@ -348,6 +401,22 @@ mod tests {
         assert_eq!(glyphs.get(Meaning::Idle).text, "o");
         assert_eq!(glyphs.get(Meaning::Idle).color, Some(Color::Rgb(1, 2, 3)));
         assert!(glyphs.table_text().contains("idle"));
+    }
+
+    #[test]
+    fn unread_dots_are_one_cell_and_coloured_by_report_kind() {
+        let nerd = Glyphs::new(GlyphSet::Nerd, &[], &[]);
+        assert_eq!(nerd.get(Meaning::for_unread("done")).text, "•");
+        assert_eq!(
+            nerd.get(Meaning::for_unread("done")).color,
+            Some(Color::Cyan)
+        );
+        assert_eq!(
+            nerd.get(Meaning::for_unread("failed")).color,
+            Some(Color::Red)
+        );
+        assert_eq!(Meaning::for_unread("progress"), Meaning::Unread);
+        assert_eq!(nerd.get(Meaning::Unread).color, None);
     }
 
     #[test]

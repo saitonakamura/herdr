@@ -100,6 +100,8 @@ pub struct MessageInfo {
     #[serde(default)]
     pub from_agent_id: Option<String>,
     pub to_agent_id: String,
+    #[serde(default)]
+    pub summary: String,
 }
 
 // Readers tolerate values a newer server adds: they decode as `Unknown`.
@@ -206,6 +208,8 @@ pub fn lifecycle_subscriptions() -> Vec<serde_json::Value> {
 pub struct EventLine {
     pub event: String,
     pub pane_id: Option<String>,
+    /// The sender of a queued or delivered message.
+    pub from_agent_id: Option<String>,
 }
 
 pub fn parse_event_line(value: &serde_json::Value) -> Option<EventLine> {
@@ -218,7 +222,14 @@ pub fn parse_event_line(value: &serde_json::Value) -> Option<EventLine> {
         })
         .and_then(|id| id.as_str())
         .map(str::to_string);
-    Some(EventLine { event, pane_id })
+    let from_agent_id = data
+        .and_then(|data| data.get("message")?.get("from_agent_id")?.as_str())
+        .map(str::to_string);
+    Some(EventLine {
+        event,
+        pane_id,
+        from_agent_id,
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -377,5 +388,28 @@ mod unix {
                 on_line(value);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn event_lines_carry_the_pane_and_a_messages_sender() {
+        let queued = parse_event_line(&serde_json::json!({
+            "event": "message.queued",
+            "data": { "message": { "from_agent_id": "a", "to_agent_id": "root" } }
+        }))
+        .unwrap();
+        assert_eq!(queued.from_agent_id.as_deref(), Some("a"));
+        assert_eq!(queued.pane_id, None);
+        let updated = parse_event_line(&serde_json::json!({
+            "event": "pane.updated",
+            "data": { "pane": { "pane_id": "w1:p3" } }
+        }))
+        .unwrap();
+        assert_eq!(updated.pane_id.as_deref(), Some("w1:p3"));
+        assert_eq!(updated.from_agent_id, None);
     }
 }

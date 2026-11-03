@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::api::{AgentStatus, PaneInfo, SessionSnapshot, TaskStatus};
+use crate::api::{AgentStatus, BlockedReason, PaneInfo, SessionSnapshot, TaskStatus};
 use crate::glyphs::Meaning;
 
 /// The one effort or subtree the sidebar is narrowed to.
@@ -37,6 +37,107 @@ pub struct Extras {
     pub exited: HashSet<String>,
     /// Seconds each pane has been in its current state.
     pub ages: HashMap<String, u64>,
+    /// Seconds each marked pane has waited in its attention state (`AttentionClock`).
+    pub waited: HashMap<String, u64>,
+    /// Loud panes that focus has dimmed to steady until their state next changes.
+    pub dimmed: HashSet<String>,
+    /// The first line of each agent's latest report, by agent id, for agents with an unread report.
+    pub reports: HashMap<String, String>,
+}
+
+/// How strongly a row asks for the user (052). Ordered as the attention section sorts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Mark {
+    /// Wanted, with an unread report (or blocked in herdr with no unread axis).
+    Loud,
+    /// Wanted, report read.
+    Steady,
+    /// Not wanted, unread report.
+    Quiet,
+}
+
+/// Wanted: task status needs_user, or blocked in herdr for any reason.
+pub fn is_wanted(pane: &PaneInfo) -> bool {
+    pane.task_status == Some(TaskStatus::NeedsUser) || pane.agent_status == AgentStatus::Blocked
+}
+
+/// The kind of the agent's unread report: loom's `unseen` annotation.
+pub fn unread_kind(pane: &PaneInfo) -> Option<&str> {
+    pane.annotations
+        .get("unseen")
+        .map(|kind| kind.trim())
+        .filter(|kind| !kind.is_empty())
+}
+
+/// The mark before focus dims it.
+pub fn undimmed_mark(pane: &PaneInfo) -> Option<Mark> {
+    let unread = unread_kind(pane).is_some();
+    if !is_wanted(pane) {
+        return unread.then_some(Mark::Quiet);
+    }
+    // herdr's blocked has no unread axis of its own: loud until its state changes,
+    // unless loom wants it too, whose unread report then decides
+    let herdr_only = pane.agent_status == AgentStatus::Blocked
+        && pane.task_status != Some(TaskStatus::NeedsUser);
+    Some(if unread || herdr_only {
+        Mark::Loud
+    } else {
+        Mark::Steady
+    })
+}
+
+pub fn mark(pane: &PaneInfo, dimmed: &HashSet<String>) -> Option<Mark> {
+    match undimmed_mark(pane) {
+        Some(Mark::Loud) if dimmed.contains(&pane.pane_id) => Some(Mark::Steady),
+        mark => mark,
+    }
+}
+
+fn blocked_word(reason: Option<BlockedReason>) -> &'static str {
+    match reason {
+        Some(BlockedReason::Question) => "question",
+        Some(BlockedReason::Permission) => "permission",
+        Some(BlockedReason::Form) => "form",
+        Some(BlockedReason::Interrupted) => "interrupted",
+        Some(BlockedReason::Unknown) | None => "blocked",
+    }
+}
+
+/// An attention row's second line: loom's reason, else herdr's blocked reason,
+/// else the unread report's kind and first line.
+pub fn reason_line(pane: &PaneInfo, reports: &HashMap<String, String>) -> Option<String> {
+    if let Some(reason) = pane
+        .annotations
+        .get("reason")
+        .map(|r| r.trim())
+        .filter(|r| !r.is_empty())
+    {
+        return Some(reason.to_string());
+    }
+    if pane.agent_status == AgentStatus::Blocked {
+        return Some(blocked_word(pane.blocked_reason).to_string());
+    }
+    let kind = unread_kind(pane)?;
+    let line = pane
+        .agent_id
+        .as_ref()
+        .and_then(|id| reports.get(id))
+        .map(|line| line.trim())
+        .filter(|line| !line.is_empty());
+    Some(match line {
+        Some(line) => format!("{kind}: {line}"),
+        None => kind.to_string(),
+    })
+}
+
+/// loom's `questions` token, `?N`, on the agent's pane.
+fn questions(pane: &PaneInfo) -> Option<String> {
+    let value = pane.tokens.get("questions")?.trim();
+    match value {
+        "" | "?0" | "0" => None,
+        v if v.starts_with('?') => Some(v.to_string()),
+        v => Some(format!("?{v}")),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -85,6 +186,28 @@ pub struct AgentItem {
     pub folded: bool,
     pub hidden_below: usize,
     pub focused: bool,
+    pub mark: Option<Mark>,
+    /// The unread report's kind.
+    pub unread: Option<String>,
+    /// `?N`, open questions for the user.
+    pub questions: Option<String>,
+}
+
+/// A row of the attention section.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttentionItem {
+    pub pane_id: String,
+    pub agent_id: Option<String>,
+    pub mark: Mark,
+    pub meaning: Meaning,
+    pub name: String,
+    /// The workspace's label.
+    pub workspace: String,
+    pub unread: Option<String>,
+    pub questions: Option<String>,
+    pub waited: Option<u64>,
+    pub reason: Option<String>,
+    pub focused: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,6 +220,9 @@ pub struct PaneItem {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Item {
+    /// The attention section's title, with its row count.
+    AttentionHeader(usize),
+    Attention(Box<AttentionItem>),
     Scope(String),
     Search(String),
     Header(HeaderItem),
@@ -109,6 +235,8 @@ impl Item {
     /// A key that survives redraws, for the selection.
     pub fn key(&self) -> String {
         match self {
+            Item::AttentionHeader(_) => "attention".into(),
+            Item::Attention(a) => format!("attention:{}", a.pane_id),
             Item::Scope(_) => "scope".into(),
             Item::Search(_) => "search".into(),
             Item::Header(h) => format!("ws:{}", h.workspace_id),
@@ -119,7 +247,7 @@ impl Item {
     }
 
     pub fn selectable(&self) -> bool {
-        !matches!(self, Item::Search(_))
+        !matches!(self, Item::Search(_) | Item::AttentionHeader(_))
     }
 }
 
@@ -307,6 +435,8 @@ pub struct Inputs<'a> {
     pub extras: &'a Extras,
     pub ui: &'a UiState,
     pub search: Option<&'a str>,
+    /// Whether to draw the attention section.
+    pub attention: bool,
 }
 
 /// Whether the scope still names something live.
@@ -340,6 +470,10 @@ pub fn build(inputs: &Inputs) -> Vec<Item> {
         .filter(|scope| scope_is_live(snapshot, scope));
 
     let mut items = Vec::new();
+    // session-wide whatever the scope; a search narrows the trees only, so the section steps aside
+    if inputs.attention && search.is_none() {
+        items.extend(attention_items(snapshot, inputs.extras, &tab_labels));
+    }
     if let Some(scope) = scope {
         let label = match scope {
             Scope::Workspace(id) => snapshot
@@ -576,6 +710,9 @@ fn push_agent(items: &mut Vec<Item>, node: Node, ctx: &Ctx, seen: &mut HashSet<S
         folded,
         hidden_below,
         focused: pane.focused,
+        mark: mark(pane, &ctx.inputs.extras.dimmed),
+        unread: unread_kind(pane).map(str::to_string),
+        questions: questions(pane),
     })));
     if folded {
         return;
@@ -598,6 +735,55 @@ fn push_agent(items: &mut Vec<Item>, node: Node, ctx: &Ctx, seen: &mut HashSet<S
             seen,
         );
     }
+}
+
+/// The attention section: every wanted agent and every agent with an unread report,
+/// loud, steady then quiet, oldest first within each. Empty when there are none.
+fn attention_items(
+    snapshot: &SessionSnapshot,
+    extras: &Extras,
+    tab_labels: &HashMap<&str, &str>,
+) -> Vec<Item> {
+    let workspaces: HashMap<&str, &str> = snapshot
+        .workspaces
+        .iter()
+        .map(|w| (w.workspace_id.as_str(), w.label.as_str()))
+        .collect();
+    let mut rows: Vec<AttentionItem> = snapshot
+        .panes
+        .iter()
+        .filter(|pane| is_agent(pane))
+        .filter_map(|pane| {
+            Some(AttentionItem {
+                pane_id: pane.pane_id.clone(),
+                agent_id: pane.agent_id.clone(),
+                mark: mark(pane, &extras.dimmed)?,
+                meaning: Meaning::for_state(pane.agent_status, pane.blocked_reason),
+                name: agent_name(pane, tab_labels),
+                workspace: workspaces
+                    .get(pane.workspace_id.as_str())
+                    .map(|label| label.to_string())
+                    .unwrap_or_else(|| pane.workspace_id.clone()),
+                unread: unread_kind(pane).map(str::to_string),
+                questions: questions(pane),
+                waited: extras.waited.get(&pane.pane_id).copied(),
+                reason: reason_line(pane, &extras.reports),
+                focused: pane.focused,
+            })
+        })
+        .collect();
+    if rows.is_empty() {
+        return Vec::new();
+    }
+    rows.sort_by(|a, b| {
+        a.mark
+            .cmp(&b.mark)
+            .then(b.waited.unwrap_or(0).cmp(&a.waited.unwrap_or(0)))
+            .then(a.pane_id.cmp(&b.pane_id))
+    });
+    let mut items = vec![Item::AttentionHeader(rows.len())];
+    items.extend(rows.into_iter().map(|row| Item::Attention(Box::new(row))));
+    items
 }
 
 /// The agent ids in `agent`'s subtree, itself included, within one workspace.
@@ -656,6 +842,114 @@ impl AgeClock {
             .iter()
             .map(|(pane, (_, at))| (pane.clone(), now.saturating_sub(*at)))
             .collect()
+    }
+}
+
+/// Focus for this many seconds dims a loud row to steady (052).
+pub const DIM_AFTER: u64 = 10;
+
+/// Everything whose change ends a dim: the row's state as herdr and loom give it.
+type DimKey = (
+    AgentStatus,
+    Option<BlockedReason>,
+    Option<TaskStatus>,
+    Option<String>,
+    Option<String>,
+);
+
+#[derive(Debug)]
+struct Watch {
+    /// What the waited time counts from: a want and its reason, or an unread
+    /// report's kind. Marking a wanted row read doesn't restart it.
+    wait_key: (bool, Option<String>),
+    since: u64,
+    dim_key: DimKey,
+    focused_since: Option<u64>,
+    dimmed: bool,
+}
+
+/// How long each marked pane has waited, and which loud panes focus has dimmed.
+/// Sidebar-local, never persisted, and it never clears an unread report.
+#[derive(Debug, Default)]
+pub struct AttentionClock {
+    watches: HashMap<String, Watch>,
+}
+
+impl AttentionClock {
+    pub fn observe(&mut self, snapshot: &SessionSnapshot, now: u64) {
+        let mut marked = HashSet::new();
+        for pane in &snapshot.panes {
+            let Some(mark) = undimmed_mark(pane) else {
+                continue;
+            };
+            marked.insert(pane.pane_id.as_str());
+            let unread = unread_kind(pane).map(str::to_string);
+            let reason = pane.annotations.get("reason").cloned();
+            let wait_key = if is_wanted(pane) {
+                (true, reason.clone())
+            } else {
+                (false, unread.clone())
+            };
+            let dim_key = (
+                pane.agent_status,
+                pane.blocked_reason,
+                pane.task_status,
+                unread,
+                reason,
+            );
+            let watch = self
+                .watches
+                .entry(pane.pane_id.clone())
+                .or_insert_with(|| Watch {
+                    wait_key: wait_key.clone(),
+                    since: now,
+                    dim_key: dim_key.clone(),
+                    focused_since: None,
+                    dimmed: false,
+                });
+            if watch.wait_key != wait_key {
+                watch.wait_key = wait_key;
+                watch.since = now;
+            }
+            if watch.dim_key != dim_key {
+                watch.dim_key = dim_key;
+                watch.focused_since = None;
+                watch.dimmed = false;
+            }
+            if !pane.focused {
+                watch.focused_since = None;
+            } else if mark == Mark::Loud && !watch.dimmed {
+                let since = *watch.focused_since.get_or_insert(now);
+                watch.dimmed = now.saturating_sub(since) >= DIM_AFTER;
+            }
+        }
+        self.watches
+            .retain(|pane, _| marked.contains(pane.as_str()));
+    }
+
+    pub fn waited(&self, now: u64) -> HashMap<String, u64> {
+        self.watches
+            .iter()
+            .map(|(pane, watch)| (pane.clone(), now.saturating_sub(watch.since)))
+            .collect()
+    }
+
+    pub fn dimmed(&self) -> HashSet<String> {
+        self.watches
+            .iter()
+            .filter(|(_, watch)| watch.dimmed)
+            .map(|(pane, _)| pane.clone())
+            .collect()
+    }
+
+    /// When a focused loud row next dims, so the program can wake to redraw it.
+    pub fn next_due(&self) -> Option<u64> {
+        self.watches
+            .values()
+            .filter(|watch| !watch.dimmed)
+            .filter_map(|watch| watch.focused_since)
+            .map(|since| since + DIM_AFTER)
+            .min()
     }
 }
 
@@ -727,7 +1021,7 @@ pub mod fixtures {
         root.repo = Some(repo("master"));
         let mut a = agent("w1:p3", "a", Some("root"), AgentStatus::Working);
         a.annotations.insert("ticket".into(), "fork-030".into());
-        let b = agent("w1:p4", "b", Some("root"), AgentStatus::Blocked);
+        let b = agent("w1:p4", "b", Some("root"), AgentStatus::Working);
         let a1 = agent("w1:p5", "a1", Some("a"), AgentStatus::Idle);
         let sh = shell("w1:p2", "/code/herdr");
         let mut other = agent("w2:p1", "other", None, AgentStatus::Idle);
@@ -749,6 +1043,36 @@ pub mod fixtures {
             panes: vec![b, sh, a1, root, a, other],
         }
     }
+
+    /// Every mark at once: alpha asks (loud), beta waits on a permission in herdr
+    /// (loud), cockpit's handoff was read (steady), alpha-one finished unread (quiet).
+    pub fn attention_snapshot() -> SessionSnapshot {
+        let mut snapshot = snapshot();
+        for pane in &mut snapshot.panes {
+            match pane.agent_id.as_deref() {
+                Some("a") => {
+                    pane.task_status = Some(TaskStatus::NeedsUser);
+                    pane.annotations.insert("unseen".into(), "asking".into());
+                    pane.annotations.insert("reason".into(), "which db?".into());
+                    pane.tokens.insert("questions".into(), "?2".into());
+                }
+                Some("b") => {
+                    pane.agent_status = AgentStatus::Blocked;
+                    pane.blocked_reason = Some(BlockedReason::Permission);
+                }
+                Some("root") => {
+                    pane.task_status = Some(TaskStatus::NeedsUser);
+                    pane.annotations.insert("reason".into(), "merge it".into());
+                }
+                Some("a1") => {
+                    pane.task_status = Some(TaskStatus::Complete);
+                    pane.annotations.insert("unseen".into(), "done".into());
+                }
+                _ => {}
+            }
+        }
+        snapshot
+    }
 }
 
 #[cfg(test)]
@@ -766,6 +1090,8 @@ mod tests {
                 Item::Agent(a) => format!("{}{}", "  ".repeat(a.depth), a.name),
                 Item::Pane(p) => format!("- {}", p.name),
                 Item::New => "+".into(),
+                Item::AttentionHeader(n) => format!("! {n}"),
+                Item::Attention(a) => format!("! {}", a.name),
             })
             .collect()
     }
@@ -777,6 +1103,7 @@ mod tests {
             extras: &Extras::default(),
             ui,
             search,
+            attention: true,
         })
     }
 
@@ -856,6 +1183,7 @@ mod tests {
             extras: &Extras::default(),
             ui: &UiState::default(),
             search: None,
+            attention: true,
         });
         assert!(items
             .iter()
@@ -950,6 +1278,7 @@ mod tests {
             extras: &Extras::default(),
             ui: &UiState::default(),
             search: None,
+            attention: true,
         });
         let agents = items.iter().filter(|i| matches!(i, Item::Agent(_))).count();
         assert_eq!(agents, 5);
@@ -974,6 +1303,7 @@ mod tests {
             extras: &extras,
             ui: &UiState::default(),
             search: None,
+            attention: true,
         });
         let find = |name: &str| {
             items
@@ -1009,5 +1339,246 @@ mod tests {
         snapshot.panes[3].agent_status = AgentStatus::Working;
         clock.observe(&snapshot, 170);
         assert_eq!(clock.ages(175)[&snapshot.panes[3].pane_id], 5);
+    }
+
+    fn pane_mut<'a>(snapshot: &'a mut SessionSnapshot, agent: &str) -> &'a mut PaneInfo {
+        snapshot
+            .panes
+            .iter_mut()
+            .find(|p| p.agent_id.as_deref() == Some(agent))
+            .unwrap()
+    }
+
+    fn build_attention(snapshot: &SessionSnapshot, extras: &Extras, ui: &UiState) -> Vec<Item> {
+        build(&Inputs {
+            snapshot,
+            extras,
+            ui,
+            search: None,
+            attention: true,
+        })
+    }
+
+    fn section_rows(items: &[Item]) -> Vec<AttentionItem> {
+        items
+            .iter()
+            .filter_map(|item| match item {
+                Item::Attention(a) => Some((**a).clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn wanted_and_unread_make_three_marks() {
+        let snapshot = attention_snapshot();
+        let mark_of = |agent: &str| {
+            let pane = snapshot
+                .panes
+                .iter()
+                .find(|p| p.agent_id.as_deref() == Some(agent))
+                .unwrap();
+            mark(pane, &HashSet::new())
+        };
+        assert_eq!(mark_of("a"), Some(Mark::Loud));
+        assert_eq!(mark_of("b"), Some(Mark::Loud));
+        assert_eq!(mark_of("root"), Some(Mark::Steady));
+        assert_eq!(mark_of("a1"), Some(Mark::Quiet));
+        assert_eq!(mark_of("other"), None);
+    }
+
+    #[test]
+    fn a_herdr_block_that_loom_also_wants_follows_looms_unread_axis() {
+        let mut snapshot = attention_snapshot();
+        let a = pane_mut(&mut snapshot, "a");
+        a.agent_status = AgentStatus::Blocked;
+        a.annotations.remove("unseen");
+        assert_eq!(undimmed_mark(a), Some(Mark::Steady));
+        a.task_status = Some(TaskStatus::Running);
+        assert_eq!(undimmed_mark(a), Some(Mark::Loud));
+    }
+
+    #[test]
+    fn the_section_sorts_loud_steady_quiet_then_oldest_first() {
+        let snapshot = attention_snapshot();
+        let mut extras = Extras::default();
+        extras.waited.insert("w1:p3".into(), 30);
+        extras.waited.insert("w1:p4".into(), 90);
+        let items = build_attention(&snapshot, &extras, &UiState::default());
+        assert_eq!(items[0], Item::AttentionHeader(4));
+        let rows = section_rows(&items);
+        let order: Vec<(&str, Mark)> = rows.iter().map(|r| (r.name.as_str(), r.mark)).collect();
+        assert_eq!(
+            order,
+            [
+                ("beta", Mark::Loud),
+                ("alpha", Mark::Loud),
+                ("cockpit", Mark::Steady),
+                ("alpha-one", Mark::Quiet)
+            ]
+        );
+        assert_eq!(rows[1].workspace, "dogfood");
+        assert_eq!(rows[1].questions.as_deref(), Some("?2"));
+        assert_eq!(rows[0].waited, Some(90));
+        // the agents keep their rows in their trees, marked the same way
+        let tree: Vec<(String, Option<Mark>)> = items
+            .iter()
+            .filter_map(|item| match item {
+                Item::Agent(a) => Some((a.name.clone(), a.mark)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(tree.len(), 5);
+        assert!(tree.contains(&("alpha-one".into(), Some(Mark::Quiet))));
+        assert!(tree.contains(&("remote".into(), None)));
+    }
+
+    #[test]
+    fn the_second_line_is_looms_reason_then_herdrs_then_the_report() {
+        let snapshot = attention_snapshot();
+        let mut extras = Extras::default();
+        let reason = |extras: &Extras| -> Vec<Option<String>> {
+            section_rows(&build_attention(&snapshot, extras, &UiState::default()))
+                .into_iter()
+                .map(|r| r.reason)
+                .collect()
+        };
+        // with no waited times the order is loud, steady, quiet by pane id
+        assert_eq!(
+            reason(&extras),
+            [
+                Some("which db?".into()),
+                Some("permission".into()),
+                Some("merge it".into()),
+                Some("done".into())
+            ]
+        );
+        extras
+            .reports
+            .insert("a1".into(), "shipped the parser".into());
+        assert_eq!(
+            reason(&extras)[3].as_deref(),
+            Some("done: shipped the parser")
+        );
+    }
+
+    #[test]
+    fn the_section_is_session_wide_and_hidden_when_empty_off_or_searching() {
+        let snapshot = attention_snapshot();
+        let extras = Extras::default();
+        let ui = UiState {
+            scope: Some(Scope::Workspace("w2".into())),
+            ..Default::default()
+        };
+        assert_eq!(
+            section_rows(&build_attention(&snapshot, &extras, &ui)).len(),
+            4
+        );
+        let off = build(&Inputs {
+            snapshot: &snapshot,
+            extras: &extras,
+            ui: &UiState::default(),
+            search: None,
+            attention: false,
+        });
+        assert!(section_rows(&off).is_empty());
+        let searching = build(&Inputs {
+            snapshot: &snapshot,
+            extras: &extras,
+            ui: &UiState::default(),
+            search: Some("alpha"),
+            attention: true,
+        });
+        assert!(section_rows(&searching).is_empty());
+        let quiet = build_attention(&fixtures::snapshot(), &extras, &UiState::default());
+        assert!(!quiet.iter().any(|i| matches!(i, Item::AttentionHeader(_))));
+    }
+
+    #[test]
+    fn the_questions_token_reads_looms_count() {
+        let mut snapshot = snapshot();
+        pane_mut(&mut snapshot, "b")
+            .tokens
+            .insert("questions".into(), "3".into());
+        pane_mut(&mut snapshot, "a")
+            .tokens
+            .insert("questions".into(), "?0".into());
+        let items = build_attention(&snapshot, &Extras::default(), &UiState::default());
+        let questions = |name: &str| {
+            items.iter().find_map(|item| match item {
+                Item::Agent(a) if a.name == name => Some(a.questions.clone()),
+                _ => None,
+            })
+        };
+        assert_eq!(questions("beta"), Some(Some("?3".into())));
+        assert_eq!(questions("alpha"), Some(None));
+    }
+
+    #[test]
+    fn focus_dims_loud_after_ten_seconds_until_the_state_changes() {
+        let mut snapshot = attention_snapshot();
+        let mut clock = AttentionClock::default();
+        clock.observe(&snapshot, 100);
+        assert_eq!(clock.next_due(), None);
+        // a glance shorter than the dim restarts the count
+        for pane in &mut snapshot.panes {
+            pane.focused = pane.agent_id.as_deref() == Some("a");
+        }
+        clock.observe(&snapshot, 101);
+        assert_eq!(clock.next_due(), Some(111));
+        pane_mut(&mut snapshot, "a").focused = false;
+        clock.observe(&snapshot, 105);
+        assert_eq!(clock.next_due(), None);
+        pane_mut(&mut snapshot, "a").focused = true;
+        clock.observe(&snapshot, 106);
+        clock.observe(&snapshot, 115);
+        assert!(clock.dimmed().is_empty());
+        clock.observe(&snapshot, 116);
+        assert!(clock.dimmed().contains("w1:p3"));
+        assert_eq!(clock.next_due(), None);
+        let a = |snapshot: &SessionSnapshot| {
+            snapshot
+                .panes
+                .iter()
+                .find(|p| p.agent_id.as_deref() == Some("a"))
+                .unwrap()
+                .clone()
+        };
+        assert_eq!(mark(&a(&snapshot), &clock.dimmed()), Some(Mark::Steady));
+        // dimming never reads the report
+        assert_eq!(unread_kind(&a(&snapshot)), Some("asking"));
+        // leaving keeps it dim; the next state change makes it loud again
+        pane_mut(&mut snapshot, "a").focused = false;
+        clock.observe(&snapshot, 130);
+        assert!(clock.dimmed().contains("w1:p3"));
+        pane_mut(&mut snapshot, "a")
+            .annotations
+            .insert("reason".into(), "which db, really?".into());
+        clock.observe(&snapshot, 131);
+        assert!(clock.dimmed().is_empty());
+        assert_eq!(mark(&a(&snapshot), &clock.dimmed()), Some(Mark::Loud));
+    }
+
+    #[test]
+    fn waited_counts_from_when_the_row_was_marked() {
+        let mut snapshot = attention_snapshot();
+        let mut clock = AttentionClock::default();
+        clock.observe(&snapshot, 100);
+        pane_mut(&mut snapshot, "a").agent_status = AgentStatus::Idle;
+        clock.observe(&snapshot, 120);
+        // a state flicker under the same want doesn't restart it, nor does marking it read
+        assert_eq!(clock.waited(130)["w1:p3"], 30);
+        pane_mut(&mut snapshot, "a").annotations.remove("unseen");
+        clock.observe(&snapshot, 125);
+        assert_eq!(clock.waited(130)["w1:p3"], 30);
+        pane_mut(&mut snapshot, "a")
+            .annotations
+            .insert("unseen".into(), "asking".into());
+        pane_mut(&mut snapshot, "a").task_status = Some(TaskStatus::Running);
+        clock.observe(&snapshot, 140);
+        assert_eq!(clock.waited(150)["w1:p3"], 10);
+        pane_mut(&mut snapshot, "a").annotations.remove("unseen");
+        clock.observe(&snapshot, 160);
+        assert!(!clock.waited(160).contains_key("w1:p3"));
     }
 }

@@ -137,6 +137,7 @@ impl App {
             extras: &self.extras,
             ui: &self.ui,
             search: self.search.as_deref(),
+            attention: self.config.attention,
         })
     }
 
@@ -260,6 +261,16 @@ impl App {
         })
     }
 
+    /// Mark read has no built-in: herdr doesn't know loom's unread reports.
+    fn mark_read(&mut self, agent_id: &str, pane_id: &str, name: &str) -> Vec<Effect> {
+        let vars = [("agent_id", agent_id), ("pane_id", pane_id), ("name", name)];
+        let effects = self.action("ack", &vars, Vec::new);
+        if effects.is_empty() {
+            self.status = Some("mark read: no [sidebar.actions] ack configured".into());
+        }
+        effects
+    }
+
     fn open_ui(&self, agent_id: &str, name: &str) -> Vec<Effect> {
         self.action("ui", &[("agent_id", agent_id), ("name", name)], || {
             vec![Effect::Call(
@@ -344,6 +355,9 @@ impl App {
     }
 
     fn item_command(&mut self, command: Command, item: Item) -> Vec<Effect> {
+        if let Item::Attention(row) = &item {
+            return self.attention_command(command, row);
+        }
         match (command, item) {
             (Command::Activate, item) => self.activate(&item),
             (Command::Fold, Item::Header(h)) => {
@@ -408,6 +422,11 @@ impl App {
                 None => Vec::new(),
             },
             (Command::Close, Item::Agent(a)) => self.close(a.agent_id.unwrap_or(a.pane_id), a.name),
+            (Command::Ack, Item::Agent(a)) => self.mark_read(
+                a.agent_id.as_deref().unwrap_or(&a.pane_id),
+                &a.pane_id,
+                &a.name,
+            ),
             (Command::OpenUi, Item::Agent(a)) => {
                 self.open_ui(a.agent_id.as_deref().unwrap_or(&a.pane_id), &a.name)
             }
@@ -415,6 +434,21 @@ impl App {
                 self.open_menu(&item);
                 Vec::new()
             }
+            _ => Vec::new(),
+        }
+    }
+
+    /// An attention row acts on its agent as the tree row does; folding and scope
+    /// belong to the trees.
+    fn attention_command(&mut self, command: Command, row: &model::AttentionItem) -> Vec<Effect> {
+        let id = row.agent_id.clone().unwrap_or_else(|| row.pane_id.clone());
+        match command {
+            Command::Activate => vec![focus_pane(&row.pane_id)],
+            Command::Ack => self.mark_read(&id, &row.pane_id, &row.name),
+            Command::Close => self.close(id, row.name.clone()),
+            Command::Reply if row.agent_id.is_some() => self.reply(id, row.name.clone()),
+            Command::Tell if row.agent_id.is_some() => self.tell(id, row.name.clone()),
+            Command::OpenUi => self.open_ui(&id, &row.name),
             _ => Vec::new(),
         }
     }
@@ -432,7 +466,7 @@ impl App {
                 self.ui.scope = None;
                 vec![Effect::Persist]
             }
-            Item::Search(_) => Vec::new(),
+            Item::Search(_) | Item::AttentionHeader(_) | Item::Attention(_) => Vec::new(),
         }
     }
 
@@ -1332,6 +1366,86 @@ mod tests {
         snap.panes.retain(|p| p.agent_id.as_deref() != Some("a"));
         assert_eq!(app.set_snapshot(snap), [Effect::Persist]);
         assert_eq!(app.ui.scope, None);
+    }
+
+    fn attention_app(config: &str) -> App {
+        let mut app = App::new(from_table(&config.parse().unwrap()), UiState::default());
+        app.set_snapshot(crate::model::fixtures::attention_snapshot());
+        app.focused = true;
+        app
+    }
+
+    const ACK: &str = r#"actions = { ack = { command = ["loom", "ack", "{agent_id}"] } }"#;
+
+    #[test]
+    fn a_marks_read_through_the_ack_action_and_does_nothing_without_it() {
+        let mut app = app(ACK);
+        app.selected = Some("pane:w1:p3".into());
+        assert_eq!(
+            press(&mut app, KeyCode::Char('a')),
+            [Effect::Run {
+                argv: vec!["loom".into(), "ack".into(), "a".into()],
+                popup: false
+            }]
+        );
+        let mut bare = self::app("");
+        bare.selected = Some("pane:w1:p3".into());
+        assert!(press(&mut bare, KeyCode::Char('a')).is_empty());
+        let status = bare.status.clone().unwrap();
+        assert!(status.starts_with("mark read"), "{status}");
+        // z a is still the fold chord
+        typed(&mut bare, "za");
+        assert!(bare.ui.folded.contains("a"));
+    }
+
+    #[test]
+    fn attention_rows_focus_mark_read_and_close_like_tree_rows() {
+        let mut app = attention_app(ACK);
+        app.ensure_selection();
+        // the header is skipped; the first row is the oldest loud one
+        typed(&mut app, "gg");
+        assert_eq!(app.selected.as_deref(), Some("attention:w1:p3"));
+        assert_eq!(
+            press(&mut app, KeyCode::Enter),
+            [Effect::Call("pane.focus", json!({ "pane_id": "w1:p3" }))]
+        );
+        assert_eq!(
+            press(&mut app, KeyCode::Char('a')),
+            [Effect::Run {
+                argv: vec!["loom".into(), "ack".into(), "a".into()],
+                popup: false
+            }]
+        );
+        assert_eq!(
+            press(&mut app, KeyCode::Char('c')),
+            [Effect::ClosePreview {
+                agent_id: "a".into(),
+                name: "alpha".into()
+            }]
+        );
+        // folding and scope belong to the trees
+        assert!(press(&mut app, KeyCode::Char('h')).is_empty());
+        assert!(press(&mut app, KeyCode::Char('f')).is_empty());
+        assert_eq!(app.ui, UiState::default());
+    }
+
+    #[test]
+    fn the_attention_section_draws_on_top_and_its_rows_click_to_focus() {
+        let mut app = attention_app("glyphs = \"unicode\"");
+        let lines = draw(&mut app, 40, 30);
+        assert_eq!(lines[0], "attention 4");
+        assert!(lines[1].starts_with(" ●alpha dogfood ?2"), "{lines:?}");
+        assert!(click(&mut app, 3, 0, MouseButton::Left).is_empty());
+        for row in [3, 4] {
+            assert_eq!(
+                click(&mut app, 3, row, MouseButton::Left),
+                [Effect::Call("pane.focus", json!({ "pane_id": "w1:p4" }))]
+            );
+        }
+        assert_eq!(app.selected.as_deref(), Some("attention:w1:p4"));
+        let mut off = attention_app("attention = false");
+        let lines = draw(&mut off, 40, 30);
+        assert!(lines[0].starts_with("▾ dogfood"), "{lines:?}");
     }
 
     #[test]

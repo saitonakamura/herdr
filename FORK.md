@@ -168,19 +168,34 @@ it draws and does is 018's resolution (`.issues/herdr-fork/018-sidebar-content.m
   ```toml
   [sidebar]
   glyphs = "nerd"   # or "unicode"
-  line1 = ["name", "effort", "task", "ticket", "messages", "source", "age"]
+  line1 = ["name", "effort", "task", "ticket", "messages", "questions", "source", "age"]
   line2 = ["branch", "ahead_behind", "dirty", "worktree"]
   colors = { muted = "#757ead", selection = "8", working = "yellow" }
   glyph = { awaiting = "…" }   # per meaning; `herdr-sidebar glyphs` lists them
+  attention = true   # the attention section; false turns it off
   [sidebar.actions]
   close = { command = ["loom", "close", "{agent_id}"], popup = true }
+  ack = { command = ["loom", "ack", "{agent_id}"] }
   ```
 
-  Actions are `reply`, `tell`, `close`, `ui`, `rename`, `close_workspace`,
+  Actions are `reply`, `tell`, `close`, `ack`, `ui`, `rename`, `close_workspace`,
   `new_worktree` and `new_workspace`; `{agent_id}`, `{pane_id}`, `{workspace_id}`
   and `{name}` are filled in. `popup = true` runs the command through the
   fork-only `popup.open`, otherwise detached. Without an override `ui` opens loom's
-  `ui` plugin popup.
+  `ui` plugin popup, and `ack` (the `a` key, mark read) does nothing: herdr has no
+  unread reports of its own.
+- **Attention** (052). A section pinned above the trees lists, session-wide
+  whatever the scope, every wanted agent (task status `needs_user`, or blocked) and
+  every agent with an unread report (loom's `unseen` annotation). It is hidden when
+  empty and while searching. Rows sort loud (wanted, unread; a herdr block with
+  no `needs_user`), steady (wanted, read), then quiet (unread only), oldest first;
+  the agent keeps its tree row, marked the same way. Loud reverses the state glyph
+  and bolds the name, quiet adds a dim `•` coloured by report kind
+  (`unread_done`, `unread_failed`, … in `[sidebar.colors]`). A row's second line
+  is loom's `reason`, else the blocked reason, else the report kind and the first
+  line of the agent's latest report (`message.list`, read again when it sends one).
+  About 10 s of focus draws a loud row as steady until its state next changes;
+  that is the program's own memory, and never marks anything read.
 - **State.** Collapsed sections, folds and the scope live in
   `$XDG_STATE_HOME/herdr/sidebar/<session>.json`. `herdr-sidebar ctl fold|scope
   [<pane>]` talks to the running program over `<HERDR_SOCKET_PATH>.sidebar`, so

@@ -12,7 +12,9 @@ use ratatui::style::{Modifier, Style};
 use serde_json::{json, Value};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use crate::api::{self, ApiError, MessageInfo, MessageKind, SessionSnapshot};
+use crate::api::{
+    self, AgentStatus, ApiError, BlockedReason, MessageInfo, MessageKind, SessionSnapshot,
+};
 use crate::app::substitute;
 use crate::config::Config;
 use crate::glyphs::Meaning;
@@ -84,6 +86,8 @@ pub enum Subject {
         /// The unread report's kind (loom's `unseen` annotation).
         unread: Option<String>,
         report: Option<Report>,
+        /// Blocked on a turn a restart cut off (053): the user decides whether it goes on.
+        interrupted: bool,
     },
     Workspace {
         workspace_id: String,
@@ -120,6 +124,8 @@ pub fn subject(
                 name: model::agent_name(pane, &tab_labels),
                 unread: model::unread_kind(pane).map(str::to_string),
                 report: pane.agent_id.as_deref().and_then(report),
+                interrupted: pane.agent_status == AgentStatus::Blocked
+                    && pane.blocked_reason == Some(BlockedReason::Interrupted),
             })
         }
     }
@@ -127,6 +133,7 @@ pub fn subject(
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Entry {
+    Continue,
     OpenReport,
     Ack,
     Reply,
@@ -145,6 +152,8 @@ pub enum Entry {
 impl Entry {
     pub fn key(self) -> char {
         match self {
+            // c is close
+            Entry::Continue => 'C',
             Entry::OpenReport => 'o',
             Entry::Ack => 'a',
             Entry::Reply | Entry::Rename => 'r',
@@ -162,6 +171,7 @@ impl Entry {
 
     pub fn label(self) -> &'static str {
         match self {
+            Entry::Continue => "continue",
             Entry::OpenReport => "open report",
             Entry::Ack => "ack",
             Entry::Reply => "reply",
@@ -194,9 +204,13 @@ pub fn entries(subject: &Subject) -> Vec<Entry> {
             agent_id,
             unread,
             report,
+            interrupted,
             ..
         } => {
             let mut entries = Vec::new();
+            if *interrupted {
+                entries.push(Entry::Continue);
+            }
             if report.is_some() {
                 entries.push(Entry::OpenReport);
             }
@@ -416,6 +430,8 @@ type Row = (Spans, Option<usize>);
 
 const NO_ACK: &str = "ack: no [sidebar.actions] ack configured";
 
+const AGENT_PROMPT: &str = "agent.prompt";
+
 impl Menu {
     pub fn new(subject: Subject, config: Config) -> Self {
         Menu {
@@ -574,6 +590,7 @@ impl Menu {
                 format!("closing {}", self.name())
             }
             Job::ClosePreview => "reading what close takes".into(),
+            Job::Call(AGENT_PROMPT, _) => format!("continuing {}", self.name()),
             _ => "working".into(),
         };
         self.screen = Screen::Working(what);
@@ -587,6 +604,13 @@ impl Menu {
             input: String::new(),
         };
         match entry {
+            Entry::Continue => {
+                if let Subject::Agent { pane_id, .. } = &self.subject {
+                    // agent.prompt reaches an interrupted pane, where messages wait
+                    let params = json!({ "target": pane_id, "text": "continue" });
+                    self.start(Job::Call(AGENT_PROMPT, params));
+                }
+            }
             Entry::OpenReport => self.goto(Screen::Report { scroll: 0 }),
             Entry::Ack => {
                 if self.config.action("ack").is_none() {
@@ -1442,6 +1466,7 @@ pub mod tests {
             name: "alpha".into(),
             unread: unread.map(Into::into),
             report: Some(report("done: built it")),
+            interrupted: false,
         }
     }
 
@@ -1502,6 +1527,7 @@ pub mod tests {
             name: "claude".into(),
             unread: None,
             report: None,
+            interrupted: false,
         };
         assert_eq!(keys(&menu(bare, "")), "cp");
         let ws = Subject::Workspace {
@@ -1509,6 +1535,69 @@ pub mod tests {
             label: "elsewhere".into(),
         };
         assert_eq!(keys(&menu(ws, "")), "rcwoKJ");
+    }
+
+    pub fn interrupted() -> Subject {
+        let mut subject = agent(None);
+        if let Subject::Agent { interrupted, .. } = &mut subject {
+            *interrupted = true;
+        }
+        subject
+    }
+
+    fn beta(snapshot: &mut SessionSnapshot) -> &mut api::PaneInfo {
+        snapshot
+            .panes
+            .iter_mut()
+            .find(|p| p.pane_id == "w1:p4")
+            .unwrap()
+    }
+
+    #[test]
+    fn continue_is_offered_only_on_an_interrupted_agent() {
+        assert_eq!(keys(&menu(interrupted(), "")), "Cortcfp");
+        let lines = draw(&mut menu(interrupted(), ""), 40, 14);
+        assert_eq!(lines[3], "  C  continue");
+        let mut snapshot = crate::model::fixtures::attention_snapshot();
+        let offered = |snapshot: &SessionSnapshot| {
+            let subject = subject(snapshot, &Target::Pane("w1:p4".into()), |_| None).unwrap();
+            entries(&subject).contains(&Entry::Continue)
+        };
+        // beta is blocked on a permission: no
+        assert_eq!(beta(&mut snapshot).agent_status, AgentStatus::Blocked);
+        assert!(!offered(&snapshot));
+        beta(&mut snapshot).blocked_reason = Some(BlockedReason::Interrupted);
+        assert!(offered(&snapshot));
+        for status in [
+            AgentStatus::Idle,
+            AgentStatus::Working,
+            AgentStatus::Awaiting,
+            AgentStatus::Done,
+        ] {
+            beta(&mut snapshot).agent_status = status;
+            assert!(!offered(&snapshot), "{status:?}");
+        }
+    }
+
+    #[test]
+    fn continue_prompts_the_pane_and_closes_the_popup() {
+        let mut m = menu(interrupted(), "");
+        typed(&mut m, "C");
+        assert_eq!(m.screen, Screen::Working("continuing alpha".into()));
+        let mut stub = Stub::default();
+        m.work(&mut stub);
+        assert_eq!(
+            stub.calls,
+            [(
+                "agent.prompt".to_string(),
+                json!({ "target": "w1:p3", "text": "continue" })
+            )]
+        );
+        assert_eq!(m.exit, Some(Exit::Quit));
+        // lowercase c is still close
+        let mut m = menu(interrupted(), "");
+        typed(&mut m, "c");
+        assert_eq!(m.job, Some(Job::ClosePreview));
     }
 
     #[test]
@@ -1595,6 +1684,8 @@ pub mod tests {
             name: "test-dirs-055".into(),
             unread: Some("done".into()),
             report: latest_report(api::messages_from_result(&json!({ "messages": [message] }))),
+
+            interrupted: false,
         };
         let mut m = menu(subject, &format!("glyphs = \"unicode\"\n{LOOM}"));
         m.now_ms = sent + 4 * 60_000 + 59_000;

@@ -46,8 +46,8 @@ The state of an agent whose turn ended at its prompt while work it started runs 
 _Avoid_: background, waiting, parked
 
 **Acknowledgement**:
-Focusing a done agent's pane while the outer terminal has focus. One acknowledgement clears done for every client.
-_Avoid_: seen, read
+Focusing a done agent's pane while the outer terminal has focus. One acknowledgement clears done for every client. Never shortened to ack, which is the user clearing an unread report.
+_Avoid_: seen, read, ack
 
 **Blocked reason**:
 What a blocked agent waits on: a `question` asked in prose, a tool `permission`, a `form` to fill in, or a decision on a turn a restart `interrupted`.
@@ -58,12 +58,12 @@ An agent that needs something from the user now: its task status is needs_user, 
 _Avoid_: needs attention, pending
 
 **Unread report**:
-An agent's latest report that the user has not marked read. Focus never clears it, unlike done.
-_Avoid_: unseen, unacked
+An agent's latest report that the user has not acked. Focus never clears it, unlike done.
+_Avoid_: unseen
 
-**Mark read**:
-The user's explicit act that clears an unread report. It is not an acknowledgement, which is focus clearing done.
-_Avoid_: ack, seen
+**Ack**:
+The user's explicit act that clears an unread report, by opening the report or by asking for it outright. It is not an acknowledgement, which is focus clearing done.
+_Avoid_: mark read, seen
 
 **Attention section**:
 The session-wide list of every wanted agent and every agent with an unread report, at the top of the sidebar.

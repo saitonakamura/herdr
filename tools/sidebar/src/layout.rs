@@ -98,7 +98,7 @@ pub fn cut(text: &str, width: usize) -> String {
     out
 }
 
-fn age_text(seconds: u64) -> String {
+pub fn age_text(seconds: u64) -> String {
     match seconds {
         s if s < 60 => format!("{s}s"),
         s if s < 3600 => format!("{}m", s / 60),

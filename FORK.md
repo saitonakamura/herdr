@@ -195,10 +195,17 @@ it draws and does is 018's resolution (`.issues/herdr-fork/018-sidebar-content.m
   latest report's first line, and one entry per action with its key; the key, j/k
   and Enter, or a click runs one, and Esc closes it, giving keyboard focus back to
   the sidebar when it held it.
-  - Agent: **open report** (`o`, the latest report's summary and body; closing it
-    acks an unread one), **ack** (`a`, while a report is unread), **reply** (`r`),
-    **tell** (`t`), **close** (`c`), **scope to subtree** (`f`), **open in loom
-    ui** (`p`).
+  - Agent: **open report** (`o`; closing it acks an unread one), **ack** (`a`,
+    while a report is unread), **reply** (`r`), **tell** (`t`), **close** (`c`),
+    **scope to subtree** (`f`), **open in loom ui** (`p`).
+  - The report screen (060) has the name, the kind's glyph in its colour, the kind
+    and the report's age as its header, then the report as loom wrote it. That
+    text comes from the herdr message, not loom's files: its summary without the
+    `<kind>: ` prefix or the ` ‖ ` rows loom appends for the parent agent, then
+    its body, which is loom's `--body-file` (herdr types only the summary into
+    the recipient). It is drawn as light markdown: headings bold, inline code and
+    fenced blocks dimmed, list items with a hanging indent, wrapped at word
+    boundaries. j/k, ctrl-d/u and the wheel scroll it.
   - Workspace: **rename** (`r`), **close** (`c`), **new worktree** (`w`),
     **collapse others** (`o`).
   - With `[sidebar.actions] close`, close asks for an outcome, ok or struggled

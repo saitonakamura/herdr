@@ -221,8 +221,8 @@ it draws and does is 018's resolution (`.issues/herdr-fork/018-sidebar-content.m
   every agent with an unread report (loom's `unseen` annotation). It is hidden when
   empty and while searching. Rows sort loud (wanted, unread; a herdr block with
   no `needs_user`), steady (wanted, read), then quiet (unread only), oldest first;
-  the agent keeps its tree row, marked the same way. Loud reverses the state glyph
-  and bolds the name. Every row carries at most one loom mark after its name: the
+  the agent keeps its tree row, marked the same way. Loud draws a `▌` in the state's
+  colour at the row's left edge (wide rows) and bolds the name. Every row carries at most one loom mark after its name: the
   unread report's kind in its colour (done `✓`, failed `✗`, blocked `↑`, asking
   `?`, handoff `→`, any other `•`; nerd glyphs in the `nerd` set), else, once
   acked, where the task status settled, muted (complete `✓`, failed `✗`,

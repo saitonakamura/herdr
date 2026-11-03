@@ -320,13 +320,13 @@ fn name_style(failed: bool, focused: bool, mark: Option<Mark>) -> Style {
     style
 }
 
-/// The state glyph's style: loud draws it in reverse video.
-fn state_style(color: Option<Color>, mark: Option<Mark>) -> Style {
-    let style = fg(color);
+/// A wide row's first cell: a bar in the state's colour when loud, else blank.
+/// Reverse video on the glyph broke on nerd icons, which overflow their cell.
+fn edge_span(color: Option<Color>, mark: Option<Mark>) -> Span {
     if mark == Some(Mark::Loud) {
-        style.add_modifier(Modifier::REVERSED)
+        span("▌", fg(color))
     } else {
-        style
+        span(" ", Style::default())
     }
 }
 
@@ -358,9 +358,9 @@ fn agent_lines(agent: &AgentItem, width: u16, config: &Config, key: String) -> V
 
     let guides = guides_text(agent);
     let mut lead = vec![
-        span(" ", Style::default()),
+        edge_span(state.color, agent.mark),
         span(guides.clone(), muted),
-        span(state.text.clone(), state_style(state.color, agent.mark)),
+        span(state.text.clone(), fg(state.color)),
     ];
     if let Some(brand) = &brand {
         lead.push(span(brand.text.clone(), fg(brand.color)));
@@ -562,7 +562,7 @@ fn attention_lines(
     let state = config.glyphs.get(row.meaning);
     let focus = Target::FocusPane(row.pane_id.clone());
     let name_style = name_style(false, row.focused, mark);
-    let glyph = span(state.text.clone(), state_style(state.color, mark));
+    let glyph = span(state.text.clone(), fg(state.color));
     if narrow {
         let room = width.saturating_sub(state.text.width());
         let name: String = {
@@ -584,7 +584,7 @@ fn attention_lines(
             target: Some(focus),
         }];
     }
-    let lead = vec![span(" ", Style::default()), glyph];
+    let lead = vec![edge_span(state.color, mark), glyph];
     let lead_width: usize = lead.iter().map(|s| s.text.width()).sum();
     let mut tokens: Vec<(&str, Span)> = vec![("name", span(row.name.clone(), name_style))];
     if let Some(dot) = loom_mark_span(row.loom_mark, config) {
@@ -668,7 +668,7 @@ fn narrow_agent_line(agent: &AgentItem, width: u16, config: &Config, key: String
     Line {
         spans: vec![
             span(indent, Style::default()),
-            span(state.text.clone(), state_style(state.color, agent.mark)),
+            span(state.text.clone(), fg(state.color)),
             span(name, style),
         ],
         key,
@@ -903,10 +903,10 @@ mod tests {
         let text: Vec<String> = lines.iter().map(Line::text).collect();
         assert_eq!(text[0], "attention 4");
         assert_eq!(text[1].width(), 40, "{text:?}");
-        assert!(text[1].starts_with(" ●alpha ? dogfood ?2"), "{text:?}");
+        assert!(text[1].starts_with("▌●alpha ? dogfood ?2"), "{text:?}");
         assert!(text[1].ends_with(" 2m"), "{text:?}");
         assert_eq!(text[2], "  which db?");
-        assert!(text[3].starts_with(" !beta dogfood"), "{text:?}");
+        assert!(text[3].starts_with("▌!beta dogfood"), "{text:?}");
         assert_eq!(text[4], "  permission");
         assert!(text[5].starts_with(" ✓cockpit dogfood"), "{text:?}");
         assert_eq!(text[6], "  merge it");
@@ -921,10 +921,12 @@ mod tests {
     }
 
     #[test]
-    fn loud_reverses_the_glyph_and_bolds_the_name_steady_does_not() {
+    fn loud_bars_the_edge_and_bolds_the_name_steady_does_not() {
         let lines = render_attention(40, &Extras::default());
         let alpha = &lines[1];
-        assert!(span_with(alpha, "●")
+        assert_eq!(alpha.spans[0].text, "▌");
+        assert_eq!(alpha.spans[0].style.fg, span_with(alpha, "●").style.fg);
+        assert!(!span_with(alpha, "●")
             .style
             .add_modifier
             .contains(Modifier::REVERSED));
@@ -933,20 +935,14 @@ mod tests {
             .add_modifier
             .contains(Modifier::BOLD));
         let cockpit = &lines[5];
-        assert!(!span_with(cockpit, "✓")
-            .style
-            .add_modifier
-            .contains(Modifier::REVERSED));
+        assert_eq!(cockpit.spans[0].text, " ");
         assert!(!span_with(cockpit, "cockpit")
             .style
             .add_modifier
             .contains(Modifier::BOLD));
         // the same marks in the tree
         let tree_alpha = lines.iter().find(|l| l.key == "pane:w1:p3").unwrap();
-        assert!(span_with(tree_alpha, "●")
-            .style
-            .add_modifier
-            .contains(Modifier::REVERSED));
+        assert_eq!(tree_alpha.spans[0].text, "▌");
         assert!(
             tree_alpha.text().ends_with("fork-030 ?2"),
             "{}",

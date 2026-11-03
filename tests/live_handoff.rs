@@ -519,34 +519,133 @@ fn wait_for_replacement_server_pid(runtime_dir: &Path, old_pid: u32, timeout: Du
 
 #[cfg(target_os = "macos")]
 fn wait_for_replacement_server_pid(_runtime_dir: &Path, old_pid: u32, timeout: Duration) -> u32 {
-    let handoff_socket_pattern = format!("herdr-handoff-{old_pid}.sock");
     let deadline = Instant::now() + timeout;
-    let mut last_stdout = String::new();
+    let mut last_children = Ok(Vec::new());
     while Instant::now() < deadline {
-        if let Ok(output) = std::process::Command::new("pgrep")
-            .args(["-af", &handoff_socket_pattern])
-            .output()
-        {
-            last_stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-            for line in last_stdout.lines() {
-                let Some(pid_text) = line.split_whitespace().next() else {
-                    continue;
-                };
-                let Ok(pid) = pid_text.parse::<u32>() else {
-                    continue;
-                };
-                if pid != old_pid {
-                    return pid;
-                }
+        last_children = support::herdr_child_pids(old_pid);
+        if let Ok(pids) = &last_children {
+            assert!(
+                pids.len() <= 1,
+                "old server pid {old_pid} has multiple herdr children: {pids:?}"
+            );
+            if let Some(pid) = pids.first() {
+                register_spawned_herdr_pid(Some(*pid));
+                return *pid;
             }
         }
         thread::sleep(Duration::from_millis(25));
     }
     panic!(
-        "replacement server for {} did not appear; last pgrep output: {}",
-        _runtime_dir.display(),
-        last_stdout
+        "replacement child of old server pid {old_pid} did not appear; expected executable {}; last children: {last_children:?}",
+        env!("CARGO_BIN_EXE_herdr")
     );
+}
+
+#[cfg(target_os = "macos")]
+struct ResumeServer(u32);
+
+#[cfg(target_os = "macos")]
+impl Drop for ResumeServer {
+    fn drop(&mut self) {
+        unsafe {
+            libc::kill(self.0 as libc::pid_t, libc::SIGCONT);
+            if thread::panicking() {
+                // A delayed wrapper must not stop its parent after a timed-out lookup.
+                libc::kill(self.0 as libc::pid_t, libc::SIGKILL);
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn replacement_lookup_timeout_does_not_leave_stopped_parent() {
+    use std::os::unix::process::ExitStatusExt;
+
+    let mut child = std::process::Command::new("/bin/sleep")
+        .arg("30")
+        .spawn()
+        .expect("spawn parent stand-in");
+    let pid = child.id();
+    let failure = std::panic::catch_unwind(|| {
+        let _resume = ResumeServer(pid);
+        assert_eq!(unsafe { libc::kill(pid as libc::pid_t, libc::SIGSTOP) }, 0);
+        wait_for_replacement_server_pid(Path::new("/unused"), pid, Duration::ZERO);
+    })
+    .expect_err("lookup should time out");
+
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let mut status = child.try_wait().expect("check parent");
+    while status.is_none() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
+        status = child.try_wait().expect("check parent");
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+
+    assert_eq!(
+        status.and_then(|status| status.signal()),
+        Some(libc::SIGKILL)
+    );
+    let diagnostic = failure
+        .downcast_ref::<String>()
+        .expect("timeout diagnostic");
+    assert!(diagnostic.contains(&format!("old server pid {pid}")));
+    assert!(diagnostic.contains("last children:"));
+}
+
+#[cfg(target_os = "macos")]
+fn handoff_replacement_pid(
+    api_socket: &Path,
+    runtime_dir: &Path,
+    old_pid: u32,
+    timeout: Duration,
+) -> u32 {
+    use std::os::unix::fs::PermissionsExt;
+
+    let wrapper = runtime_dir.join("handoff-import.sh");
+    fs::write(
+        &wrapper,
+        format!(
+            "#!/bin/sh\nkill -STOP {old_pid} || exit 1\nexec '{}' \"$@\"\n",
+            env!("CARGO_BIN_EXE_herdr").replace('\'', "'\\''")
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&wrapper, fs::Permissions::from_mode(0o700)).unwrap();
+
+    thread::scope(|scope| {
+        // Drop inside the scope so even a failed lookup resumes the server before joining the request.
+        let resume = ResumeServer(old_pid);
+        let handoff = scope.spawn(|| {
+            request(
+                api_socket,
+                serde_json::json!({
+                    "id": "test:handoff",
+                    "method": "server.live_handoff",
+                    "params": {"import_exe": wrapper}
+                }),
+            )
+        });
+        let pid = wait_for_replacement_server_pid(runtime_dir, old_pid, timeout);
+        drop(resume);
+        assert_ok(handoff.join().expect("handoff request thread"));
+        pid
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn handoff_replacement_pid(
+    api_socket: &Path,
+    runtime_dir: &Path,
+    old_pid: u32,
+    timeout: Duration,
+) -> u32 {
+    assert_ok(request(
+        api_socket,
+        serde_json::json!({"id":"test:handoff","method":"server.live_handoff","params":{}}),
+    ));
+    wait_for_replacement_server_pid(runtime_dir, old_pid, timeout)
 }
 
 fn unused_local_port() -> u16 {
@@ -643,12 +742,12 @@ fn live_server_holds_one_pty_master_fd_per_pane() {
     ));
     wait_for_server_ptmx_fd_count(server_pid, 3, Duration::from_secs(5));
 
-    assert_ok(request(
+    let replacement_pid = handoff_replacement_pid(
         &api_socket,
-        serde_json::json!({"id":"test:handoff","method":"server.live_handoff","params":{}}),
-    ));
-    let replacement_pid =
-        wait_for_replacement_server_pid(&runtime_dir, server_pid, Duration::from_secs(10));
+        &runtime_dir,
+        server_pid,
+        Duration::from_secs(10),
+    );
     wait_for_api(&api_socket, Duration::from_secs(10));
     wait_for_server_ptmx_fd_count(replacement_pid, 3, Duration::from_secs(5));
 
@@ -687,12 +786,8 @@ fn live_handoff_unknown_pane_exit_preserves_session_on_shutdown() {
         .to_string();
     let old_pid = spawned.child.process_id().expect("old server pid");
 
-    assert_ok(request(
-        &api_socket,
-        serde_json::json!({"id":"test:handoff","method":"server.live_handoff","params":{}}),
-    ));
     let replacement_pid =
-        wait_for_replacement_server_pid(&runtime_dir, old_pid, Duration::from_secs(10));
+        handoff_replacement_pid(&api_socket, &runtime_dir, old_pid, Duration::from_secs(10));
     drop(spawned);
     wait_for_api(&api_socket, Duration::from_secs(10));
 
@@ -796,12 +891,12 @@ fn live_handoff_carries_more_panes_than_one_scm_rights_message() {
     }
     wait_for_server_ptmx_fd_count(server_pid, PANES, Duration::from_secs(60));
 
-    assert_ok(request(
+    let replacement_pid = handoff_replacement_pid(
         &api_socket,
-        serde_json::json!({"id":"test:handoff","method":"server.live_handoff","params":{}}),
-    ));
-    let replacement_pid =
-        wait_for_replacement_server_pid(&runtime_dir, server_pid, Duration::from_secs(30));
+        &runtime_dir,
+        server_pid,
+        Duration::from_secs(30),
+    );
     wait_for_api(&api_socket, Duration::from_secs(30));
     wait_for_server_ptmx_fd_count(replacement_pid, PANES, Duration::from_secs(30));
 

@@ -1,0 +1,9 @@
+{
+  "message_id": 123,
+  "kind": "report",
+  "from_agent_id": "15c8c116",
+  "to_agent_id": "82993002",
+  "summary": "done: herdr-fork 059 sidebar popup menu done. PR https://github.com/saitonakamura/herdr/pull/53 (5001cd62, merge 8a537c45), tools/sidebar + FORK.md only; ticket closed in 790ef3fa (Resolution + map Decisions line; nothing was blocked on it). Dotfiles: branch herdr-fork/059-sidebar-popup-menu at d858736 (docs/setup/herdr.md sidebar lines, config.fork.toml comments incl. prefix+alt+a 'loom ack: the focused pane's report'), pushed, not merged. loom close has no structured refusal, so the menu parses held-line reason tokens (unseen-only -> ack and close; others/busy -> force); a structured refusal from loom would make that sturdier. Local just check failures were the known ones (cross_area, api_ping, remote_attach fake-ssh, macOS chmod ACL, maintenance tag.gpgsign) plus a flaky live_handoff that passes alone; CI green on all three OSes. Task worktree and fork branch removed; throwaway session already stopped. ‖ child mac-notify [0583f345] done, last done 6d ago: 049 done: PR https://github.com/saitonakamura/herdr/pull/37… ‖ child popup-menu-059 [15c8c116] done, last done 0s ago: herdr-fork 059 sidebar popup menu done. PR https://github.c…",
+  "body": null,
+  "sent_at_ms": 1793707043797
+}

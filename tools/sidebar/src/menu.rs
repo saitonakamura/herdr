@@ -15,8 +15,10 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use crate::api::{self, ApiError, MessageInfo, MessageKind, SessionSnapshot};
 use crate::app::substitute;
 use crate::config::Config;
-use crate::layout::cut;
+use crate::glyphs::Meaning;
+use crate::layout::{age_text, cut};
 use crate::model;
+use crate::report::{self, Spans};
 
 /// What the menu is for: `herdr-sidebar menu pane <id>` or `menu workspace <id>`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,11 +49,14 @@ pub struct Report {
     pub message_id: u64,
     pub summary: String,
     pub body: Option<String>,
+    pub sent_at_ms: Option<u64>,
 }
 
 impl Report {
+    /// The summary's first line, with its kind but without loom's rows for the parent.
     fn first_line(&self) -> &str {
-        self.summary.lines().next().unwrap_or("").trim()
+        let line = self.summary.lines().next().unwrap_or("");
+        line.split(" ‖ ").next().unwrap_or(line).trim()
     }
 }
 
@@ -65,6 +70,7 @@ pub fn latest_report(messages: Vec<MessageInfo>) -> Option<Report> {
             message_id: m.message_id,
             summary: m.summary,
             body: m.body.filter(|b| !b.trim().is_empty()),
+            sent_at_ms: m.sent_at_ms,
         })
 }
 
@@ -391,9 +397,14 @@ pub struct Menu {
     pub status: Option<String>,
     pub job: Option<Job>,
     pub exit: Option<Exit>,
+    /// When the menu opened, for the report's age.
+    pub now_ms: u64,
     /// The screen row of each choice, from the last draw, for clicks.
     rows: Vec<Option<usize>>,
 }
+
+/// A body line and the choice it picks when clicked.
+type Row = (Spans, Option<usize>);
 
 const NO_ACK: &str = "ack: no [sidebar.actions] ack configured";
 
@@ -407,6 +418,9 @@ impl Menu {
             status: None,
             job: None,
             exit: None,
+            now_ms: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_millis() as u64),
             rows: Vec::new(),
         }
     }
@@ -987,6 +1001,43 @@ impl Menu {
         }
     }
 
+    /// The report screen's header: name, the kind's glyph in its colour, kind, age.
+    fn report_header(&self) -> Spans {
+        let Subject::Agent {
+            name,
+            unread,
+            report,
+            ..
+        } = &self.subject
+        else {
+            return Vec::new();
+        };
+        let kind = report
+            .as_ref()
+            .and_then(|r| report::summary_kind(&r.summary))
+            .or(unread.as_deref())
+            .unwrap_or("report");
+        let glyph = self.config.glyphs.get(Meaning::for_unread(kind));
+        let mut glyph_style = Style::default();
+        if let Some(color) = glyph.color {
+            glyph_style = glyph_style.fg(color);
+        }
+        let mut spans = vec![
+            (name.clone(), Style::default().add_modifier(Modifier::BOLD)),
+            (" ".into(), Style::default()),
+            (glyph.text.trim().to_string(), glyph_style),
+            (format!(" {kind}"), Style::default()),
+        ];
+        if let Some(sent) = report.as_ref().and_then(|r| r.sent_at_ms) {
+            let age = age_text(self.now_ms.saturating_sub(sent) / 1000);
+            spans.push((
+                format!(" · {age}"),
+                Style::default().add_modifier(Modifier::DIM),
+            ));
+        }
+        spans
+    }
+
     fn header(&self) -> (String, Option<(String, bool)>) {
         match &self.subject {
             Subject::Agent {
@@ -1011,14 +1062,14 @@ impl Menu {
         }
     }
 
-    fn body(&self, width: usize) -> Vec<(String, Style, Option<usize>)> {
+    fn body(&self, width: usize) -> Vec<Row> {
         let bold = Style::default().add_modifier(Modifier::BOLD);
         let plain = Style::default();
         let dim = Style::default().add_modifier(Modifier::DIM);
-        let mut out: Vec<(String, Style, Option<usize>)> = Vec::new();
-        let text = |out: &mut Vec<_>, s: &str, style: Style| {
+        let mut out: Vec<Row> = Vec::new();
+        let text = |out: &mut Vec<Row>, s: &str, style: Style| {
             for line in wrap(s, width) {
-                out.push((line, style, None));
+                out.push((vec![(line, style)], None));
             }
         };
         match &self.screen {
@@ -1040,7 +1091,7 @@ impl Menu {
                         text(&mut out, line, plain);
                     }
                     if !unread.is_empty() {
-                        out.push((String::new(), plain, None));
+                        out.push((Vec::new(), None));
                         text(&mut out, "only unread reports hold it:", bold);
                         for node in unread {
                             text(&mut out, &format!("  {}: {}", node.name, node.line), plain);
@@ -1048,7 +1099,7 @@ impl Menu {
                     }
                 }
                 if !matches!(self.screen, Screen::Menu) {
-                    out.push((String::new(), plain, None));
+                    out.push((Vec::new(), None));
                 }
                 for (index, (key, label, _)) in self.choices().into_iter().enumerate() {
                     let style = if index == self.selected {
@@ -1058,7 +1109,10 @@ impl Menu {
                     };
                     let line = cut(&format!(" {key}  {label}"), width);
                     let pad = width.saturating_sub(line.width());
-                    out.push((format!("{line}{}", " ".repeat(pad)), style, Some(index)));
+                    out.push((
+                        vec![(format!("{line}{}", " ".repeat(pad)), style)],
+                        Some(index),
+                    ));
                 }
             }
             Screen::Report { .. } => {
@@ -1067,11 +1121,8 @@ impl Menu {
                     ..
                 } = &self.subject
                 {
-                    text(&mut out, &report.summary, bold);
-                    if let Some(body) = &report.body {
-                        out.push((String::new(), plain, None));
-                        text(&mut out, body, plain);
-                    }
+                    let text = report::text(&report.summary, report.body.as_deref());
+                    out.extend(report::render(&text, width).into_iter().map(|l| (l, None)));
                 }
             }
             Screen::Prompt { kind, input } => {
@@ -1107,12 +1158,17 @@ impl Menu {
         self.rows = vec![None; height];
         let bold = Style::default().add_modifier(Modifier::BOLD);
         let dim = Style::default().add_modifier(Modifier::DIM);
-        let (title, line) = self.header();
-        let mut top = vec![(cut(&title, width), bold)];
-        if let Some((line, unread)) = line {
-            top.push((cut(&line, width), if unread { bold } else { dim }));
-        }
-        top.push(("─".repeat(width), dim));
+        let mut top: Vec<Spans> = if let Screen::Report { .. } = self.screen {
+            vec![self.report_header()]
+        } else {
+            let (title, line) = self.header();
+            let mut top = vec![vec![(cut(&title, width), bold)]];
+            if let Some((line, unread)) = line {
+                top.push(vec![(cut(&line, width), if unread { bold } else { dim })]);
+            }
+            top
+        };
+        top.push(vec![("─".repeat(width), dim)]);
         // a status wraps to two lines, so an error is read whole; the hint is cut to one
         let footer: Vec<String> = match &self.status {
             Some(status) => {
@@ -1129,14 +1185,23 @@ impl Menu {
             body.drain(..*scroll);
         }
         let x = area.x + 1;
-        for (row, (text, style)) in top.iter().enumerate() {
+        let put = |buf: &mut Buffer, row: usize, spans: &Spans| {
+            let mut at = x;
+            for (text, style) in spans {
+                let left = (x as usize + width).saturating_sub(at as usize);
+                at = buf
+                    .set_stringn(at, area.y + row as u16, text, left, *style)
+                    .0;
+            }
+        };
+        for (row, spans) in top.iter().enumerate() {
             if row < height {
-                buf.set_stringn(x, area.y + row as u16, text, width, *style);
+                put(buf, row, spans);
             }
         }
-        for (offset, (text, style, choice)) in body.into_iter().take(room).enumerate() {
+        for (offset, (spans, choice)) in body.into_iter().take(room).enumerate() {
             let row = top.len() + offset;
-            buf.set_stringn(x, area.y + row as u16, &text, width, style);
+            put(buf, row, &spans);
             self.rows[row] = choice;
         }
         let style = if self.status.is_some() { bold } else { dim };
@@ -1312,8 +1377,11 @@ pub mod tests {
             message_id: 7,
             summary: summary.into(),
             body: Some("the long part\nsecond line".into()),
+            sent_at_ms: Some(NOW_MS - 4 * 60_000),
         }
     }
+
+    const NOW_MS: u64 = 1_762_000_000_000;
 
     pub fn agent(unread: Option<&str>) -> Subject {
         Subject::Agent {
@@ -1326,7 +1394,9 @@ pub mod tests {
     }
 
     pub fn menu(subject: Subject, config: &str) -> Menu {
-        Menu::new(subject, from_table(&config.parse().unwrap()))
+        let mut menu = Menu::new(subject, from_table(&config.parse().unwrap()));
+        menu.now_ms = NOW_MS;
+        menu
     }
 
     pub fn press(menu: &mut Menu, code: KeyCode) {
@@ -1441,8 +1511,8 @@ pub mod tests {
         let mut m = menu(agent(Some("done")), LOOM);
         press(&mut m, KeyCode::Char('o'));
         let lines = draw(&mut m, 40, 12);
-        assert_eq!(lines[3], " done: built it");
-        assert_eq!(lines[5], " the long part");
+        assert_eq!(lines[2], " built it");
+        assert_eq!(lines[4], " the long part");
         press(&mut m, KeyCode::Esc);
         assert_eq!(m.job, Some(Job::Ack { then_quit: false }));
         let mut stub = Stub::default();
@@ -1455,6 +1525,81 @@ pub mod tests {
         press(&mut m, KeyCode::Char('o'));
         press(&mut m, KeyCode::Esc);
         assert_eq!(m.job, None);
+    }
+
+    #[test]
+    fn the_report_screen_shows_the_report_under_name_kind_and_age() {
+        let message: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/reports/message-119.json"))
+                .unwrap();
+        let sent = message["sent_at_ms"].as_u64().unwrap();
+        let subject = Subject::Agent {
+            pane_id: "w1:p3".into(),
+            agent_id: Some("004127b1".into()),
+            name: "test-dirs-055".into(),
+            unread: Some("done".into()),
+            report: latest_report(api::messages_from_result(&json!({ "messages": [message] }))),
+        };
+        let mut m = menu(subject, &format!("glyphs = \"unicode\"\n{LOOM}"));
+        m.now_ms = sent + 4 * 60_000 + 59_000;
+        press(&mut m, KeyCode::Char('o'));
+        let mut buf = Buffer::empty(ratatui::layout::Rect::new(0, 0, 50, 30));
+        m.draw(&mut buf);
+        let line = |y: u16| {
+            (0..50)
+                .map(|x| buf[(x, y)].symbol().to_string())
+                .collect::<String>()
+                .trim_end()
+                .to_string()
+        };
+        assert_eq!(line(0), " test-dirs-055 ✓ done · 4m");
+        // the glyph in its kind's colour, the name bold, the body normal weight
+        assert_eq!(buf[(15, 0)].fg, ratatui::style::Color::Cyan);
+        assert!(buf[(1, 0)].modifier.contains(Modifier::BOLD));
+        assert_eq!(line(2), " 055 test user dirs: test-only temp defaults");
+        assert!(!buf[(1, 2)].modifier.contains(Modifier::BOLD));
+        let lines: Vec<String> = (0..30).map(line).collect();
+        assert!(lines.iter().all(|l| !l.contains('‖')), "{lines:#?}");
+        let heading = lines
+            .iter()
+            .position(|l| l == " 055 test user dirs — implementation report")
+            .unwrap();
+        assert!(buf[(1, heading as u16)].modifier.contains(Modifier::BOLD));
+        assert_eq!(lines[29], " j/k scroll · esc closes and acks");
+        // scrolling still works and is clamped to the end
+        for _ in 0..500 {
+            press(&mut m, KeyCode::Char('j'));
+        }
+        m.draw(&mut buf);
+        let Screen::Report { scroll } = m.screen else {
+            panic!()
+        };
+        assert!(scroll > 0);
+        press(&mut m, KeyCode::Char('g'));
+        assert_eq!(m.screen, Screen::Report { scroll: 0 });
+    }
+
+    #[test]
+    fn a_report_without_a_body_is_its_summary_without_the_parents_rows() {
+        let mut subject = agent(None);
+        if let Subject::Agent { report, .. } = &mut subject {
+            *report = Some(Report {
+                body: None,
+                sent_at_ms: None,
+                ..super::tests::report(
+                    "failed: tests red ‖ child b [b1] running, no report yet ‖ [loom] 1 ask open",
+                )
+            });
+        }
+        let mut m = menu(subject, "glyphs = \"unicode\"");
+        // the menu's line keeps the kind but drops the rows too
+        assert_eq!(draw(&mut m, 60, 10)[1], " failed: tests red");
+        press(&mut m, KeyCode::Char('o'));
+        let lines = draw(&mut m, 60, 10);
+        // no age without a send time
+        assert_eq!(lines[0], " alpha ✗ failed");
+        assert_eq!(lines[2], " tests red");
+        assert_eq!(lines[3], "");
     }
 
     #[test]

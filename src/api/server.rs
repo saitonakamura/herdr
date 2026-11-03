@@ -88,6 +88,7 @@ fn default_capabilities() -> Option<ServerCapabilities> {
             .map(|kind| (*kind).to_owned())
             .collect(),
         wait_readers: true,
+        wait_read_retries: crate::app::wait_readers::QUICK_REREADS.into(),
         pane_read_links: true,
     })
 }
@@ -1431,6 +1432,7 @@ mod tests {
                 agent_waits: false,
                 wait_sources: Vec::new(),
                 wait_readers: false,
+                wait_read_retries: 0,
                 pane_read_links: false,
             }),
             None,

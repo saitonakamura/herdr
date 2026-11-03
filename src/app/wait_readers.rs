@@ -3,7 +3,7 @@
 //! The schedule is runtime state, rebuilt from the live waits after a load; what a read found
 //! is kept on the wait itself.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::time::{Duration, Instant};
 
 /// One read may take this long before its process group is killed and it counts as failed.
@@ -23,12 +23,43 @@ pub(crate) const MAX_READ_INTERVAL_MS: u64 = 86_400_000;
 const READ_OUTPUT_LIMIT: u64 = 64 * 1024;
 /// When a read could not start for want of a slot, try again this soon.
 const BUSY_RETRY: Duration = Duration::from_secs(5);
+/// Re-reads a just-declared wait gets after a failed read, before any read has succeeded; advertised
+/// as `wait_read_retries`, so a declarer can tell a blip from a source the server cannot read (113).
+pub(crate) const QUICK_REREADS: u8 = 2;
+/// How soon a quick re-read follows the failed read.
+const QUICK_REREAD_AFTER: Duration = Duration::from_secs(3);
+
+/// The states a reader says its kind of source can report, and those of the other kinds that read
+/// the same ref; a reader that names none (a free-form kind, an older reader) is not checked.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct Vocabulary {
+    pub states: Vec<String>,
+    pub related: BTreeMap<String, Vec<String>>,
+}
+
+impl Vocabulary {
+    /// Why `until` can never satisfy a wait on `kind:target`, or None when it is one of the states.
+    pub(crate) fn refuses(&self, kind: &str, target: &str, until: &str) -> Option<String> {
+        if self.states.iter().any(|state| state == until) {
+            return None;
+        }
+        let states = self.states.join(", ");
+        Some(
+            match self.related.iter().find(|(_, states)| states.iter().any(|s| s == until)) {
+                Some((other, _)) => format!(
+                    "`{until}` is a {other}: state, not one {kind}: reports ({states}); did you mean --on {other}:{target}?"
+                ),
+                None => format!("`{until}` is not a state {kind}: reports ({states})"),
+            },
+        )
+    }
+}
 
 /// What one run of a reader said.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ReadOutcome {
-    /// It reached the source, which is in this state.
-    Read(String),
+    /// It reached the source, which is in this state; the reader may also name the kind's states.
+    Read(String, Option<Vocabulary>),
     /// It could not reach the source this time (exit 1, a timeout, unreadable output).
     Failed(String),
     /// It cannot read this source at all (exit 2): retrying will not help.
@@ -76,7 +107,9 @@ pub(crate) fn parse_read_output(exit_code: Option<i32>, stdout: &str, stderr: &s
                 .and_then(|answer| answer.get("ok"))
                 .and_then(serde_json::Value::as_bool);
             match (ok, field("state")) {
-                (Some(true), Some(state)) => ReadOutcome::Read(state),
+                (Some(true), Some(state)) => {
+                    ReadOutcome::Read(state, answer.as_ref().and_then(vocabulary))
+                }
                 _ => ReadOutcome::Failed(complaint("the reader printed no state".to_owned())),
             }
         }
@@ -86,11 +119,36 @@ pub(crate) fn parse_read_output(exit_code: Option<i32>, stdout: &str, stderr: &s
     }
 }
 
+/// A reader answer's `states` (an array of strings) and `related_states` ({kind: [state]}).
+fn vocabulary(answer: &serde_json::Value) -> Option<Vocabulary> {
+    let strings = |value: &serde_json::Value| -> Option<Vec<String>> {
+        value
+            .as_array()?
+            .iter()
+            .map(|state| state.as_str().map(str::to_owned))
+            .collect()
+    };
+    let states = strings(answer.get("states")?).filter(|states| !states.is_empty())?;
+    let related = answer
+        .get("related_states")
+        .and_then(serde_json::Value::as_object)
+        .map(|related| {
+            related
+                .iter()
+                .filter_map(|(kind, states)| Some((kind.clone(), strings(states)?)))
+                .collect()
+        })
+        .unwrap_or_default();
+    Some(Vocabulary { states, related })
+}
+
 #[derive(Debug, Clone, Copy)]
 struct Slot {
     due: Instant,
     last_landed: Instant,
     in_flight: bool,
+    /// Quick re-reads left: a declared wait gets QUICK_REREADS until a read succeeds.
+    rereads: u8,
 }
 
 /// When each live reader wait is next looked at. A look either starts a read, or finds that none
@@ -115,9 +173,35 @@ impl ReaderSchedule {
                 due: now,
                 last_landed: now,
                 in_flight: false,
+                rereads: 0,
             },
         );
         self.due.insert((now, wait_id));
+    }
+
+    /// Starts watching a wait just declared: like `add`, and a failed read is soon read again.
+    pub(crate) fn declared(&mut self, wait_id: u64, now: Instant) {
+        self.add(wait_id, now);
+        if let Some(slot) = self.slots.get_mut(&wait_id) {
+            slot.rereads = QUICK_REREADS;
+        }
+    }
+
+    /// After a failed read: due again soon if the wait has quick re-reads left.
+    pub(crate) fn reread_soon(&mut self, wait_id: u64, now: Instant) -> bool {
+        let Some(slot) = self.slots.get_mut(&wait_id).filter(|slot| slot.rereads > 0) else {
+            return false;
+        };
+        slot.rereads -= 1;
+        self.reschedule(wait_id, now + QUICK_REREAD_AFTER);
+        true
+    }
+
+    /// A read succeeded: later failures wait for the interval like any other.
+    pub(crate) fn read_ok(&mut self, wait_id: u64) {
+        if let Some(slot) = self.slots.get_mut(&wait_id) {
+            slot.rereads = 0;
+        }
     }
 
     pub(crate) fn remove(&mut self, wait_id: u64) {
@@ -266,6 +350,45 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_read_may_name_its_kinds_states_and_those_of_kinds_reading_the_same_ref() {
+        let read = parse_read_output(
+            Some(0),
+            r#"{"ok":true,"state":"open","error":null,"states":["open","merged","closed"],"related_states":{"ci":["passed","failed"],"bad":[1]}}"#,
+            "",
+        );
+        let vocabulary = Vocabulary {
+            states: vec!["open".into(), "merged".into(), "closed".into()],
+            related: [("ci".to_owned(), vec!["passed".into(), "failed".into()])].into(),
+        };
+        assert_eq!(
+            read,
+            ReadOutcome::Read("open".into(), Some(vocabulary.clone()))
+        );
+        for no_vocabulary in [
+            r#"{"ok":true,"state":"In Review","states":null}"#,
+            r#"{"ok":true,"state":"open","states":[]}"#,
+            r#"{"ok":true,"state":"open","states":["open",2]}"#,
+        ] {
+            assert_eq!(
+                parse_read_output(Some(0), no_vocabulary, ""),
+                ReadOutcome::Read(
+                    serde_json::from_str::<serde_json::Value>(no_vocabulary).unwrap()["state"]
+                        .as_str()
+                        .unwrap()
+                        .into(),
+                    None
+                ),
+                "{no_vocabulary}: a free-form or malformed vocabulary is not checked"
+            );
+        }
+        assert_eq!(vocabulary.refuses("pr", "o/r#1", "merged"), None);
+        assert_eq!(
+            vocabulary.refuses("pr", "o/r#1", "passed").as_deref(),
+            Some("`passed` is a ci: state, not one pr: reports (open, merged, closed); did you mean --on ci:o/r#1?")
+        );
+    }
+
+    #[test]
     fn the_read_contract_maps_exit_codes_and_answers() {
         assert_eq!(
             parse_read_output(
@@ -273,7 +396,7 @@ mod tests {
                 "noise\n{\"ok\":true,\"ref\":\"pr:o/r#1\",\"state\":\"merged\",\"error\":null}\n",
                 ""
             ),
-            ReadOutcome::Read("merged".into())
+            ReadOutcome::Read("merged".into(), None)
         );
         assert_eq!(
             parse_read_output(
@@ -380,7 +503,7 @@ mod tests {
             Duration::from_secs(10),
         ))
         .await;
-        assert_eq!(read, ReadOutcome::Read("merged".into()));
+        assert_eq!(read, ReadOutcome::Read("merged".into(), None));
         assert!(
             started.elapsed() < Duration::from_secs(5),
             "a descendant holding the pipe does not hold the read"

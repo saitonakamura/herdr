@@ -87,6 +87,10 @@ pub struct ServerCapabilities {
     /// Plugins can add wait source kinds with `[[readers]]`; `plugin.list` shows which.
     #[serde(default)]
     pub wait_readers: bool,
+    /// Quick re-reads a just-declared reader wait gets after a failed read, before the reader's
+    /// interval takes over; 0 on a server that waits the interval.
+    #[serde(default)]
+    pub wait_read_retries: u32,
     /// `pane.read` keeps hyperlinks as OSC 8 in ANSI output when asked (`links`).
     #[serde(default)]
     pub pane_read_links: bool,

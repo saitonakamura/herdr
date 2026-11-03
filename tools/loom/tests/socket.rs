@@ -211,10 +211,16 @@ fn a_reader_source_round_trips_with_normalized_shorthand() {
 }
 
 fn reader_declare(exchanges: Vec<(&'static str, Value)>) -> std::process::Output {
+    reader_declare_on(0, exchanges)
+}
+
+/// A reader declare on a server that makes `retries` quick re-reads of a failed first read.
+fn reader_declare_on(retries: u64, exchanges: Vec<(&'static str, Value)>) -> std::process::Output {
     let mut all = vec![
         (
             "ping",
-            json!({"capabilities":{"agent_waits":true,"wait_sources":["node","run"],"wait_readers":true}}),
+            json!({"capabilities":{"agent_waits":true,"wait_sources":["node","run"],"wait_readers":true,
+                "wait_read_retries":retries}}),
         ),
         (
             "wait.declare",
@@ -259,7 +265,107 @@ fn a_reader_wait_whose_first_read_fails_is_refused_and_cancelled() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("404 Project Not Found"), "{stderr}");
     assert!(stderr.contains("cancelled"), "{stderr}");
+    assert!(
+        stderr.contains("the server's env"),
+        "a 404 is auth-shaped: {stderr}"
+    );
     assert!(output.stdout.is_empty(), "nothing reads as declared");
+}
+
+#[test]
+fn a_failed_first_read_the_server_re_reads_is_waited_out() {
+    // 113: one transient glab failure refused a wait whose source read `open` seconds later
+    let output = reader_declare_on(
+        2,
+        vec![
+            (
+                "wait.get",
+                json!({"wait":{"wait_id":10,"state":"live","errors":1,
+                    "last_error":"glab MR gl:group/project!7 failed:"}}),
+            ),
+            (
+                "wait.get",
+                json!({"wait":{"wait_id":10,"state":"live","errors":0,"last_ok_at_ms":2,"last_state":"open"}}),
+            ),
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("10 live"), "{stdout}");
+    assert!(stdout.contains("last read open"), "{stdout}");
+}
+
+#[test]
+fn a_refusal_says_what_failed_and_blames_the_env_only_for_auth() {
+    for (error, says) in [
+        (
+            "glab MR gl:group/project!7 timed out after 20s",
+            "the read timed out (glab MR gl:group/project!7 timed out after 20s)",
+        ),
+        (
+            "glab MR gl:group/project!7 failed:",
+            "the reader gave no reason (\"glab MR gl:group/project!7 failed:\")",
+        ),
+    ] {
+        let output = reader_declare(vec![
+            (
+                "wait.get",
+                json!({"wait":{"wait_id":10,"state":"live","errors":1,"last_error":error}}),
+            ),
+            (
+                "wait.cancel",
+                json!({"wait":{"wait_id":10,"state":"cancelled"}}),
+            ),
+        ]);
+        assert!(!output.status.success());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(says), "{stderr}");
+        assert!(!stderr.contains("env"), "not an auth failure: {stderr}");
+    }
+}
+
+#[test]
+fn a_source_unreachable_after_the_re_reads_is_refused_with_the_last_error() {
+    let output = reader_declare_on(
+        2,
+        vec![(
+            "wait.get",
+            json!({"wait":{"wait_id":10,"state":"fired","errors":3,
+                "last_error":"glab MR gl:group/project!7 timed out after 20s",
+                "fired":{"reason":"failed: source unreachable","to":[]}}}),
+        )],
+    );
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("refused: source unreachable: the read timed out"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("already fired"), "{stderr}");
+}
+
+#[test]
+fn an_until_the_source_never_reports_is_refused_with_the_servers_hint() {
+    // 113: pr waits declared --until passed sat live, reading open, until their deadlines
+    let why = "`passed` is a ci: state, not one pr: reports (open, merged, closed); did you mean --on ci:o/r#59?";
+    let output = reader_declare_on(
+        2,
+        vec![(
+            "wait.get",
+            json!({"wait":{"wait_id":10,"state":"fired","errors":0,"last_ok_at_ms":1,"last_state":"open",
+                "fired":{"reason":format!("failed: {why}"),"to":[]}}}),
+        )],
+    );
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains(&format!("refused: {why}; wait 10")),
+        "{stderr}"
+    );
 }
 
 #[test]

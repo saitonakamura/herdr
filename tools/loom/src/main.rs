@@ -77,6 +77,9 @@ fn run() -> Result<(), String> {
             &path,
             caller.as_deref().unwrap_or_default(),
             &result["wait"],
+            server["capabilities"]["wait_read_retries"]
+                .as_u64()
+                .unwrap_or(0),
         )?;
     }
     if request.json {
@@ -101,12 +104,14 @@ fn run() -> Result<(), String> {
 const FIRST_READ: std::time::Duration = std::time::Duration::from_secs(40);
 
 /// A reader wait counts as declared only once the server has read its source, which it does at
-/// once: a reader that works in the caller's pane can still fail in the server's env (110).
+/// once: a reader that works in the caller's pane can still fail in the server's env (110). A
+/// server that re-reads a failed first read (`retries`) gets the chance before a refusal (113).
 #[cfg(unix)]
 fn first_read(
     path: &std::path::Path,
     caller: &str,
     declared: &serde_json::Value,
+    retries: u64,
 ) -> Result<serde_json::Value, String> {
     let id = declared["wait_id"]
         .as_u64()
@@ -124,30 +129,81 @@ fn first_read(
                 format!("cancelling wait {id} failed too ({err}); run loom wait cancel {id}")
             }
         };
-        Err(format!("refused: the server cannot read this source: {why}; {after}. herdr reads it with the server's env, not this pane's"))
+        Err(format!("refused: {why}; {after}"))
     };
     loop {
         let wait =
             socket::call(path, "wait.get", serde_json::json!({"wait_id": id}))?["wait"].clone();
-        let error = wait["last_error"].as_str().unwrap_or("no read landed");
+        let errors = wait["errors"].as_u64().unwrap_or(0);
         match wait["state"].as_str() {
             Some("live") if wait["last_ok_at_ms"].is_u64() => return Ok(wait),
-            Some("live") if wait["errors"].as_u64().unwrap_or(0) > 0 => {
-                return refuse(error.to_owned())
-            }
+            Some("live") if errors > retries => return refuse(unreadable(&wait)),
             Some("live") => {}
             Some("fired") => {
-                return Err(format!(
-                    "refused: {} ({error}); wait {id} already fired",
-                    wait["fired"]["reason"].as_str().unwrap_or("the wait fired")
-                ))
+                let reason = wait["fired"]["reason"].as_str().unwrap_or("the wait fired");
+                let reason = reason.strip_prefix("failed: ").unwrap_or(reason);
+                let why = match wait["last_error"].as_str() {
+                    Some(error) if errors > 0 => format!("{reason}: {}", failure(error)),
+                    _ => reason.to_owned(),
+                };
+                return Err(format!("refused: {why}; wait {id} already fired"));
             }
             _ => return Ok(wait),
         }
         if started.elapsed() >= FIRST_READ {
-            return refuse(format!("no read landed within {}s", FIRST_READ.as_secs()));
+            return refuse(if errors > 0 {
+                unreadable(&wait)
+            } else {
+                format!(
+                    "the server cannot read this source: no read landed within {}s",
+                    FIRST_READ.as_secs()
+                )
+            });
         }
         std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+}
+
+/// Why the server could not read a wait's source, from its run of failed reads.
+#[cfg(unix)]
+fn unreadable(wait: &serde_json::Value) -> String {
+    let errors = wait["errors"].as_u64().unwrap_or(0);
+    let error = wait["last_error"].as_str().unwrap_or("");
+    let reads = if errors == 1 {
+        "its read".to_owned()
+    } else {
+        format!("{errors} reads in a row")
+    };
+    format!(
+        "the server cannot read this source: {reads} failed: {}",
+        failure(error)
+    )
+}
+
+/// A reader's error, said by what failed: only an auth-shaped one points at the server's env,
+/// which an agent read as "the server has no access" after a mere timeout (113).
+#[cfg(unix)]
+fn failure(error: &str) -> String {
+    let error = error.trim();
+    let lower = error.to_lowercase();
+    let has = |needles: &[&str]| needles.iter().any(|needle| lower.contains(needle));
+    if error.is_empty() || error.ends_with(':') || lower == "failed" {
+        format!("the reader gave no reason ({error:?})")
+    } else if has(&["timed out", "timeout", "deadline exceeded", "was killed"]) {
+        format!("the read timed out ({error})")
+    } else if has(&[
+        "401",
+        "403",
+        "404",
+        "token",
+        "unauthorized",
+        "forbidden",
+        "not found",
+        "not logged in",
+    ]) {
+        format!("{error}; herdr reads it with the server's env, not this pane's")
+    } else {
+        error.to_owned()
     }
 }
 

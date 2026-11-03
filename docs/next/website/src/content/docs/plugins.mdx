@@ -290,6 +290,25 @@ Exit 0 with `ok` and a `state` is a read; a `state` equal to the wait's
 `--until` satisfies it. Exit 2 means the reader cannot read that source at all,
 and the wait fires at once. Any other exit, a missing state, or a timeout is a
 failed read, and three in a row fire the wait as `failed: source unreachable`.
+A wait that has just been declared, and has had no read succeed yet, is read
+again 3 seconds after a failed read, twice at most, so a blip at declare time
+is not mistaken for a source the server cannot read. Servers advertise how many
+such re-reads they make as `wait_read_retries`.
+
+An answer may also name every state its kind of source can report, as
+`states`, and the states of other kinds that read the same target, as
+`related_states`:
+
+```json
+{"ok": true, "state": "open", "states": ["open", "merged", "closed"],
+ "related_states": {"ci": ["none", "running", "passed", "failed"]}}
+```
+
+A wait whose `--until` is not in `states` can never be satisfied, so it fires
+on that read, and the reason names the states. When the `--until` is one of a
+related kind's states, the reason suggests waiting on that kind instead. Omit
+`states` for a kind whose states are free-form, such as an issue tracker's
+status names.
 When no read lands within three intervals (at least an interval plus 30
 seconds), for example because the plugin was disabled, the wait fires as
 `failed: reader dead`. The deadline still applies throughout.

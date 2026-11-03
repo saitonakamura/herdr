@@ -29,3 +29,14 @@ Talked through and not chosen: inserting the text inline (herdr only paints cell
 ## Parent
 
 [herdr-fork map](./000-map.md)
+
+## Resolution
+
+Draft, pending review: [saitonakamura/herdr#60](https://github.com/saitonakamura/herdr/pull/60). No wire, snapshot or API-shape change. `FORK.md` § Agent references documents it.
+
+Built as decided. The build settled these points:
+
+- **Name** mirrors herdr-sidebar's `agent_name`, read from server state. It is the tab's display name, or, for a tab's second agent (not the lowest public pane number among the tab's agents), its manual label, stripped terminal title or metadata title, else the tab's name.
+- **Effort or workspace label:** the workspace's label (`display_name_from_terminals`), which is what the user navigates by and what the ticket's `pi-migration` example shows. It appears only when the agent's workspace is not the drawn pane's. An unnamed workspace falls back to its first terminal's recorded cwd, not the live process cwd, because the live cwd would be a syscall in render.
+- **Fit:** each segment takes the longest of `name · workspace · state`, `name · state` and `state` that fits, greedily in line order. The group is right-aligned with at least two blank cells after the text, and a wide grapheme ending the text counts both its cells.
+- **Cost:** flat against master on 061's `agent references` profile. Names are computed when the per-pass index is built, never per cell.

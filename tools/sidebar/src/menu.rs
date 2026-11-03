@@ -1174,7 +1174,8 @@ impl Menu {
             }
             None => vec![cut(self.hint(), width)],
         };
-        let room = height.saturating_sub(top.len() + footer.len());
+        // the footer sits under its own rule, so the legend never reads as body text
+        let room = height.saturating_sub(top.len() + footer.len() + 1);
         let mut body = self.body(width);
         if let Screen::Report { scroll } = &mut self.screen {
             *scroll = (*scroll).min(body.len().saturating_sub(room));
@@ -1201,6 +1202,10 @@ impl Menu {
             self.rows[row] = choice;
         }
         let style = if self.status.is_some() { bold } else { dim };
+        let rule = height.saturating_sub(footer.len() + 1);
+        if rule >= top.len() {
+            put(buf, rule, &vec![("─".repeat(width), dim)]);
+        }
         for (offset, line) in footer.iter().enumerate() {
             let row = height.saturating_sub(footer.len()) + offset;
             if row >= top.len() {
@@ -1464,6 +1469,10 @@ pub mod tests {
         assert_eq!(lines[3], "  o  open report");
         assert_eq!(lines[4], "  a  ack");
         assert_eq!(lines[13], " key or enter runs · esc closes");
+        assert!(
+            lines[12].starts_with(" ──"),
+            "the legend sits under a rule: {lines:#?}"
+        );
     }
 
     #[test]

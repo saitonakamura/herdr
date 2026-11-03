@@ -18,6 +18,7 @@ use crate::config::Config;
 use crate::glyphs::Meaning;
 use crate::layout::{age_text, cut};
 use crate::model;
+use crate::reorder::{self, Step};
 use crate::report::{self, Spans};
 
 /// What the menu is for: `herdr-sidebar menu pane <id>` or `menu workspace <id>`.
@@ -137,6 +138,8 @@ pub enum Entry {
     CloseWorkspace,
     NewWorktree,
     CollapseOthers,
+    MoveUp,
+    MoveDown,
 }
 
 impl Entry {
@@ -151,6 +154,9 @@ impl Entry {
             Entry::OpenUi => 'p',
             Entry::NewWorktree => 'w',
             Entry::CollapseOthers => 'o',
+            // j/k move the selection
+            Entry::MoveUp => 'K',
+            Entry::MoveDown => 'J',
         }
     }
 
@@ -167,6 +173,8 @@ impl Entry {
             Entry::CloseWorkspace => "close",
             Entry::NewWorktree => "new worktree",
             Entry::CollapseOthers => "collapse others",
+            Entry::MoveUp => "move up",
+            Entry::MoveDown => "move down",
         }
     }
 }
@@ -179,6 +187,8 @@ pub fn entries(subject: &Subject) -> Vec<Entry> {
             Entry::CloseWorkspace,
             Entry::NewWorktree,
             Entry::CollapseOthers,
+            Entry::MoveUp,
+            Entry::MoveDown,
         ],
         Subject::Agent {
             agent_id,
@@ -347,6 +357,8 @@ pub enum Job {
     Ctl(&'static str, String),
     /// A detached `[sidebar.actions]` override; quits once started.
     Spawn(Vec<String>),
+    /// Move the workspace one place; the menu stays open for the next.
+    Move(Step),
 }
 
 /// How the popup ends.
@@ -636,6 +648,8 @@ impl Menu {
             Entry::CollapseOthers => {
                 self.job = Some(Job::Ctl("collapse-others", self.id().to_string()));
             }
+            Entry::MoveUp => self.job = Some(Job::Move(Step::Up)),
+            Entry::MoveDown => self.job = Some(Job::Move(Step::Down)),
         }
     }
 
@@ -745,9 +759,10 @@ impl Menu {
                         }
                     }
                     KeyCode::Char(c) if !ctrl => {
-                        if let Some((_, _, choice)) = choices.into_iter().find(|(k, _, _)| *k == c)
-                        {
-                            self.choose(choice);
+                        if let Some(index) = choices.iter().position(|(k, _, _)| *k == c) {
+                            // a key selects its entry too, so enter repeats it
+                            self.selected = index;
+                            self.choose(choices[index].2.clone());
                         }
                     }
                     _ => {}
@@ -891,6 +906,39 @@ impl Menu {
                     self.status = Some(format!("{}: {err}", argv[0]));
                 }
             },
+            Job::Move(step) => self.status = Some(self.step(io, step)),
+        }
+    }
+
+    /// Moves the workspace one place, against herdr's order as it is now.
+    fn step(&self, io: &mut dyn Io, step: Step) -> String {
+        let id = self.id().to_string();
+        let snapshot = match io
+            .call("session.snapshot", json!({}))
+            .and_then(|r| api::snapshot_from_result(&r))
+        {
+            Ok(snapshot) => snapshot,
+            Err(err) => return format!("herdr: {err}"),
+        };
+        let (method, params) = match reorder::step(&snapshot.workspaces, &id, step) {
+            Ok(request) => request,
+            Err(why) => return why,
+        };
+        let word = match step {
+            Step::Up => "moved up",
+            Step::Down => "moved down",
+        };
+        match io.call(method, params) {
+            Ok(result) => {
+                let order = result.get("workspaces").and_then(Value::as_array);
+                match order
+                    .and_then(|o| Some((o.iter().position(|w| w["workspace_id"] == id)?, o.len())))
+                {
+                    Some((at, of)) => format!("{word}: {} of {of}", at + 1),
+                    None => word.into(),
+                }
+            }
+            Err(err) => format!("{method}: {err}"),
         }
     }
 
@@ -1324,6 +1372,9 @@ pub mod tests {
                 "agent.close" if params.get("dry_run").is_some() => {
                     Ok(json!({ "agents": [{ "name": "alpha-one" }, { "name": "alpha" }] }))
                 }
+                "workspace.move" => Ok(json!({ "workspaces": [
+                    { "workspace_id": "w2" }, { "workspace_id": "w1" }
+                ]})),
                 "agent.close" => match self.close_error.take() {
                     Some(err) => Err(err),
                     None => Ok(json!({ "agents": [] })),
@@ -1457,7 +1508,7 @@ pub mod tests {
             workspace_id: "w2".into(),
             label: "elsewhere".into(),
         };
-        assert_eq!(keys(&menu(ws, "")), "rcwo");
+        assert_eq!(keys(&menu(ws, "")), "rcwoKJ");
     }
 
     #[test]
@@ -1937,6 +1988,48 @@ pub mod tests {
         let mut m = menu(ws(), "");
         press(&mut m, KeyCode::Char('o'));
         assert_eq!(m.job, Some(Job::Ctl("collapse-others", "w2".into())));
+    }
+
+    #[test]
+    fn shift_k_and_j_move_the_workspace_and_keep_the_menu_open() {
+        let ws = |id: &str| Subject::Workspace {
+            workspace_id: id.into(),
+            label: id.into(),
+        };
+        let mut stub = Stub::default();
+        let mut m = menu(ws("w2"), "");
+        typed(&mut m, "K");
+        assert_eq!(m.job, Some(Job::Move(Step::Up)));
+        m.work(&mut stub);
+        assert_eq!(
+            stub.calls.last(),
+            Some(&(
+                "workspace.move".to_string(),
+                json!({ "workspace_id": "w2", "insert_index": 0 })
+            ))
+        );
+        assert_eq!(m.status.as_deref(), Some("moved up: 1 of 2"));
+        // still open, on the same entry, so K K K walks it up
+        assert_eq!((m.exit.clone(), m.screen.clone()), (None, Screen::Menu));
+        assert_eq!(m.choices()[m.selected].1, "move up");
+        // at an end the entry stays and says so; nothing is sent
+        stub.calls.clear();
+        typed(&mut m, "J");
+        m.work(&mut stub);
+        assert_eq!(m.status.as_deref(), Some("already last"));
+        assert_eq!(m.choices()[m.selected].1, "move down");
+        let mut m = menu(ws("w1"), "");
+        typed(&mut m, "K");
+        m.work(&mut stub);
+        assert_eq!(m.status.as_deref(), Some("already first"));
+        assert!(stub
+            .calls
+            .iter()
+            .all(|(method, _)| method == "session.snapshot"));
+        // j/k still move the selection
+        let mut m = menu(ws("w1"), "");
+        typed(&mut m, "jk");
+        assert_eq!((m.selected, m.job.clone()), (0, None));
     }
 
     #[test]

@@ -64,6 +64,7 @@ fn assert_struct_matches<T: schemars::JsonSchema>(herdr_name: &str) {
 fn read_types_are_a_subset_of_herdrs() {
     assert_struct_matches::<api::SessionSnapshot>("SessionSnapshot");
     assert_struct_matches::<api::WorkspaceInfo>("WorkspaceInfo");
+    assert_struct_matches::<api::WorkspaceWorktreeInfo>("WorkspaceWorktreeInfo");
     assert_struct_matches::<api::TabInfo>("TabInfo");
     assert_struct_matches::<api::PaneInfo>("PaneInfo");
     assert_struct_matches::<api::PaneRepoInfo>("PaneRepoInfo");
@@ -220,6 +221,7 @@ fn requests_match_herdrs_methods_and_params() {
         (ws(), "", "rx\n"),
         (ws(), "", "cy"),
         (ws(), "", "wfeat\n"),
+        (ws(), "", "J"),
     ];
     for (subject, config, keys) in scripts {
         let mut m = menu(subject, config);
@@ -236,6 +238,24 @@ fn requests_match_herdrs_methods_and_params() {
         }
     }
     sent.extend(stub.calls);
+    // a repo's worktree group moves as one block, which fork servers never report
+    let grouped = |id: &str, linked: bool| api::WorkspaceInfo {
+        workspace_id: id.into(),
+        worktree: Some(api::WorkspaceWorktreeInfo {
+            repo_key: "k".into(),
+            is_linked_worktree: linked,
+        }),
+        ..Default::default()
+    };
+    let workspaces = [
+        grouped("w1", false),
+        grouped("w2", true),
+        Default::default(),
+    ];
+    for before in [None, Some("")] {
+        let (method, params) = crate::reorder::request(&workspaces, "w1", before).unwrap();
+        sent.push((method.to_string(), params));
+    }
 
     let methods: Vec<&str> = sent.iter().map(|(m, _)| m.as_str()).collect();
     for expected in [
@@ -248,6 +268,8 @@ fn requests_match_herdrs_methods_and_params() {
         "workspace.rename",
         "worktree.create",
         "workspace.close",
+        "workspace.move",
+        "workspace.move_block",
     ] {
         assert!(
             methods.contains(&expected),

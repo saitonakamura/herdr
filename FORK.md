@@ -211,7 +211,10 @@ it draws and does is 018's resolution (`.issues/herdr-fork/018-sidebar-content.m
     fenced blocks dimmed, list items with a hanging indent, wrapped at word
     boundaries. j/k, ctrl-d/u and the wheel scroll it.
   - Workspace: **rename** (`r`), **close** (`c`), **new worktree** (`w`),
-    **collapse others** (`o`).
+    **collapse others** (`o`), **move up** (`K`), **move down** (`J`). A move
+    keeps the popup open on the same entry, so `K K K` walks an effort up; at
+    the top or bottom the entry stays and says "already first" or "already
+    last".
   - With `[sidebar.actions] close`, close asks for an outcome, ok or struggled
     (with a why), and runs the override with `--outcome <it>` (and `--why`)
     appended, loom's flags. When it refuses, the menu offers `--force`; when
@@ -220,6 +223,19 @@ it draws and does is 018's resolution (`.issues/herdr-fork/018-sidebar-content.m
     first line before acking them through `ack`. Without the override, close is herdr's
     `agent.close`: the panes it would take, a confirm, and `--force` on
     `agent_subtree_busy`.
+- **Reordering efforts** (062). Pressing a workspace header and releasing
+  elsewhere in the list moves that workspace in herdr's order, which herdr keeps
+  and every client shows: above the header it is dropped on, or after the last
+  workspace when dropped below the last tree. While dragging, a rule naming it
+  marks where it will land (with no gap row above, the target header lights up
+  instead). A header acts on release, so a press and release on one header is
+  still a click, folding or focusing as before. Dragging works over the whole
+  list only, not while scoped or searching. Moves go through `workspace.move`,
+  or `workspace.move_block` for a repo's worktree group, following upstream's
+  rules (`8843bbb0`): a linked worktree's workspace never moves alone and
+  nothing lands inside a group. Fork servers open worktrees as tabs and report
+  no workspace `worktree`, so in practice every workspace moves on its own,
+  carrying its worktree tabs.
 - **Attention** (052). A section pinned above the trees lists, session-wide
   whatever the scope, every wanted agent (task status `needs_user`, or blocked) and
   every agent with an unread report (loom's `unseen` annotation). It is hidden when

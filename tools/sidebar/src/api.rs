@@ -28,6 +28,17 @@ pub struct WorkspaceInfo {
     pub focused: bool,
     #[serde(default)]
     pub tokens: HashMap<String, String>,
+    /// A repo's worktree group, as upstream herdr reports it. Fork servers open
+    /// worktrees as tabs and leave it out.
+    #[serde(default)]
+    pub worktree: Option<WorkspaceWorktreeInfo>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct WorkspaceWorktreeInfo {
+    pub repo_key: String,
+    pub is_linked_worktree: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]

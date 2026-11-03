@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-sidebar-reorder-efforts
 title: Reorder efforts in herdr-sidebar by dragging a header or from its menu
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee: saitonakamura
-claimed_by:
+claimed_by: macos/w1:p10/44a77b14-2210-493d-bd87-eb70b7ac0cd2
 ---
 
 ## Question

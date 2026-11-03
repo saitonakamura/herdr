@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-sidebar-attention-two-axes
 title: Draw loom's wanted and seen in herdr-sidebar, with an ack key
-status: in-progress
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee: saitonakamura
-claimed_by: macos/w1:p1P/98495540-63fc-4a6d-a7dc-389963e21b04
+claimed_by: macos/98495540-63fc-4a6d-a7dc-389963e21b04
 ---
 
 ## Question
@@ -71,3 +71,19 @@ Vocabulary (GLOSSARY.md): **wanted** (task status `needs_user`, or state `blocke
 ## Parent
 
 [herdr-fork map](./000-map.md)
+
+## Blocked by
+
+## Resolution
+
+Merged as [PR #50](https://github.com/saitonakamura/herdr/pull/50) (merge commit `45c67bc9`), `tools/sidebar` and `FORK.md` only; no server, API or persisted-state change. Dotfiles half on branch `herdr-fork/052-sidebar-attention` (`40921eb`): `[sidebar.actions] ack = loom ack {agent_id}` and the `questions` token in `config.fork.toml`, and the stale lines in `docs/setup/herdr.md`; pushed, not merged.
+
+Built as decided above, plus what the build settled:
+
+- Loud is wanted and unread, or a herdr block with no `needs_user` (no unread axis of its own). A herdr block that loom also wants follows loom's unread report.
+- Waited time counts from becoming wanted (and its `reason`), or from the report while only unread, so marking a wanted row read keeps its time.
+- A quiet row's report line comes from `message.list {from}`, read once per agent with an unread report, again when it queues a message, and from scratch after the event subscription drops.
+- The section steps aside while searching. `a` without `[sidebar.actions] ack` shows `mark read: no [sidebar.actions] ack configured`. Unread dots have their own `unread_<kind>` meanings in `[sidebar.colors]`/`[sidebar.glyph]`.
+- The focus dim wakes the program on a timer, since nothing from herdr arrives at the 10 s mark.
+
+Verified live in a throwaway session (captures in the PR): all three marks, `a` through a stubbed ack, dim at 10 s, re-loud on a state change, and the section hidden when empty. On the way, the macOS CI cancels at 15 min turned out to be GitHub failing to acquire a macOS runner ("not acquired by Runner of type hosted"), not the job timeout.

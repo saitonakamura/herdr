@@ -168,7 +168,7 @@ it draws and does is 018's resolution (`.issues/herdr-fork/018-sidebar-content.m
   ```toml
   [sidebar]
   glyphs = "nerd"   # or "unicode"
-  line1 = ["name", "effort", "task", "ticket", "messages", "questions", "source", "age"]
+  line1 = ["name", "effort", "ticket", "messages", "questions", "source", "age"]
   line2 = ["branch", "ahead_behind", "dirty", "worktree"]
   colors = { muted = "#757ead", selection = "8", working = "yellow" }
   glyph = { awaiting = "…" }   # per meaning; `herdr-sidebar glyphs` lists them
@@ -190,10 +190,12 @@ it draws and does is 018's resolution (`.issues/herdr-fork/018-sidebar-content.m
   empty and while searching. Rows sort loud (wanted, unread; a herdr block with
   no `needs_user`), steady (wanted, read), then quiet (unread only), oldest first;
   the agent keeps its tree row, marked the same way. Loud reverses the state glyph
-  and bolds the name, quiet adds a dim mark per report kind: done `✓`, failed `✗`,
-  blocked `↑`, asking `?`, handoff `→`, any other `•` (nerd glyphs in the `nerd`
-  set; `unread_done`, `unread_failed`, … in `[sidebar.glyph]` and
-  `[sidebar.colors]`). A row's second line is loom's `reason`, else the blocked
+  and bolds the name. Every row carries at most one loom mark after its name: the
+  unread report's kind in its colour (done `✓`, failed `✗`, blocked `↑`, asking
+  `?`, handoff `→`, any other `•`; nerd glyphs in the `nerd` set), else, once
+  read, where the task status settled, muted (complete `✓`, failed `✗`,
+  needs_parent `↑`). `unread_done`, `unread_failed`, … in `[sidebar.glyph]` and
+  `[sidebar.colors]` set them. The mark makes the `task` token redundant. A row's second line is loom's `reason`, else the blocked
   reason, else the report kind and the first line of the agent's latest report
   (`message.list`, read again when it sends one), without the kind loom's summary
   already leads with. A quiet row's age counts from that report's `sent_at_ms`, so

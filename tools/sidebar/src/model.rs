@@ -71,6 +71,34 @@ pub fn unread_kind(pane: &PaneInfo) -> Option<&str> {
         .filter(|kind| !kind.is_empty())
 }
 
+/// The one loom mark after a row's name: what its brief means for the user.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LoomMark {
+    pub meaning: Meaning,
+    /// Coloured while the report is unread, muted once read.
+    pub unread: bool,
+}
+
+/// The unread report's kind, else where the task status settled once it was read.
+pub fn loom_mark(pane: &PaneInfo) -> Option<LoomMark> {
+    if let Some(kind) = unread_kind(pane) {
+        return Some(LoomMark {
+            meaning: Meaning::for_unread(kind),
+            unread: true,
+        });
+    }
+    let meaning = match pane.task_status? {
+        TaskStatus::Complete => Meaning::UnreadDone,
+        TaskStatus::Failed => Meaning::UnreadFailed,
+        TaskStatus::NeedsParent => Meaning::UnreadBlocked,
+        _ => return None,
+    };
+    Some(LoomMark {
+        meaning,
+        unread: false,
+    })
+}
+
 /// The mark before focus dims it.
 pub fn undimmed_mark(pane: &PaneInfo) -> Option<Mark> {
     let unread = unread_kind(pane).is_some();
@@ -204,8 +232,7 @@ pub struct AgentItem {
     pub hidden_below: usize,
     pub focused: bool,
     pub mark: Option<Mark>,
-    /// The unread report's kind.
-    pub unread: Option<String>,
+    pub loom_mark: Option<LoomMark>,
     /// `?N`, open questions for the user.
     pub questions: Option<String>,
 }
@@ -220,7 +247,7 @@ pub struct AttentionItem {
     pub name: String,
     /// The workspace's label.
     pub workspace: String,
-    pub unread: Option<String>,
+    pub loom_mark: Option<LoomMark>,
     pub questions: Option<String>,
     pub waited: Option<u64>,
     pub reason: Option<String>,
@@ -728,7 +755,7 @@ fn push_agent(items: &mut Vec<Item>, node: Node, ctx: &Ctx, seen: &mut HashSet<S
         hidden_below,
         focused: pane.focused,
         mark: mark(pane, &ctx.inputs.extras.dimmed),
-        unread: unread_kind(pane).map(str::to_string),
+        loom_mark: loom_mark(pane),
         questions: questions(pane),
     })));
     if folded {
@@ -781,7 +808,7 @@ fn attention_items(
                     .get(pane.workspace_id.as_str())
                     .map(|label| label.to_string())
                     .unwrap_or_else(|| pane.workspace_id.clone()),
-                unread: unread_kind(pane).map(str::to_string),
+                loom_mark: loom_mark(pane),
                 questions: questions(pane),
                 waited: quiet_age(pane, extras)
                     .or_else(|| extras.waited.get(&pane.pane_id).copied()),
@@ -1486,6 +1513,38 @@ mod tests {
             reason(&extras)[3].as_deref(),
             Some("done: 049 done: PR merged")
         );
+    }
+
+    #[test]
+    fn the_loom_mark_is_the_unread_kind_else_where_the_task_settled() {
+        let mut pane = attention_snapshot().panes[0].clone();
+        pane.annotations.insert("unseen".into(), "asking".into());
+        pane.task_status = Some(TaskStatus::Running);
+        let unread = |meaning| {
+            Some(LoomMark {
+                meaning,
+                unread: true,
+            })
+        };
+        let read = |meaning| {
+            Some(LoomMark {
+                meaning,
+                unread: false,
+            })
+        };
+        assert_eq!(loom_mark(&pane), unread(Meaning::UnreadAsking));
+        pane.annotations.remove("unseen");
+        assert_eq!(loom_mark(&pane), None);
+        for (task, meaning) in [
+            (TaskStatus::Complete, Meaning::UnreadDone),
+            (TaskStatus::Failed, Meaning::UnreadFailed),
+            (TaskStatus::NeedsParent, Meaning::UnreadBlocked),
+        ] {
+            pane.task_status = Some(task);
+            assert_eq!(loom_mark(&pane), read(meaning));
+        }
+        pane.task_status = Some(TaskStatus::NeedsUser);
+        assert_eq!(loom_mark(&pane), None);
     }
 
     #[test]

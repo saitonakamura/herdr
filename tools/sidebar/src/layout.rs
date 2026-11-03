@@ -6,7 +6,7 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::config::Config;
 use crate::glyphs::Meaning;
-use crate::model::{AgentItem, AttentionItem, HeaderItem, Item, Mark};
+use crate::model::{AgentItem, AttentionItem, HeaderItem, Item, LoomMark, Mark};
 
 /// Under this many columns rows are drawn narrow (ADR 0005).
 pub const NARROW_BELOW: u16 = 16;
@@ -320,16 +320,16 @@ fn state_style(color: Option<Color>, mark: Option<Mark>) -> Style {
     }
 }
 
-/// A quiet row's dim dot, coloured by its report's kind.
-fn unread_dot(mark: Option<Mark>, unread: Option<&str>, config: &Config) -> Option<Span> {
-    if mark != Some(Mark::Quiet) {
-        return None;
-    }
-    let glyph = config.glyphs.get(Meaning::for_unread(unread.unwrap_or("")));
-    Some(span(
-        glyph.text.clone(),
-        fg(glyph.color.or(Some(config.muted))).add_modifier(Modifier::DIM),
-    ))
+/// The loom mark after a row's name: coloured while its report is unread, muted once read.
+fn loom_mark_span(mark: Option<LoomMark>, config: &Config) -> Option<Span> {
+    let mark = mark?;
+    let glyph = config.glyphs.get(mark.meaning);
+    let color = if mark.unread {
+        glyph.color.or(Some(config.muted))
+    } else {
+        Some(config.muted)
+    };
+    Some(span(glyph.text.clone(), fg(color)))
 }
 
 fn questions_span(questions: &str, config: &Config) -> Span {
@@ -395,7 +395,7 @@ fn agent_lines(agent: &AgentItem, width: u16, config: &Config, key: String) -> V
             tokens.push((token.as_str(), piece));
         }
     }
-    if let Some(dot) = unread_dot(agent.mark, agent.unread.as_deref(), config) {
+    if let Some(dot) = loom_mark_span(agent.loom_mark, config) {
         let at = tokens
             .iter()
             .position(|(t, _)| *t == "name")
@@ -577,7 +577,7 @@ fn attention_lines(
     let lead = vec![span(" ", Style::default()), glyph];
     let lead_width: usize = lead.iter().map(|s| s.text.width()).sum();
     let mut tokens: Vec<(&str, Span)> = vec![("name", span(row.name.clone(), name_style))];
-    if let Some(dot) = unread_dot(mark, row.unread.as_deref(), config) {
+    if let Some(dot) = loom_mark_span(row.loom_mark, config) {
         tokens.push(("unread", dot));
     }
     tokens.push(("workspace", span(row.workspace.clone(), muted)));
@@ -863,7 +863,7 @@ mod tests {
         let text: Vec<String> = lines.iter().map(Line::text).collect();
         assert_eq!(text[0], "attention 4");
         assert_eq!(text[1].width(), 40, "{text:?}");
-        assert!(text[1].starts_with(" ●alpha dogfood ?2"), "{text:?}");
+        assert!(text[1].starts_with(" ●alpha ? dogfood ?2"), "{text:?}");
         assert!(text[1].ends_with(" 2m"), "{text:?}");
         assert_eq!(text[2], "  which db?");
         assert!(text[3].starts_with(" !beta dogfood"), "{text:?}");
@@ -915,13 +915,11 @@ mod tests {
     }
 
     #[test]
-    fn quiet_rows_carry_a_dim_mark_per_report_kind() {
+    fn the_loom_mark_is_coloured_while_unread_and_muted_once_read() {
         let lines = render_attention(40, &Extras::default());
         for key in ["attention:w1:p5", "pane:w1:p5"] {
             let line = lines.iter().find(|l| l.key == key).unwrap();
-            let dot = span_with(line, "✓");
-            assert_eq!(dot.style.fg, Some(Color::Cyan), "{key}");
-            assert!(dot.style.add_modifier.contains(Modifier::DIM), "{key}");
+            assert_eq!(span_with(line, "✓").style.fg, Some(Color::Cyan), "{key}");
         }
         assert!(lines
             .iter()
@@ -929,12 +927,19 @@ mod tests {
             .unwrap()
             .text()
             .contains("alpha-one ✓"));
-        // no mark on the loud row, though its report is unread too
+        // a loud row carries its unread kind too
         let alpha = lines.iter().find(|l| l.key == "attention:w1:p3").unwrap();
-        assert!(!alpha
-            .spans
-            .iter()
-            .any(|s| s.style.add_modifier.contains(Modifier::DIM)));
+        assert_eq!(span_with(alpha, "?").style.fg, Some(Color::Magenta));
+        let config = unicode();
+        let read = LoomMark {
+            meaning: Meaning::UnreadDone,
+            unread: false,
+        };
+        let span = loom_mark_span(Some(read), &config).unwrap();
+        assert_eq!(
+            (span.text.as_str(), span.style.fg),
+            ("✓", Some(config.muted))
+        );
     }
 
     #[test]

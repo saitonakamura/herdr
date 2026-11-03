@@ -1434,7 +1434,7 @@ mod tests {
         let mut app = attention_app("glyphs = \"unicode\"");
         let lines = draw(&mut app, 40, 30);
         assert_eq!(lines[0], "attention 4");
-        assert!(lines[1].starts_with(" ●alpha dogfood ?2"), "{lines:?}");
+        assert!(lines[1].starts_with(" ●alpha ? dogfood ?2"), "{lines:?}");
         assert!(click(&mut app, 3, 0, MouseButton::Left).is_empty());
         for row in [3, 4] {
             assert_eq!(

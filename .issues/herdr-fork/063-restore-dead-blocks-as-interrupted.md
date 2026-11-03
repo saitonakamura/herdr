@@ -25,3 +25,15 @@ pi has full lifecycle hook authority (`agent explain`: `screen_detection_skip_re
 ## Parent
 
 [herdr-fork map](./000-map.md)
+
+## Resolution
+
+Draft, pending review of [PR #59](https://github.com/saitonakamura/herdr/pull/59).
+
+- A saved block restores as `blocked`/`interrupted` unless it is a `question` from an agent whose screen herdr still reads. Full-lifecycle hook agents (pi, omp, opencode, kilo, kimi, mastracode) restore every block as `interrupted`; hook authority is read from the saved `agent_session`, so no snapshot field was added and 053-era snapshots are covered.
+- Live per reason (throwaway `repro-063-162309`, Claude Code 2.1.317, haiku, manual permissions, `herdr session stop` then resume):
+  - `permission`: a resumed claude does not redraw the dialog; the transcript reads "User rejected write to b.txt". Restores as `interrupted`.
+  - `form` (AskUserQuestion): not redrawn; "User declined to answer questions". Restores as `interrupted`. In manual mode it was reported as `permission`, the notification overwriting PreToolUse's `form`.
+  - `question`: the transcript still ends on the sentinel and the screen matches `awaiting_user_answer`. Stays `question`. The 053 build actually lost it to `idle`: the screen match cleared the overlay and claude's resume idle hook won. A screen match naming the restored reason now confirms the overlay instead.
+  - no reason: only a screen-detected dialog or a reasonless hook agent produces it, so it restores as `interrupted`.
+- pi was covered by a unit test, not driven live.

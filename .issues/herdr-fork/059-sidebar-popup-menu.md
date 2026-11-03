@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-sidebar-popup-menu
 title: herdr-sidebar menu as a popup, with loom's open report, ack and close
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee: saitonakamura
-claimed_by:
+claimed_by: macos/w1:p1R/831d89ca-42e4-40a0-a329-ed139e83d95a
 ---
 
 ## Question

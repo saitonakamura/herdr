@@ -14,6 +14,7 @@ mod menu;
 mod model;
 #[cfg(unix)]
 mod popup;
+mod reorder;
 mod report;
 #[cfg(unix)]
 mod run;

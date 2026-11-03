@@ -8,12 +8,14 @@ use crate::keys::{Command, KeyTable};
 use crate::layout::{self, cut, Line, Target};
 use crate::menu;
 use crate::model::{self, Extras, Item, Scope, UiState};
+use crate::reorder;
 use crossterm::event::{
     KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use ratatui::buffer::Buffer;
 use ratatui::style::{Modifier, Style};
 use serde_json::json;
+use unicode_width::UnicodeWidthStr;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Effect {
@@ -47,6 +49,19 @@ enum Row {
     Overlay,
 }
 
+/// A left press on a workspace header (062): a click on release, unless it
+/// became a drag by leaving the header's row.
+#[derive(Debug, Clone, PartialEq)]
+struct Press {
+    workspace_id: String,
+    key: String,
+    /// What the press does as a click.
+    target: Option<Target>,
+    row: u16,
+    /// The row a drag points at, once it is one.
+    dragging: Option<u16>,
+}
+
 pub struct App {
     pub snapshot: SessionSnapshot,
     pub extras: Extras,
@@ -64,6 +79,7 @@ pub struct App {
     lines: Vec<Line>,
     rows: Vec<Row>,
     height: u16,
+    press: Option<Press>,
 }
 
 impl App {
@@ -86,6 +102,7 @@ impl App {
             lines: Vec::new(),
             rows: Vec::new(),
             height: 0,
+            press: None,
         }
     }
 
@@ -435,9 +452,12 @@ impl App {
                 return Vec::new();
             }
             MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Down(MouseButton::Right) => {}
+            MouseEventKind::Drag(MouseButton::Left) => return self.drag(event.row),
+            MouseEventKind::Up(MouseButton::Left) => return self.release(event.row),
             _ => return Vec::new(),
         }
         self.status = None;
+        self.press = None;
         let right = matches!(event.kind, MouseEventKind::Down(MouseButton::Right));
         let Some(Row::List(index)) = self.rows.get(event.row as usize).copied() else {
             return Vec::new();
@@ -454,7 +474,86 @@ impl App {
             };
         }
         self.selected = Some(line.key.clone());
-        match line.target_at(event.column) {
+        if let Some(id) = line.key.strip_prefix("ws:") {
+            // a header acts on release, so pressing one can start a drag instead
+            self.press = Some(Press {
+                workspace_id: id.to_string(),
+                key: line.key.clone(),
+                target: line.target_at(event.column),
+                row: event.row,
+                dragging: None,
+            });
+            return Vec::new();
+        }
+        self.click(line.target_at(event.column))
+    }
+
+    /// Dragging moves workspaces only over the whole list: no scope or search.
+    fn drag(&mut self, row: u16) -> Vec<Effect> {
+        let reorderable = self.ui.scope.is_none() && self.search.is_none();
+        let Some(press) = self.press.as_mut() else {
+            return Vec::new();
+        };
+        if press.dragging.is_some()
+            || (row != press.row
+                && reorderable
+                && reorder::movable(&self.snapshot.workspaces, &press.workspace_id))
+        {
+            press.dragging = Some(row);
+        }
+        Vec::new()
+    }
+
+    fn release(&mut self, row: u16) -> Vec<Effect> {
+        let Some(press) = self.press.take() else {
+            return Vec::new();
+        };
+        if press.dragging.is_none() {
+            let same = match self.rows.get(row as usize) {
+                Some(Row::List(index)) => {
+                    self.lines.get(*index).map(|l| &l.key) == Some(&press.key)
+                }
+                _ => false,
+            };
+            return if same {
+                self.click(press.target)
+            } else {
+                Vec::new()
+            };
+        }
+        let Some(slot) = self.drop_slot(&self.lines, row) else {
+            return Vec::new();
+        };
+        match reorder::request(
+            &self.snapshot.workspaces,
+            &press.workspace_id,
+            slot.before.as_deref(),
+        ) {
+            Some((method, params)) => vec![Effect::Call(method, params)],
+            None => Vec::new(),
+        }
+    }
+
+    /// Where a header dropped at screen row `row` lands, among `lines` as drawn.
+    fn drop_slot(&self, lines: &[Line], row: u16) -> Option<reorder::Slot> {
+        let line = match self.rows.get(row as usize) {
+            Some(Row::List(index)) => *index,
+            // under the list: just past its last row on screen
+            _ => self
+                .rows
+                .iter()
+                .rev()
+                .find_map(|r| match r {
+                    Row::List(index) => Some(index + 1),
+                    Row::Overlay => None,
+                })
+                .unwrap_or(lines.len()),
+        };
+        reorder::slot_at(&reorder::slots(lines, &self.snapshot.workspaces), line).cloned()
+    }
+
+    fn click(&mut self, target: Option<Target>) -> Vec<Effect> {
+        match target {
             Some(Target::FocusPane(pane)) => vec![focus_pane(&pane)],
             Some(Target::FocusAgent(agent)) => {
                 vec![Effect::Call("agent.focus", json!({ "target": agent }))]
@@ -589,14 +688,52 @@ impl App {
         buf.reset();
         self.rows = vec![Row::Overlay; area.height as usize];
         for row in 0..list_height {
+            if lines.get(self.scroll + row).is_some() {
+                self.rows[row] = Row::List(self.scroll + row);
+            }
+        }
+        let dragged = self
+            .press
+            .as_ref()
+            .and_then(|p| Some((p, p.dragging?)))
+            .and_then(|(press, row)| Some((press.key.clone(), self.drop_slot(&lines, row)?)));
+        let marker = dragged
+            .as_ref()
+            .map(|(_, slot)| reorder::marker(&lines, slot));
+        for row in 0..list_height {
             let index = self.scroll + row;
             let Some(line) = lines.get(index) else { break };
-            self.rows[row] = Row::List(index);
             let y = area.y + row as u16;
             let mut x = area.x;
+            if marker == Some(reorder::Marker::Rule(index)) {
+                let label = dragged
+                    .as_ref()
+                    .and_then(|(key, _)| self.item(key))
+                    .and_then(|item| match item {
+                        Item::Header(h) => Some(h.label),
+                        _ => None,
+                    })
+                    .unwrap_or_default();
+                let text = cut(&format!("── {label} "), width);
+                let fill = "─".repeat(width.saturating_sub(text.width()));
+                buf.set_stringn(
+                    x,
+                    y,
+                    format!("{text}{fill}"),
+                    width,
+                    Style::default().add_modifier(Modifier::BOLD),
+                );
+                continue;
+            }
             let highlight = show_selection && selected_lines.contains(&index);
+            let target = marker == Some(reorder::Marker::Header(index));
+            let source = dragged.as_ref().is_some_and(|(key, _)| key == &line.key);
             for span in &line.spans {
-                let style = if highlight {
+                let style = if target {
+                    span.style.add_modifier(Modifier::REVERSED)
+                } else if source {
+                    span.style.add_modifier(Modifier::DIM)
+                } else if highlight {
                     span.style.bg(self.config.selection)
                 } else {
                     span.style
@@ -679,13 +816,147 @@ mod tests {
             .collect()
     }
 
-    fn click(app: &mut App, col: u16, row: u16, button: MouseButton) -> Vec<Effect> {
+    fn mouse(app: &mut App, kind: MouseEventKind, col: u16, row: u16) -> Vec<Effect> {
         app.mouse(MouseEvent {
-            kind: MouseEventKind::Down(button),
+            kind,
             column: col,
             row,
             modifiers: KeyModifiers::NONE,
         })
+    }
+
+    /// A press and a release on the same cell.
+    fn click(app: &mut App, col: u16, row: u16, button: MouseButton) -> Vec<Effect> {
+        let mut effects = mouse(app, MouseEventKind::Down(button), col, row);
+        effects.extend(mouse(app, MouseEventKind::Up(button), col, row));
+        effects
+    }
+
+    /// Presses at `from`, drags through `path`, draws, and releases at the last row.
+    fn drag(app: &mut App, from: u16, path: &[u16]) -> (Vec<String>, Vec<Effect>) {
+        let mut effects = mouse(app, MouseEventKind::Down(MouseButton::Left), 4, from);
+        for row in path {
+            effects.extend(mouse(app, MouseEventKind::Drag(MouseButton::Left), 4, *row));
+        }
+        let drawn = draw(app, 40, 30);
+        let last = *path.last().unwrap_or(&from);
+        effects.extend(mouse(app, MouseEventKind::Up(MouseButton::Left), 4, last));
+        (drawn, effects)
+    }
+
+    /// Three efforts: dogfood (w1, a tree), elsewhere (w2, one agent), quiet (w3, empty).
+    fn three() -> App {
+        let mut app = app("glyphs = \"unicode\"\nattention = false");
+        let mut snap = snapshot();
+        snap.workspaces
+            .push(crate::model::fixtures::workspace("w3", "quiet"));
+        app.set_snapshot(snap);
+        app
+    }
+
+    fn row_of(lines: &[String], start: &str) -> u16 {
+        lines.iter().position(|l| l.starts_with(start)).unwrap() as u16
+    }
+
+    #[test]
+    fn dragging_a_header_above_another_moves_it_there() {
+        let mut app = three();
+        let lines = draw(&mut app, 40, 30);
+        let (dogfood, quiet) = (row_of(&lines, "▾ dogfood"), row_of(&lines, "▾ quiet"));
+        let (drawn, effects) = drag(&mut app, quiet, &[quiet - 1, dogfood]);
+        assert_eq!(
+            effects,
+            [Effect::Call(
+                "workspace.move",
+                json!({ "workspace_id": "w3", "insert_index": 0 })
+            )]
+        );
+        assert_eq!(drawn[dogfood as usize], lines[dogfood as usize]);
+        // dogfood sits at the top with no gap above it, so its header lights up instead
+        mouse(&mut app, MouseEventKind::Down(MouseButton::Left), 4, quiet);
+        mouse(
+            &mut app,
+            MouseEventKind::Drag(MouseButton::Left),
+            4,
+            dogfood,
+        );
+        let mut buf = Buffer::empty(ratatui::layout::Rect::new(0, 0, 40, 30));
+        app.draw(&mut buf);
+        assert!(buf[(2, dogfood)].modifier.contains(Modifier::REVERSED));
+        assert!(buf[(2, quiet)].modifier.contains(Modifier::DIM));
+        mouse(&mut app, MouseEventKind::Up(MouseButton::Left), 4, dogfood);
+        // a drop onto elsewhere rules off the gap above it, naming what moves
+        let elsewhere = row_of(&lines, "▾ elsewhere");
+        let (drawn, effects) = drag(&mut app, quiet, &[elsewhere]);
+        assert!(
+            drawn[elsewhere as usize - 1].starts_with("── quiet ──"),
+            "{drawn:#?}"
+        );
+        assert_eq!(
+            effects,
+            [Effect::Call(
+                "workspace.move",
+                json!({ "workspace_id": "w3", "insert_index": 1 })
+            )]
+        );
+    }
+
+    #[test]
+    fn dropping_below_the_last_tree_moves_it_to_the_end() {
+        let mut app = three();
+        let lines = draw(&mut app, 40, 30);
+        let new = lines.iter().position(|l| l == " + new").unwrap() as u16;
+        let (drawn, effects) = drag(&mut app, 0, &[5, new]);
+        assert!(
+            drawn[new as usize - 1].starts_with("── dogfood ──"),
+            "{drawn:#?}"
+        );
+        assert_eq!(
+            effects,
+            [Effect::Call(
+                "workspace.move",
+                json!({ "workspace_id": "w1", "insert_index": 3 })
+            )]
+        );
+        // past the list too
+        let (_, effects) = drag(&mut app, 0, &[29]);
+        assert_eq!(effects.len(), 1);
+        // the last one dropped after itself stays put
+        let quiet = row_of(&lines, "▾ quiet");
+        assert!(drag(&mut app, quiet, &[new]).1.is_empty());
+    }
+
+    #[test]
+    fn a_press_and_release_on_one_header_stays_a_click() {
+        let mut app = three();
+        draw(&mut app, 40, 30);
+        // the press alone does nothing yet
+        assert!(mouse(&mut app, MouseEventKind::Down(MouseButton::Left), 0, 0).is_empty());
+        // moving along the header's own row is no drag
+        assert!(mouse(&mut app, MouseEventKind::Drag(MouseButton::Left), 3, 0).is_empty());
+        assert_eq!(
+            mouse(&mut app, MouseEventKind::Up(MouseButton::Left), 3, 0),
+            [Effect::Persist]
+        );
+        assert!(app.ui.collapsed.contains("w1"));
+        // a drag that comes back to its own header is a drop in place: nothing
+        let lines = draw(&mut app, 40, 30);
+        let elsewhere = row_of(&lines, "▾ elsewhere");
+        assert!(drag(&mut app, elsewhere, &[elsewhere + 1, elsewhere])
+            .1
+            .is_empty());
+        assert!(!app.ui.collapsed.contains("w2"));
+    }
+
+    #[test]
+    fn a_scoped_or_searched_list_does_not_drag() {
+        let mut app = three();
+        app.ui.scope = Some(Scope::Workspace("w2".into()));
+        let lines = draw(&mut app, 40, 30);
+        let elsewhere = row_of(&lines, "▾ elsewhere");
+        let (drawn, effects) = drag(&mut app, elsewhere, &[elsewhere + 3]);
+        assert!(effects.is_empty());
+        assert_eq!(drawn, lines);
     }
 
     #[test]

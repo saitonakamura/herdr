@@ -457,6 +457,7 @@ mod tests {
                 agent_waits: false,
                 wait_sources: Vec::new(),
                 wait_readers: false,
+                wait_read_retries: 0,
                 pane_read_links: false,
             }),
         }

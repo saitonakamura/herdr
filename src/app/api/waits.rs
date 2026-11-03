@@ -162,7 +162,7 @@ impl App {
         self.settle_node_wait_now(wait_id);
         self.check_run_wait(wait_id, std::time::Instant::now());
         if read {
-            self.wait_reads.add(wait_id, std::time::Instant::now());
+            self.wait_reads.declared(wait_id, std::time::Instant::now());
         }
         match self.state.waits.get(wait_id) {
             Some(wait) => encode_success(id, ResponseResult::WaitInfo { wait: wait.info() }),
@@ -540,33 +540,42 @@ impl App {
         if !self.wait_reads.landed(wait_id, std::time::Instant::now()) {
             return;
         }
-        let Some((until, source)) = self
+        let Some((until, on)) = self
             .state
             .waits
             .get(wait_id)
             .filter(|wait| wait.is_live())
-            .and_then(|wait| {
-                let on = wait.on.as_ref()?;
-                Some((wait.until.clone(), format!("{}:{}", on.kind, on.target)))
-            })
+            .and_then(|wait| Some((wait.until.clone(), wait.on.clone()?)))
         else {
             self.wait_reads.remove(wait_id);
             return;
         };
+        let source = format!("{}:{}", on.kind, on.target);
         let now = epoch_now_ms();
         let settled = match outcome {
-            ReadOutcome::Read(state) => {
+            ReadOutcome::Read(state, vocabulary) => {
+                self.wait_reads.read_ok(wait_id);
                 self.state
                     .waits
                     .record_read(wait_id, now, Ok(state.clone()));
-                (until.as_deref() == Some(state.as_str()))
-                    .then(|| WaitOutcome::Satisfied(format!("{source} is {state}")))
+                let until = until.unwrap_or_default();
+                if until == state {
+                    Some(WaitOutcome::Satisfied(format!("{source} is {state}")))
+                } else {
+                    // A state the reader says this kind never reports would hold the wait to its deadline (113).
+                    vocabulary
+                        .and_then(|vocabulary| vocabulary.refuses(&on.kind, &on.target, &until))
+                        .map(|why| WaitOutcome::Fired(format!("failed: {why}")))
+                }
             }
             ReadOutcome::Failed(error) => {
                 let errors = self.state.waits.record_read(wait_id, now, Err(error));
-                errors
-                    .is_some_and(|errors| errors >= READ_ERROR_LIMIT)
-                    .then(|| WaitOutcome::Fired(SOURCE_UNREACHABLE.to_owned()))
+                let unreachable = errors.is_some_and(|errors| errors >= READ_ERROR_LIMIT);
+                if !unreachable {
+                    self.wait_reads
+                        .reread_soon(wait_id, std::time::Instant::now());
+                }
+                unreachable.then(|| WaitOutcome::Fired(SOURCE_UNREACHABLE.to_owned()))
             }
             ReadOutcome::Refused(error) => {
                 self.state.waits.record_read(wait_id, now, Err(error));
@@ -1990,7 +1999,7 @@ mod tests {
         );
 
         f.app
-            .wait_read_finished(id, ReadOutcome::Read("open".into()));
+            .wait_read_finished(id, ReadOutcome::Read("open".into(), None));
         let wait = f.app.state.waits.get(id).unwrap().clone();
         assert_eq!(
             (wait.state, wait.last_state.as_deref()),
@@ -2001,7 +2010,7 @@ mod tests {
         f.app
             .handle_internal_event(crate::events::AppEvent::WaitReadFinished {
                 wait_id: id,
-                outcome: ReadOutcome::Read("merged".into()),
+                outcome: ReadOutcome::Read("merged".into(), None),
             });
         assert!(matches!(f.state(id), WaitState::Satisfied { .. }));
         assert_eq!(
@@ -2045,7 +2054,7 @@ mod tests {
             .wait_read_finished(id, ReadOutcome::Failed("gh: 502".into()));
         assert_eq!(f.app.state.waits.get(id).unwrap().errors, 2);
         f.app
-            .wait_read_finished(id, ReadOutcome::Read("open".into()));
+            .wait_read_finished(id, ReadOutcome::Read("open".into(), None));
         assert_eq!(
             f.app.state.waits.get(id).unwrap().errors,
             0,
@@ -2080,6 +2089,139 @@ mod tests {
     }
 
     #[test]
+    fn a_just_declared_wait_whose_read_fails_is_read_again_soon_until_a_read_lands() {
+        // 113: one transient glab failure at declare time refused the wait; the interval is 5 min
+        let mut f = fixture();
+        f.install_reader("pr");
+        let id = f.declare_read(Some("merged"))["result"]["wait"]["wait_id"]
+            .as_u64()
+            .unwrap();
+        let soon = |f: &Fixture| {
+            f.app.wait_reads.next_due().is_some_and(|due| {
+                due <= std::time::Instant::now() + std::time::Duration::from_secs(4)
+            })
+        };
+        f.app.fire_due_waits();
+        assert!(!soon(&f), "a started read waits for the interval");
+
+        f.app
+            .wait_read_finished(id, ReadOutcome::Failed("glab: timeout".into()));
+        assert!(soon(&f), "the first failed read is read again in seconds");
+        f.app
+            .wait_read_finished(id, ReadOutcome::Read("open".into(), None));
+        // the re-read's look starts a read and puts the next one an interval out
+        f.app
+            .wait_reads
+            .reschedule(id, std::time::Instant::now() + READ_INTERVAL);
+        f.app
+            .wait_read_finished(id, ReadOutcome::Failed("glab: timeout".into()));
+        assert!(
+            !soon(&f),
+            "once a read has landed, a failure waits for the interval"
+        );
+        assert_eq!(f.state(id), WaitState::Live);
+
+        let fresh = f.declare_read(Some("merged"))["result"]["wait"]["wait_id"]
+            .as_u64()
+            .unwrap();
+        f.app.wait_reads.remove(id);
+        for _ in 0..crate::app::wait_readers::QUICK_REREADS {
+            f.app
+                .wait_read_finished(fresh, ReadOutcome::Failed("glab: timeout".into()));
+            assert!(soon(&f));
+        }
+        f.app
+            .wait_read_finished(fresh, ReadOutcome::Failed("glab: timeout".into()));
+        assert!(
+            matches!(f.state(fresh), WaitState::Fired { ref reason, .. } if reason == "failed: source unreachable"),
+            "the quick re-reads count toward the three failures"
+        );
+    }
+
+    #[test]
+    fn a_reloaded_wait_gets_no_quick_re_reads() {
+        let mut f = fixture();
+        f.install_reader("pr");
+        let id = f.declare_read(Some("merged"))["result"]["wait"]["wait_id"]
+            .as_u64()
+            .unwrap();
+        f.app.watch_live_wait_sources();
+        f.app.fire_due_waits();
+        f.app
+            .wait_read_finished(id, ReadOutcome::Failed("glab: timeout".into()));
+        assert!(f.app.wait_reads.next_due().is_some_and(|due| {
+            due > std::time::Instant::now() + std::time::Duration::from_secs(60)
+        }));
+    }
+
+    #[test]
+    fn an_until_the_reader_says_its_kind_never_reports_fires_the_wait() {
+        // 113: pr waits declared --until passed and --until checks-done sat live to their deadlines
+        use crate::app::wait_readers::Vocabulary;
+        let vocabulary = Vocabulary {
+            states: vec!["open".into(), "merged".into(), "closed".into()],
+            related: [(
+                "ci".to_owned(),
+                vec![
+                    "none".into(),
+                    "running".into(),
+                    "passed".into(),
+                    "failed".into(),
+                ],
+            )]
+            .into(),
+        };
+        let mut f = fixture();
+        f.install_reader("pr");
+        let passed = f.declare_read(Some("passed"))["result"]["wait"]["wait_id"]
+            .as_u64()
+            .unwrap();
+        f.app.wait_read_finished(
+            passed,
+            ReadOutcome::Read("open".into(), Some(vocabulary.clone())),
+        );
+        assert!(
+            matches!(f.state(passed), WaitState::Fired { ref reason, .. }
+                if reason == "failed: `passed` is a ci: state, not one pr: reports (open, merged, closed); did you mean --on ci:o/r#1?"),
+            "{:?}",
+            f.state(passed)
+        );
+        assert_eq!(
+            f.app.state.waits.get(passed).unwrap().last_state.as_deref(),
+            Some("open")
+        );
+
+        let nobody = f.declare_read(Some("checks-done"))["result"]["wait"]["wait_id"]
+            .as_u64()
+            .unwrap();
+        f.app.wait_read_finished(
+            nobody,
+            ReadOutcome::Read("open".into(), Some(vocabulary.clone())),
+        );
+        assert!(
+            matches!(f.state(nobody), WaitState::Fired { ref reason, .. }
+            if reason == "failed: `checks-done` is not a state pr: reports (open, merged, closed)")
+        );
+
+        let fine = f.declare_read(Some("merged"))["result"]["wait"]["wait_id"]
+            .as_u64()
+            .unwrap();
+        f.app
+            .wait_read_finished(fine, ReadOutcome::Read("open".into(), Some(vocabulary)));
+        let free = f.declare_read(Some("In Review"))["result"]["wait"]["wait_id"]
+            .as_u64()
+            .unwrap();
+        f.app
+            .wait_read_finished(free, ReadOutcome::Read("open".into(), None));
+        assert_eq!(
+            (f.state(fine), f.state(free)),
+            (WaitState::Live, WaitState::Live),
+            "a state in the vocabulary, or a reader that names none, is not checked"
+        );
+        f.app.state.assert_invariants_for_test();
+    }
+
+    #[test]
     fn a_refused_read_fires_at_once_and_a_late_read_is_ignored() {
         let mut f = fixture();
         f.install_reader("pr");
@@ -2094,7 +2236,7 @@ mod tests {
             WaitState::Fired { ref reason, .. } if reason == "failed: the reader cannot read this source"
         ));
         f.app
-            .wait_read_finished(id, ReadOutcome::Read("merged".into()));
+            .wait_read_finished(id, ReadOutcome::Read("merged".into(), None));
         assert!(
             matches!(f.state(id), WaitState::Fired { .. }),
             "a late read changes nothing"

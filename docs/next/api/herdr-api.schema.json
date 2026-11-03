@@ -12730,6 +12730,13 @@
               "description": "Whether this server supports explicit client-shell surface interest.",
               "type": "boolean"
             },
+            "wait_read_retries": {
+              "default": 0,
+              "description": "Quick re-reads a just-declared reader wait gets after a failed read, before the reader's\ninterval takes over; 0 on a server that waits the interval.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
             "wait_readers": {
               "default": false,
               "description": "Plugins can add wait source kinds with `[[readers]]`; `plugin.list` shows which.",

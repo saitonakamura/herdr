@@ -878,7 +878,8 @@ time in milliseconds, or `deadline_in_ms`, from now. Agent info carries
 `live_waits` and, while a fire to the user is unanswered, `wait_needs_user`
 with its `wait_id` and `reason`. Servers with waits advertise `agent_waits` and
 the `on` source kinds they read themselves as `wait_sources`. Servers that take
-plugin readers also advertise `wait_readers`, and `plugin.list` shows each
+plugin readers also advertise `wait_readers`, and `wait_read_retries`, the quick
+re-reads a just-declared reader wait gets after a failed read. `plugin.list` shows each
 plugin's `readers` with their `kind`, `command` and `interval_ms`. A reader wait
 carries `last_state`, `last_ok_at_ms`, `errors` and `last_error`. A message a wait sent
 carries its `wait_id`.

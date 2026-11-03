@@ -1,5 +1,7 @@
 use super::*;
 
+#[path = "agent_refs.rs"]
+mod agent_refs_tests;
 mod event_fairness;
 mod native_graphics;
 #[path = "pane_move.rs"]

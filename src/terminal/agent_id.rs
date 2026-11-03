@@ -36,7 +36,6 @@ impl AgentId {
         valid.then(|| Self(value.to_string()))
     }
 
-    #[cfg(test)]
     pub(crate) fn as_str(&self) -> &str {
         &self.0
     }

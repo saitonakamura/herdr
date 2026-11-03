@@ -1,5 +1,6 @@
 use ratatui::layout::Rect;
 
+mod agent_refs;
 mod onboarding;
 mod panes;
 mod release_notes;
@@ -10,6 +11,10 @@ mod tab_surface;
 mod text;
 mod widgets;
 
+pub(crate) use self::agent_refs::{
+    agent_id_byte_range, decorate_row as decorate_agent_ref_row, AgentRefConfig, AgentRefs,
+    CLOSED_AGENT_MEMORY,
+};
 pub(crate) use self::onboarding::{
     onboarding_welcome_continue_rect, ONBOARDING_DESCRIPTION, ONBOARDING_HELP_LABEL,
     ONBOARDING_HELP_SUFFIX, ONBOARDING_NEXT, ONBOARDING_PREFIX_SUFFIX, ONBOARDING_SUBTITLE,

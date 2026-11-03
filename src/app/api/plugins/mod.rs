@@ -318,10 +318,30 @@ impl App {
         id: String,
         params: PaneLinkActivateParams,
     ) -> String {
+        let agent_refs = self.state.agent_references.enabled;
         match self.read_checked_pane_link(&id, &params, "resolution", |runtime, col, row| {
-            runtime.link_regions_at(col, row, crate::app::actions::url_byte_range)
+            let regions = runtime.link_regions_at(col, row, crate::app::actions::url_byte_range);
+            if !regions.is_empty() || !agent_refs {
+                return (regions, None);
+            }
+            // Fork 061: an agent id is a link to its pane, after OSC 8 and URLs.
+            let agent = runtime
+                .link_target_at(col, row)
+                .as_ref()
+                .and_then(agent_id_in_link_target);
+            let regions = agent
+                .as_ref()
+                .map(|_| runtime.link_regions_at(col, row, crate::ui::agent_id_byte_range))
+                .unwrap_or_default();
+            (regions, agent)
         }) {
-            Ok((_, regions)) => encode_success(id, ResponseResult::PaneLinkResolved { regions }),
+            Ok((_, (regions, agent))) => {
+                let regions = match agent {
+                    Some(agent) if self.terminal_with_agent_id(&agent).is_none() => Vec::new(),
+                    _ => regions,
+                };
+                encode_success(id, ResponseResult::PaneLinkResolved { regions })
+            }
             Err(error) => error,
         }
     }
@@ -331,15 +351,18 @@ impl App {
         id: String,
         params: PaneLinkActivateParams,
     ) -> String {
-        let (pane_id, url) =
+        let (pane_id, target) =
             match self.read_checked_pane_link(&id, &params, "activation", |runtime, col, row| {
-                runtime
-                    .link_target_at(col, row)
-                    .and_then(crate::app::actions::url_from_link_target)
+                runtime.link_target_at(col, row)
             }) {
                 Ok(value) => value,
                 Err(error) => return error,
             };
+        let agent = target
+            .as_ref()
+            .filter(|_| self.state.agent_references.enabled)
+            .and_then(agent_id_in_link_target);
+        let url = target.and_then(crate::app::actions::url_from_link_target);
         let handled = match url.as_deref() {
             Some(url) => match self.invoke_plugin_link_handler_for_url(url, pane_id) {
                 Ok(handled) => handled,
@@ -348,7 +371,17 @@ impl App {
                     return encode_error(id, "plugin_link_failed", err);
                 }
             },
-            None => false,
+            // Fork 061: Ctrl+click on a live agent's id focuses its pane.
+            None => {
+                let pane = agent
+                    .and_then(|agent| self.terminal_with_agent_id(&agent))
+                    .and_then(|terminal_id| self.pane_for_terminal(&terminal_id));
+                if let Some((ws_idx, pane_id)) = pane {
+                    self.state.focus_pane_in_workspace(ws_idx, pane_id);
+                    self.state.mode = crate::app::Mode::Terminal;
+                }
+                pane.is_some()
+            }
         };
         encode_success(id, ResponseResult::PaneLinkActivated { url, handled })
     }
@@ -744,6 +777,17 @@ impl App {
     }
 }
 
+/// The agent id a plain-text link target is, when it is one (fork 061).
+fn agent_id_in_link_target(
+    target: &crate::ghostty::LinkTarget,
+) -> Option<crate::terminal::AgentId> {
+    let crate::ghostty::LinkTarget::Text { text, clicked_byte } = target else {
+        return None;
+    };
+    let range = crate::ui::agent_id_byte_range(text, *clicked_byte)?;
+    crate::terminal::AgentId::parse(&text[range])
+}
+
 fn invalid_plugin_id(id: String) -> String {
     encode_error(
         id,
@@ -876,6 +920,80 @@ mod tests {
         let response: serde_json::Value =
             serde_json::from_str(&app.handle_pane_link_resolve("hover".into(), params)).unwrap();
         assert_eq!(response["error"]["code"], "stale_target");
+    }
+
+    #[tokio::test]
+    async fn an_agent_id_on_screen_links_to_its_pane() {
+        let mut app = test_app();
+        let mut workspace = crate::workspace::Workspace::test_new("refs");
+        let source = workspace.tabs[0].root_pane;
+        let target = workspace.test_split(ratatui::layout::Direction::Horizontal);
+        workspace.tabs[0].layout.focus_pane(source);
+        app.state.workspaces = vec![workspace];
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        let terminal = |app: &App, pane| {
+            app.state.workspaces[0].tabs[0].panes[&pane]
+                .attached_terminal_id
+                .clone()
+        };
+        let target_terminal = terminal(&app, target);
+        app.state
+            .terminals
+            .get_mut(&target_terminal)
+            .unwrap()
+            .agent_id = crate::terminal::AgentId::parse("8c1ee73d");
+        let (runtime, _rx) = crate::terminal::TerminalRuntime::test_with_channel(80, 4);
+        runtime.test_process_pty_bytes(b"ask loom:8c1ee73d or 9b636ee5");
+        let revision = runtime.content_seq();
+        app.terminal_runtimes
+            .insert(terminal(&app, source), runtime);
+        let at = |col| PaneLinkActivateParams {
+            pane_id: app.public_pane_id(0, source).unwrap(),
+            viewport_row: 0,
+            col,
+            content_revision: Some(revision),
+            offset_from_bottom: Some(0),
+        };
+        let (known, unknown) = (at(12), at(25));
+
+        let resolved = |response: &str| match response_result(response) {
+            ResponseResult::PaneLinkResolved { regions } => regions,
+            other => panic!("unexpected {other:?}"),
+        };
+        let regions = resolved(&app.handle_pane_link_resolve("r".into(), known.clone()));
+        assert_eq!(
+            regions,
+            vec![crate::api::schema::PaneLinkRegion {
+                row: 0,
+                start_col: 9,
+                end_col: 16
+            }]
+        );
+        assert!(resolved(&app.handle_pane_link_resolve("r".into(), unknown.clone())).is_empty());
+
+        let activated = |response: &str| match response_result(response) {
+            ResponseResult::PaneLinkActivated { url, handled } => (url, handled),
+            other => panic!("unexpected {other:?}"),
+        };
+        assert_eq!(
+            activated(&app.handle_pane_link_activate("a".into(), unknown)),
+            (None, false)
+        );
+        assert_eq!(app.state.workspaces[0].focused_pane_id(), Some(source));
+        assert_eq!(
+            activated(&app.handle_pane_link_activate("a".into(), known.clone())),
+            (None, true)
+        );
+        assert_eq!(app.state.workspaces[0].focused_pane_id(), Some(target));
+
+        app.state.workspaces[0].tabs[0].layout.focus_pane(source);
+        app.state.agent_references.enabled = false;
+        assert!(resolved(&app.handle_pane_link_resolve("r".into(), known.clone())).is_empty());
+        assert_eq!(
+            activated(&app.handle_pane_link_activate("a".into(), known)),
+            (None, false)
+        );
     }
 
     #[tokio::test]

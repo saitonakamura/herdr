@@ -1121,6 +1121,12 @@
           "description": "Fork-only: width of the sidebar pane while the sidebar is collapsed. sidebar_collapsed_mode = \"hidden\" still hides it."
         },
         {
+          "key": "ui.agent_references",
+          "type": "boolean",
+          "default": "true",
+          "description": "Fork-only: draw an agent id on screen in its agent's status colour, with its state in the line's trailing blank cells, and make it a Ctrl+click link to its pane. Colours follow [sidebar.colors]. Render-only: copy, selection and pane read are unchanged. Belongs in config.fork.toml."
+        },
+        {
           "key": "ui.accent",
           "type": "color",
           "default": "\"cyan\"",

@@ -617,6 +617,8 @@ impl App {
             // Restored identities may name parents whose panes did not come back, or
             // parents in another workspace (ADR 0008); the first sync drops both.
             agent_identities_dirty: true,
+            agent_references: crate::ui::AgentRefConfig::from_config(config),
+            closed_agent_ids: std::collections::VecDeque::new(),
             messages: restored_messages,
             message_delivery_due: true,
             message_delivery_attempts: std::collections::HashMap::new(),
@@ -958,6 +960,7 @@ impl App {
                 self.state.pane_borders = config.ui.pane_borders;
                 self.state.pane_outer_borders = config.ui.pane_outer_borders;
                 self.state.pane_scrollbars = config.ui.pane_scrollbars;
+                self.state.agent_references = crate::ui::AgentRefConfig::from_config(config);
                 self.state.pane_gaps = config.ui.pane_gaps;
                 self.state.show_agent_labels_on_pane_borders =
                     config.ui.show_agent_labels_on_pane_borders;

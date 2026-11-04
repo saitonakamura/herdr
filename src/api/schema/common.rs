@@ -277,7 +277,7 @@ pub enum AgentBlockedReason {
     Question,
     Permission,
     Form,
-    // A turn a restart cut off; the user decides whether it continues.
+    // A turn or prompt a restart cut off; the user decides whether it continues.
     Interrupted,
 }
 

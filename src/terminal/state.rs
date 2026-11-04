@@ -638,8 +638,15 @@ impl TerminalState {
                 agent,
             );
         }
-        // The agent left its prompt, or left the pane: what was saved no longer stands.
-        if process_exited || matches!(fallback_state, AgentState::Working | AgentState::Blocked) {
+        // The agent left its prompt, or left the pane: what was saved no longer stands. The
+        // screen naming the very block that was saved confirms it instead.
+        let confirms_restored = fallback_state == AgentState::Blocked
+            && blocked_reason.is_some()
+            && self.restored_status == Some(RestoredAgentStatus::Blocked(blocked_reason));
+        if process_exited
+            || (matches!(fallback_state, AgentState::Working | AgentState::Blocked)
+                && !confirms_restored)
+        {
             self.restored_status = None;
         }
         self.fallback_state = fallback_state;
@@ -6749,6 +6756,40 @@ mod tests {
 
         assert_eq!(terminal.state, AgentState::Working);
         assert_eq!(terminal.restored_agent_status(), None);
+    }
+
+    #[test]
+    fn a_screen_match_naming_the_restored_block_confirms_it() {
+        let screen_blocked = |terminal: &mut TerminalState, reason| {
+            terminal.set_detected_state_with_blocked_reason_at(
+                Some(Agent::Claude),
+                AgentState::Blocked,
+                false,
+                reason,
+                false,
+                false,
+                Instant::now(),
+            );
+        };
+        let mut terminal =
+            restored_claude_terminal(RestoredAgentStatus::Blocked(Some(BlockedReason::Question)));
+        report_claude(&mut terminal, AgentState::Idle, 1);
+
+        // The resumed transcript redraws the question the restart saved.
+        screen_blocked(&mut terminal, Some(BlockedReason::Question));
+
+        assert_eq!(terminal.state, AgentState::Blocked);
+        assert_eq!(terminal.blocked_reason(), Some(BlockedReason::Question));
+        assert!(terminal.restored_agent_status().is_some());
+
+        // A different block on screen is a fresh event and replaces it.
+        for reason in [None, Some(BlockedReason::Permission)] {
+            let mut terminal = restored_claude_terminal(RestoredAgentStatus::Blocked(Some(
+                BlockedReason::Question,
+            )));
+            screen_blocked(&mut terminal, reason);
+            assert_eq!(terminal.restored_agent_status(), None, "{reason:?}");
+        }
     }
 
     #[test]

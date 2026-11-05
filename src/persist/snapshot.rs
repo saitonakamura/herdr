@@ -184,9 +184,16 @@ impl PaneAgentStatusSnapshot {
             AgentState::Blocked => AgentStatus::Blocked,
             AgentState::Unknown => return None,
         };
+        // Still the saved question: the session that asked it gets another chance to come back.
+        let blocked_reason = match terminal.restored_agent_status() {
+            Some(crate::terminal::RestoredAgentStatus::UnconfirmedQuestion) => {
+                Some(crate::detect::BlockedReason::Question)
+            }
+            _ => terminal.blocked_reason(),
+        };
         Some(Self {
             status,
-            blocked_reason: terminal.blocked_reason().map(Into::into),
+            blocked_reason: blocked_reason.map(Into::into),
         })
     }
 }

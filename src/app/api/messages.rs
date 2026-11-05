@@ -10,10 +10,14 @@ use crate::app::agent_identity::AgentParentError;
 use crate::app::messages::{delivery_block, NewMessage, WithdrawError};
 use crate::app::App;
 use crate::detect::{AgentState, BlockedReason};
-use crate::terminal::{AgentId, TerminalId};
+use crate::terminal::{AgentId, RestoredAgentStatus, TerminalId};
 
 /// The name a message from the user carries.
 const USER_SENDER: &str = "user";
+/// How long a restored question's messages wait for its composer to be painted.
+const RESTORED_QUESTION_DELIVERY_WINDOW: std::time::Duration = std::time::Duration::from_secs(10);
+const RESTORED_QUESTION_DELIVERY_INTERVAL: std::time::Duration =
+    std::time::Duration::from_millis(250);
 
 impl App {
     pub(in crate::app) fn handle_message_send(
@@ -178,6 +182,67 @@ impl App {
         for recipient in self.state.messages.pending_recipients() {
             self.try_deliver_message_to(&recipient);
         }
+    }
+
+    /// A restored question standing again is no state change, so nothing else wakes delivery for
+    /// what waited through the restart, and the report can land before the composer is painted.
+    pub(super) fn start_restored_question_delivery(
+        &mut self,
+        ws_idx: usize,
+        pane_id: crate::layout::PaneId,
+    ) {
+        let Some(terminal) = self
+            .state
+            .terminal_id_for_pane(ws_idx, pane_id)
+            .and_then(|terminal_id| self.state.terminals.get(&terminal_id))
+        else {
+            return;
+        };
+        let Some(agent_id) = terminal.agent_id.clone().filter(|_| {
+            terminal.restored_agent_status()
+                == Some(RestoredAgentStatus::Blocked(Some(BlockedReason::Question)))
+        }) else {
+            return;
+        };
+        let now = std::time::Instant::now();
+        self.state.message_delivery_attempts.remove(&agent_id);
+        self.state.message_delivery_due = true;
+        self.state
+            .restored_question_deliveries
+            .insert(agent_id, now + RESTORED_QUESTION_DELIVERY_WINDOW);
+        self.state.restored_question_delivery_retry_at =
+            Some(now + RESTORED_QUESTION_DELIVERY_INTERVAL);
+    }
+
+    /// Tries a restored question's composer again, for as long as the window lasts and the
+    /// question stands. Past it, messages wait for a state change like any other held ones.
+    pub(crate) fn retry_restored_question_delivery(&mut self, now: std::time::Instant) {
+        if self
+            .state
+            .restored_question_delivery_retry_at
+            .is_none_or(|retry_at| now < retry_at)
+        {
+            return;
+        }
+        let mut deliveries = std::mem::take(&mut self.state.restored_question_deliveries);
+        deliveries.retain(|agent_id, until| {
+            now < *until
+                && !self.state.messages.pending_for(agent_id).is_empty()
+                && self
+                    .terminal_with_agent_id(agent_id)
+                    .and_then(|terminal_id| self.state.terminals.get(&terminal_id))
+                    .is_some_and(|terminal| {
+                        terminal.restored_agent_status()
+                            == Some(RestoredAgentStatus::Blocked(Some(BlockedReason::Question)))
+                    })
+        });
+        for agent_id in deliveries.keys() {
+            self.state.message_delivery_attempts.remove(agent_id);
+        }
+        self.state.restored_question_delivery_retry_at =
+            (!deliveries.is_empty()).then(|| now + RESTORED_QUESTION_DELIVERY_INTERVAL);
+        self.state.restored_question_deliveries = deliveries;
+        self.deliver_pending_messages();
     }
 
     /// Types all of the recipient's pending messages into its pane as one block when it can take
@@ -345,12 +410,14 @@ fn now_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use crate::api::schema::{
-        EventData, EventKind, MessageKind, MessageListParams, MessageSendParams, MessageState,
-        MessageTarget, Method, PaneTarget, Request,
+        AgentBlockedReason, EventData, EventKind, MessageKind, MessageListParams,
+        MessageSendParams, MessageState, MessageTarget, Method, PaneAgentState,
+        PaneReportAgentParams, PaneTarget, Request,
     };
     use crate::app::App;
     use crate::detect::{Agent, AgentState, BlockedReason};
     use crate::layout::PaneId;
+    use crate::terminal::RestoredAgentStatus;
 
     const EMPTY: &str = "\u{276f} ";
 
@@ -393,6 +460,12 @@ mod tests {
     }
 
     impl Fixture {
+        fn next_seq(&mut self) -> u64 {
+            let seq = self.app.state.next_agent_state_change_seq + 1000;
+            self.app.state.next_agent_state_change_seq += 1;
+            seq
+        }
+
         fn agent(&mut self, pane: PaneId, agent: Agent, state: AgentState, name: &str) {
             let terminal = self.terminal(pane);
             terminal.set_detected_state(Some(agent), state);
@@ -716,6 +789,171 @@ mod tests {
                 assert!(typed.try_recv().is_err());
             }
         }
+    }
+
+    /// A pi pane the server just restored, resumed but not yet heard from, as it comes back from
+    /// a saved `status`.
+    fn restored_pi(f: &mut Fixture, status: RestoredAgentStatus) {
+        let lead = f.lead;
+        let terminal = f.terminal(lead);
+        terminal.set_persisted_agent_session(crate::agent_resume::PersistedAgentSession {
+            source: "herdr:pi".into(),
+            agent: "pi".into(),
+            session_ref: crate::agent_resume::AgentSessionRef::id("pi-session").unwrap(),
+        });
+        terminal.restore_agent_status(status, std::time::Instant::now());
+    }
+
+    fn pi_reports(f: &mut Fixture, state: PaneAgentState, reason: Option<AgentBlockedReason>) {
+        let pane_id = f.public(f.lead);
+        let seq = f.next_seq();
+        let response = f.call(Method::PaneReportAgent(PaneReportAgentParams {
+            pane_id,
+            source: "herdr:pi".into(),
+            agent: "pi".into(),
+            state,
+            blocked_reason: reason,
+            background: false,
+            message: None,
+            seq: Some(seq),
+            agent_session_id: Some("pi-session".into()),
+            agent_session_path: None,
+            resume_argv: None,
+        }));
+        assert!(response.get("error").is_none(), "{response}");
+    }
+
+    #[tokio::test]
+    async fn a_restored_question_takes_what_waited_through_the_restart_once_its_session_reports() {
+        let mut f = fixture();
+        restored_pi(&mut f, RestoredAgentStatus::UnconfirmedQuestion);
+        let mut typed = f.runtime(f.lead, EMPTY);
+
+        let held = f.send(f.lead, "sent across the restart")["result"]["message"]["message_id"]
+            .as_u64()
+            .unwrap();
+        assert_eq!(f.state_of(held), "pending", "no live question yet");
+
+        pi_reports(&mut f, PaneAgentState::Idle, None);
+        assert_eq!(
+            f.terminal(f.lead).blocked_reason(),
+            Some(BlockedReason::Question)
+        );
+        f.app.deliver_pending_messages();
+
+        assert!(typed_line(&mut typed)
+            .await
+            .contains("sent across the restart"));
+        assert_eq!(f.state_of(held), "delivered");
+    }
+
+    #[tokio::test]
+    async fn a_restored_question_retries_until_its_composer_is_painted() {
+        let mut f = fixture();
+        restored_pi(&mut f, RestoredAgentStatus::UnconfirmedQuestion);
+        let (runtime, mut typed) = crate::terminal::TerminalRuntime::test_with_channel(80, 24);
+        f.app.state.insert_test_runtime(f.lead, runtime);
+        let held = f.send(f.lead, "wait for paint")["result"]["message"]["message_id"]
+            .as_u64()
+            .unwrap();
+
+        pi_reports(&mut f, PaneAgentState::Idle, None);
+        f.app.deliver_pending_messages();
+        assert_eq!(f.state_of(held), "pending", "nothing painted yet");
+        assert!(typed.try_recv().is_err());
+
+        // Not due yet: the retry keeps its own pace.
+        f.app
+            .retry_restored_question_delivery(std::time::Instant::now());
+        assert_eq!(f.state_of(held), "pending");
+
+        let mut typed = f.runtime(f.lead, EMPTY);
+        let due = f.app.state.restored_question_delivery_retry_at.unwrap();
+        f.app.retry_restored_question_delivery(due);
+        assert!(typed_line(&mut typed).await.contains("wait for paint"));
+        assert_eq!(f.state_of(held), "delivered");
+
+        // Nothing left to deliver, so the retry stands down instead of ticking on.
+        let due = f.app.state.restored_question_delivery_retry_at.unwrap();
+        f.app.retry_restored_question_delivery(due);
+        assert_eq!(f.app.state.restored_question_delivery_retry_at, None);
+    }
+
+    #[tokio::test]
+    async fn a_restored_question_stops_retrying_when_its_window_ends() {
+        let mut f = fixture();
+        restored_pi(&mut f, RestoredAgentStatus::UnconfirmedQuestion);
+        let (runtime, _typed) = crate::terminal::TerminalRuntime::test_with_channel(80, 24);
+        f.app.state.insert_test_runtime(f.lead, runtime);
+        f.send(f.lead, "never painted");
+        pi_reports(&mut f, PaneAgentState::Idle, None);
+
+        let past_window = std::time::Instant::now() + super::RESTORED_QUESTION_DELIVERY_WINDOW;
+        f.app.retry_restored_question_delivery(past_window);
+
+        assert_eq!(f.app.state.restored_question_delivery_retry_at, None);
+        assert!(f.app.state.restored_question_deliveries.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_restored_question_with_a_draft_holds_the_message() {
+        let mut f = fixture();
+        restored_pi(&mut f, RestoredAgentStatus::UnconfirmedQuestion);
+        let mut typed = f.runtime(f.lead, "\u{276f} half typed");
+        pi_reports(&mut f, PaneAgentState::Idle, None);
+
+        let id = f.send(f.lead, "not over the draft")["result"]["message"]["message_id"]
+            .as_u64()
+            .unwrap();
+
+        assert_eq!(f.state_of(id), "pending");
+        assert!(typed.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn a_restored_question_gives_way_to_a_live_dialog() {
+        for reason in [
+            None,
+            Some(AgentBlockedReason::Permission),
+            Some(AgentBlockedReason::Form),
+        ] {
+            let mut f = fixture();
+            restored_pi(&mut f, RestoredAgentStatus::UnconfirmedQuestion);
+            let mut typed = f.runtime(f.lead, EMPTY);
+            pi_reports(&mut f, PaneAgentState::Idle, None);
+            pi_reports(&mut f, PaneAgentState::Blocked, reason);
+
+            let id = f.send(f.lead, "not into a dialog")["result"]["message"]["message_id"]
+                .as_u64()
+                .unwrap();
+
+            assert_eq!(f.state_of(id), "pending", "{reason:?}");
+            assert!(typed.try_recv().is_err(), "{reason:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_cut_off_turn_restored_as_interrupted_holds_the_message_at_its_prompt() {
+        let mut f = fixture();
+        restored_pi(
+            &mut f,
+            RestoredAgentStatus::Blocked(Some(BlockedReason::Interrupted)),
+        );
+        let mut typed = f.runtime(f.lead, EMPTY);
+        pi_reports(&mut f, PaneAgentState::Idle, None);
+        assert_eq!(
+            f.terminal(f.lead).blocked_reason(),
+            Some(BlockedReason::Interrupted)
+        );
+
+        let id = f.send(f.lead, "would restart the turn")["result"]["message"]["message_id"]
+            .as_u64()
+            .unwrap();
+        f.app.deliver_pending_messages();
+
+        assert_eq!(f.state_of(id), "pending");
+        assert!(typed.try_recv().is_err());
+        assert_eq!(f.app.state.restored_question_delivery_retry_at, None);
     }
 
     #[tokio::test]

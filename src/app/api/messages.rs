@@ -932,6 +932,101 @@ mod tests {
         }
     }
 
+    /// A claude pane restored on a question whose `claude --resume` has not started yet.
+    fn restored_claude(f: &mut Fixture) {
+        let lead = f.lead;
+        f.agent(lead, Agent::Claude, AgentState::Idle, "lead");
+        let terminal = f.terminal(lead);
+        terminal.set_persisted_agent_session(crate::agent_resume::PersistedAgentSession {
+            source: "herdr:claude".into(),
+            agent: "claude".into(),
+            session_ref: crate::agent_resume::AgentSessionRef::id("claude-session").unwrap(),
+        });
+        terminal.restore_agent_status(
+            RestoredAgentStatus::UnconfirmedQuestion,
+            std::time::Instant::now(),
+        );
+    }
+
+    fn claude_reports(f: &mut Fixture, state: PaneAgentState, reason: Option<AgentBlockedReason>) {
+        let pane_id = f.public(f.lead);
+        let seq = f.next_seq();
+        let response = f.call(Method::PaneReportAgent(PaneReportAgentParams {
+            pane_id,
+            source: "herdr:claude".into(),
+            agent: "claude".into(),
+            state,
+            blocked_reason: reason,
+            background: false,
+            message: None,
+            seq: Some(seq),
+            agent_session_id: Some("claude-session".into()),
+            agent_session_path: None,
+            resume_argv: None,
+        }));
+        assert!(response.get("error").is_none(), "{response}");
+    }
+
+    #[tokio::test]
+    async fn a_restored_claude_question_takes_what_waited_once_its_session_reports() {
+        let mut f = fixture();
+        restored_claude(&mut f);
+        // The boot attempt finds no runtime, and uses up the one attempt of this state change.
+        let held = f.send(f.lead, "held at boot")["result"]["message"]["message_id"]
+            .as_u64()
+            .unwrap();
+        f.app.deliver_pending_messages();
+        assert_eq!(f.state_of(held), "pending");
+
+        let mut typed = f.runtime(f.lead, EMPTY);
+        let later = f.send(f.lead, "sent while resuming")["result"]["message"]["message_id"]
+            .as_u64()
+            .unwrap();
+        assert_eq!(f.state_of(later), "pending", "no live question yet");
+
+        claude_reports(&mut f, PaneAgentState::Idle, None);
+        assert_eq!(
+            f.terminal(f.lead).blocked_reason(),
+            Some(BlockedReason::Question)
+        );
+        f.app.deliver_pending_messages();
+
+        let line = typed_line(&mut typed).await;
+        assert!(line.contains("held at boot"), "{line}");
+        assert!(line.contains("sent while resuming"), "{line}");
+        assert_eq!(f.state_of(held), "delivered");
+        assert_eq!(f.state_of(later), "delivered");
+    }
+
+    #[tokio::test]
+    async fn a_restored_claude_question_holds_for_a_draft_and_for_a_dialog() {
+        let mut f = fixture();
+        restored_claude(&mut f);
+        let mut typed = f.runtime(f.lead, "\u{276f} half typed");
+        let id = f.send(f.lead, "not over the draft")["result"]["message"]["message_id"]
+            .as_u64()
+            .unwrap();
+        claude_reports(&mut f, PaneAgentState::Idle, None);
+        f.app.deliver_pending_messages();
+        assert_eq!(f.state_of(id), "pending");
+        assert!(typed.try_recv().is_err());
+
+        let mut f = fixture();
+        restored_claude(&mut f);
+        let mut typed = f.runtime(f.lead, EMPTY);
+        claude_reports(&mut f, PaneAgentState::Idle, None);
+        claude_reports(
+            &mut f,
+            PaneAgentState::Blocked,
+            Some(AgentBlockedReason::Permission),
+        );
+        let id = f.send(f.lead, "not into a dialog")["result"]["message"]["message_id"]
+            .as_u64()
+            .unwrap();
+        assert_eq!(f.state_of(id), "pending");
+        assert!(typed.try_recv().is_err());
+    }
+
     #[tokio::test]
     async fn a_cut_off_turn_restored_as_interrupted_holds_the_message_at_its_prompt() {
         let mut f = fixture();

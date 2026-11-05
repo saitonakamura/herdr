@@ -374,6 +374,13 @@ pub(crate) fn screen_assisted_hook_authority(source: &str, agent_label: &str) ->
     matches!((source, agent_label), ("herdr:claude", "claude"))
 }
 
+/// Integrations whose resumed session reports from its prompt, which is what stands a question
+/// saved before a restart again.
+pub(crate) fn session_report_confirms_restored_question(source: &str, agent_label: &str) -> bool {
+    full_lifecycle_hook_authority(source, agent_label)
+        || screen_assisted_hook_authority(source, agent_label)
+}
+
 pub(crate) fn session_identity_only_integration(source: &str, agent_label: &str) -> bool {
     matches!(
         (source, agent_label),

@@ -494,13 +494,16 @@ fn resumed_agent_status(
         AgentStatus::Blocked => {
             let reason = saved.blocked_reason.map(Into::into);
             // Only a prose question outlives the process: the resumed transcript still shows
-            // it. A dialog does not come back. A full-lifecycle hook agent's screen is never
-            // re-read, so its question waits for the resumed session to report back.
-            let hook_lifecycle = session.is_some_and(|session| {
-                crate::detect::full_lifecycle_hook_authority(&session.source, &session.agent)
+            // it. A dialog does not come back. A hook agent's question waits for the resumed
+            // session to report back, so a resume that fails never reads as a live question.
+            let session_confirms = session.is_some_and(|session| {
+                crate::detect::session_report_confirms_restored_question(
+                    &session.source,
+                    &session.agent,
+                )
             });
             let status = match reason {
-                Some(BlockedReason::Question) if hook_lifecycle => {
+                Some(BlockedReason::Question) if session_confirms => {
                     Some(RestoredAgentStatus::UnconfirmedQuestion)
                 }
                 Some(BlockedReason::Question) => Some(RestoredAgentStatus::Blocked(reason)),
@@ -2064,6 +2067,100 @@ mod tests {
 
         assert_ne!(terminal.state, AgentState::Blocked);
         assert_eq!(terminal.blocked_reason(), None);
+    }
+
+    /// A claude pane the server just restored on a question, resumed but not yet heard from.
+    fn restored_claude_question() -> (crate::app::AppState, TerminalId) {
+        save_and_restore_claude_pane(
+            |terminal| {
+                report(
+                    terminal,
+                    AgentState::Blocked,
+                    blocked(Some(crate::detect::BlockedReason::Question)),
+                    2,
+                )
+            },
+            true,
+        )
+    }
+
+    #[tokio::test]
+    async fn a_claude_question_stands_once_its_session_reports_from_the_prompt() {
+        use crate::detect::BlockedReason;
+        let (mut restored, terminal_id) = restored_claude_question();
+        assert_eq!(
+            restored.terminals[&terminal_id].blocked_reason(),
+            Some(BlockedReason::Interrupted),
+            "no claude has resumed yet"
+        );
+
+        resumed_session_reports_idle(&mut restored, &terminal_id);
+
+        let terminal = &restored.terminals[&terminal_id];
+        assert_eq!(terminal.state, AgentState::Blocked);
+        assert_eq!(terminal.blocked_reason(), Some(BlockedReason::Question));
+    }
+
+    #[tokio::test]
+    async fn a_claude_question_leaves_with_its_session() {
+        let replaced = crate::agent_resume::AgentSessionRef::id("cleared-session");
+        for confirmed in [false, true] {
+            let (mut restored, terminal_id) = restored_claude_question();
+            if confirmed {
+                resumed_session_reports_idle(&mut restored, &terminal_id);
+            }
+            let terminal = restored.terminals.get_mut(&terminal_id).unwrap();
+
+            // A /clear reports the new session before its idle.
+            terminal.set_agent_session_ref_for_session_start(
+                CLAUDE.source.into(),
+                CLAUDE.label.into(),
+                replaced.clone(),
+                Some(200),
+                Some("clear".into()),
+            );
+            terminal.set_detailed_hook_authority_at(
+                CLAUDE.source.into(),
+                CLAUDE.label.into(),
+                AgentState::Idle,
+                Default::default(),
+                None,
+                replaced.clone(),
+                Some(201),
+                std::time::Instant::now(),
+            );
+
+            assert_eq!(terminal.state, AgentState::Idle, "confirmed {confirmed}");
+            assert_eq!(terminal.blocked_reason(), None, "confirmed {confirmed}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_claude_question_whose_session_never_returns_is_no_live_question() {
+        let (restored, terminal_id) = restored_claude_question();
+        assert_eq!(
+            restored.terminals[&terminal_id].blocked_reason(),
+            Some(crate::detect::BlockedReason::Interrupted)
+        );
+
+        // Still saved as the question, so a later restart that does resume it can confirm it.
+        let runtimes = crate::terminal::TerminalRuntimeRegistry::new();
+        let saved = crate::persist::capture(
+            &restored.workspaces,
+            &restored.terminals,
+            &runtimes,
+            Some(0),
+            0,
+        );
+        let root = restored.workspaces[0].tabs[0].root_pane;
+        let status = saved.workspaces[0].tabs[0].panes[&root.raw()]
+            .agent_status
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            status.blocked_reason,
+            Some(crate::api::schema::AgentBlockedReason::Question)
+        );
     }
 
     #[tokio::test]

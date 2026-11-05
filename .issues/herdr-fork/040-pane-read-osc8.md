@@ -56,7 +56,7 @@ Why A over B:
   `--links` out, which is fine because the plugin runs on the host.
 - **The cost is one vendored patch.** libghostty-vt's formatter already tracked
   per-cell hyperlinks, but emitted them only for HTML. Patch
-  `0008-vt-formatter-hyperlinks` adds a default-off `hyperlinks` option that
+  `0009-vt-formatter-hyperlinks` adds a default-off `hyperlinks` option that
   reuses that tracking for VT. It is indexed in
   `vendor/libghostty-vt.patches.md` with its removal condition. Building OSC 8
   in Rust instead would have meant splitting formatter calls at link boundaries,

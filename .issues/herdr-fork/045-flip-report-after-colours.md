@@ -120,6 +120,14 @@ The on-box tickets are `terminal-coding-flow/009` (unload the primary's two load
 agents) and `010` (check the music mac, which the repo says never had them).
 Merge that branch only once this PR is in the dogfood binary.
 
+**Superseded by upstream, 2026-11-05.** The sync to `ee5bfb50` brought upstream's
+`3f5032c9` (#5517), which holds the same report on the server instead
+(`src/app/theme_sync.rs`): a report that changes sides waits for a background of
+that side, or 750 ms. That covers what 043 measured, works for any client, and
+also answers panes opened during the hold, so the sync dropped this ticket's
+client hold, its replay order and their tests. The server test
+`client_shell_flip_background_before_report_keeps_the_explicit_appearance` stays.
+
 ## Parent
 
 [000-map](./000-map.md)

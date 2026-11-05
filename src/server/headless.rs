@@ -863,9 +863,8 @@ impl HeadlessServer {
         let server_keybindings = self.server_keybindings.clone();
         apply_keybindings(&mut self.app, &server_keybindings);
         self.sync_visible_server_config_diagnostic(false);
-        // Colours first: panes re-query them when the appearance report reaches them.
-        self.app.set_host_terminal_theme(host_terminal_theme);
-        self.app.set_host_terminal_appearance_state(
+        self.app.set_host_terminal_state(
+            host_terminal_theme,
             host_terminal_appearance,
             host_terminal_appearance_explicit,
         );
@@ -2301,9 +2300,8 @@ impl HeadlessServer {
                 if !client.shell_surface_active || self.foreground_client_id != Some(client_id) {
                     return false;
                 }
-                // Colours first: panes re-query them when the appearance report reaches them.
-                let mut changed = self.app.set_host_terminal_theme(client.host_terminal_theme);
-                changed |= self.app.set_host_terminal_appearance_state(
+                let changed = self.app.set_host_terminal_state(
+                    client.host_terminal_theme,
                     client.host_terminal_appearance,
                     client.host_terminal_appearance_explicit,
                 );
@@ -3410,6 +3408,7 @@ impl HeadlessServer {
             changed = true;
         }
 
+        changed |= self.app.release_host_appearance_if_ready(now);
         changed |= self.app.handle_tab_bar_status_tasks(now);
 
         if geometry_dirty {

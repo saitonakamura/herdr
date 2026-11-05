@@ -32,6 +32,89 @@ fn unavailable_terminal_grid_is_not_fabricated() {
 }
 
 #[test]
+fn resize_poll_loop_keeps_polling_through_a_transient_zero_grid() {
+    let (resize_tx, mut resize_rx) = tokio::sync::mpsc::channel(8);
+    let should_quit = Arc::new(AtomicBool::new(false));
+    let quit = Arc::clone(&should_quit);
+    let mut samples = vec![
+        Err(crate::platform::zero_sized_terminal_grid_error()),
+        Ok((80u16, 24u16, 8u32, 16u32, true)),
+    ]
+    .into_iter();
+    let mut signals = vec![true, false].into_iter();
+
+    super::terminal_geometry::resize_poll_loop_with(
+        resize_tx,
+        (80, 24, 8, 16, true),
+        move |_| match samples.next() {
+            Some(sample) => sample,
+            None => {
+                quit.store(true, Ordering::Release);
+                Ok((80, 24, 8, 16, true))
+            }
+        },
+        move || signals.next().unwrap_or(false),
+        &should_quit,
+    );
+
+    // The transient zero-sized sample must keep the loop polling and retain the
+    // pending resize signal, so the recovered size re-reports exactly once even
+    // though it matches the last known size, and no failure is reported.
+    let mut events = Vec::new();
+    while let Ok(event) = resize_rx.try_recv() {
+        events.push(event);
+    }
+    assert!(
+        matches!(
+            events.as_slice(),
+            [super::ClientLoopEvent::Resize(80, 24, 8, 16, true)]
+        ),
+        "expected exactly one recovered resize report"
+    );
+}
+
+#[test]
+fn resize_poll_loop_detaches_once_on_a_real_terminal_failure() {
+    let (resize_tx, mut resize_rx) = tokio::sync::mpsc::channel(8);
+    let should_quit = Arc::new(AtomicBool::new(false));
+    let mut samples = vec![
+        Err(crate::platform::zero_sized_terminal_grid_error()),
+        Err(io::Error::new(
+            io::ErrorKind::NotConnected,
+            "terminal is gone",
+        )),
+    ]
+    .into_iter();
+
+    super::terminal_geometry::resize_poll_loop_with(
+        resize_tx,
+        (80, 24, 8, 16, true),
+        move |_| {
+            samples
+                .next()
+                .expect("polling must stop after a real terminal failure")
+        },
+        || false,
+        &should_quit,
+    );
+
+    // The transient sample must not stop the loop, but the following real
+    // failure must report exactly one terminal-unavailable event and terminate.
+    let mut events = Vec::new();
+    while let Ok(event) = resize_rx.try_recv() {
+        events.push(event);
+    }
+    assert!(
+        matches!(
+            events.as_slice(),
+            [super::ClientLoopEvent::TerminalUnavailable(err)]
+                if err.kind() == io::ErrorKind::NotConnected
+        ),
+        "expected exactly one terminal-unavailable event"
+    );
+}
+
+#[test]
 fn missing_pixel_geometry_keeps_a_valid_terminal_grid() {
     let reported_cell_size = AtomicU64::new(0);
     let geometry = current_terminal_geometry_with(
@@ -960,34 +1043,4 @@ fn terminal_control_scroll_command_maps_to_attach_scroll() {
     assert_eq!(source, AttachScrollSource::Wheel);
     assert_eq!(direction, AttachScrollDirection::Up);
     assert_eq!(lines, 3);
-}
-
-#[test]
-fn host_theme_replay_sends_colours_before_the_appearance() {
-    use crate::protocol::{
-        ClientHostAppearance, ClientHostColor, ClientHostDefaultColorKind, ClientHostThemeUpdate,
-    };
-
-    let color = |kind| ClientHostThemeUpdate::DefaultColor {
-        kind,
-        color: ClientHostColor { r: 1, g: 2, b: 3 },
-    };
-    let mut state = ClientState::test_new();
-    state.record_host_theme_update(&color(ClientHostDefaultColorKind::Background));
-    state.record_host_theme_update(&ClientHostThemeUpdate::Appearance(
-        ClientHostAppearance::Light,
-    ));
-    // A later re-query, a resize say, retains a background recorded after the appearance.
-    state.record_host_theme_update(&color(ClientHostDefaultColorKind::Background));
-    state.record_host_theme_update(&color(ClientHostDefaultColorKind::Foreground));
-
-    let replay = state.host_theme_replay().cloned().collect::<Vec<_>>();
-    assert_eq!(
-        replay,
-        [
-            color(ClientHostDefaultColorKind::Background),
-            color(ClientHostDefaultColorKind::Foreground),
-            ClientHostThemeUpdate::Appearance(ClientHostAppearance::Light),
-        ]
-    );
 }

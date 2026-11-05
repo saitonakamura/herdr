@@ -36,6 +36,9 @@ pub(crate) use notifications::{
     show_actionable_desktop_notification,
 };
 
+mod launchd_spawn;
+pub(crate) use launchd_spawn::{leave_launchd_job, spawn_launchd_job};
+
 #[cfg(test)]
 mod config_file_tests;
 

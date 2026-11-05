@@ -400,6 +400,14 @@ bridge caches `claimed_session`, and nothing claims again. The `wN:pZ` control f
 since its authority was established before its flip. Two panes aren't proof, and the
 `None` transition could trip the generation gate instead.
 
+**This weakens the lost-claim form of the hypothesis.** `pimig-066`'s last message, delivered after the closure, notes that `route_full_lifecycle_hook_report`
+(`src/terminal/state.rs:1206-1264`) accepts a plain state report with no separate
+claim when the process is present, the persisted session matches and no suppression
+holds. `live_full_lifecycle_hook_rejects_different_session_ref_for_same_source`
+covers that path. `wN:p9` has its session persisted, so a dropped claim alone
+shouldn't cost it authority once pi is detected again. That points at
+suppression from the `None` transition, or a session mismatch. Not yet tested.
+
 **Next, to settle it:**
 
 1. A deterministic `TerminalState` test of this order: Pi detected, Claude detected,

@@ -28,7 +28,7 @@ Nothing.
 
 Read from source only: neither `hc` nor the app was built or run, so how the app feels is still unknown.
 Evidence, commits and the full tables are in
-[`docs/research/herdr-app-core-comparison.md`](../../docs/research/herdr-app-core-comparison.md).
+[`assets/067-herdr-app-and-core-comparison.md`](./assets/067-herdr-app-and-core-comparison.md).
 
 ### The answer
 
@@ -76,7 +76,7 @@ release copies.
 
 ### Requirements, in short
 
-The [full table](../../docs/research/herdr-app-core-comparison.md#2-requirements) has about 50 rows, none
+The [full table](./assets/067-herdr-app-and-core-comparison.md#2-requirements) has about 50 rows, none
 dropped.
 
 | | |
@@ -103,7 +103,7 @@ can run commands and write files.
 
 Of the fork's 66 tickets: **0 port as they are in Rust**, 17 stop being needed, 12 are small, 19 are real
 rewrites, 5 need an app patch or are gone, and 13 are process work.
-[Listed by name](../../docs/research/herdr-app-core-comparison.md#4-options-in-tickets).
+[Listed by name](./assets/067-herdr-app-and-core-comparison.md#4-options-in-tickets).
 
 | option | size | thrown away | verdict |
 | --- | --- | --- | --- |

@@ -1595,6 +1595,10 @@ impl App {
             params.agent_session_id,
             params.agent_session_path,
         );
+        let question_unconfirmed = self.pane_terminal(ws_idx, pane_id).is_some_and(|terminal| {
+            terminal.restored_agent_status()
+                == Some(crate::terminal::RestoredAgentStatus::UnconfirmedQuestion)
+        });
         self.handle_internal_event(crate::events::AppEvent::HookStateReported {
             pane_id,
             session_ref: session_ref.clone(),
@@ -1608,6 +1612,9 @@ impl App {
             message: params.message,
             seq: params.seq,
         });
+        if question_unconfirmed {
+            self.start_restored_question_delivery(ws_idx, pane_id);
+        }
         let applied =
             report_is_newer && self.session_report_applied(ws_idx, pane_id, session_ref.as_ref());
         if applied {

@@ -63,6 +63,9 @@ pub enum RestoredAgentStatus {
     Blocked(Option<BlockedReason>),
     /// Saved awaiting: a live declared wait keeps it awaiting, otherwise the restart cut it off.
     Awaiting,
+    /// A question saved by a full-lifecycle hook agent, whose screen is never read: it stays
+    /// interrupted until the session that asked reports from its prompt again.
+    UnconfirmedQuestion,
 }
 
 #[cfg(unix)]
@@ -327,6 +330,19 @@ impl TerminalState {
             ),
             ..TerminalStateMutation::default()
         })
+    }
+
+    /// The question was asked in the session the pane just left, so nothing waits on it here.
+    fn drop_restored_question_of_replaced_session(&mut self) {
+        if matches!(
+            self.restored_status,
+            Some(
+                RestoredAgentStatus::UnconfirmedQuestion
+                    | RestoredAgentStatus::Blocked(Some(BlockedReason::Question))
+            )
+        ) {
+            self.restored_status = None;
+        }
     }
 
     pub(crate) fn declared_wait(&self) -> bool {
@@ -1041,6 +1057,9 @@ impl TerminalState {
         if state != AgentState::Idle {
             self.restored_status = None;
         }
+        let full_lifecycle_source =
+            crate::detect::full_lifecycle_hook_authority(&source, &agent_label);
+        let names_session = session_ref.is_some();
         self.hook_authority = Some(HookAuthority {
             source,
             agent_label,
@@ -1051,6 +1070,14 @@ impl TerminalState {
             detail,
         });
         let current_session = self.current_session_identity_for_persistence();
+        if full_lifecycle_source && names_session && previous_session != current_session {
+            self.drop_restored_question_of_replaced_session();
+        } else if full_lifecycle_source
+            && self.restored_status == Some(RestoredAgentStatus::UnconfirmedQuestion)
+        {
+            self.restored_status =
+                Some(RestoredAgentStatus::Blocked(Some(BlockedReason::Question)));
+        }
         let effective_state_change = self.recompute_effective_state(
             previous_agent_label,
             previous_known_agent,
@@ -1827,6 +1854,9 @@ impl TerminalState {
             if process_present {
                 self.clear_full_lifecycle_hook_suppression_for_detected_agent(None, known_agent);
                 let current_session = self.current_session_identity_for_persistence();
+                if previous_session != current_session {
+                    self.drop_restored_question_of_replaced_session();
+                }
                 return Some(TerminalStateMutation {
                     effective_state_change: self.recompute_effective_state(
                         previous_agent_label,
@@ -1945,6 +1975,9 @@ impl TerminalState {
         if previous_session.is_some() && previous_session != current_session {
             // Rebinding can expose a cached Working screen; only a fresh report ends acquisition.
             self.agent_process_acquisition_pending = true;
+            if full_lifecycle_source {
+                self.drop_restored_question_of_replaced_session();
+            }
         }
         Some(TerminalStateMutation {
             effective_state_change: self.recompute_effective_state(
@@ -2370,7 +2403,7 @@ impl TerminalState {
     ) -> (AgentState, Option<BlockedReason>) {
         match self.restored_status {
             Some(RestoredAgentStatus::Blocked(reason)) => return (AgentState::Blocked, reason),
-            Some(RestoredAgentStatus::Awaiting) => {
+            Some(RestoredAgentStatus::Awaiting | RestoredAgentStatus::UnconfirmedQuestion) => {
                 return (AgentState::Blocked, Some(BlockedReason::Interrupted))
             }
             None => {}
@@ -6743,6 +6776,28 @@ mod tests {
         assert!(terminal
             .clear_restored_agent_status(Instant::now())
             .is_none());
+    }
+
+    #[test]
+    fn typing_or_a_report_from_elsewhere_settles_an_unconfirmed_question() {
+        let mut terminal = restored_claude_terminal(RestoredAgentStatus::UnconfirmedQuestion);
+        assert_eq!(terminal.state, AgentState::Blocked);
+        assert_eq!(terminal.blocked_reason(), Some(BlockedReason::Interrupted));
+
+        // Claude's hooks are not the full-lifecycle kind, so they confirm nothing.
+        report_claude(&mut terminal, AgentState::Idle, 1);
+        assert_eq!(
+            terminal.restored_agent_status(),
+            Some(RestoredAgentStatus::UnconfirmedQuestion)
+        );
+
+        let mutation = terminal
+            .clear_restored_agent_status(Instant::now())
+            .expect("typing clears it");
+        assert_eq!(
+            mutation.effective_state_change.map(|change| change.state),
+            Some(AgentState::Idle)
+        );
     }
 
     #[test]

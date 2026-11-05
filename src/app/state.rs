@@ -906,6 +906,10 @@ pub struct AppState {
     pub(crate) messages: crate::app::messages::MessageStore,
     /// Set when a message was queued or an agent's state changed, so delivery runs again.
     pub(crate) message_delivery_due: bool,
+    /// Recipients of a restored question that just stood again, and how long to keep retrying.
+    pub(crate) restored_question_deliveries:
+        std::collections::HashMap<crate::terminal::AgentId, std::time::Instant>,
+    pub(crate) restored_question_delivery_retry_at: Option<std::time::Instant>,
     /// Each recipient's state change sequence at its last delivery attempt: one attempt per change.
     pub(crate) message_delivery_attempts:
         std::collections::HashMap<crate::terminal::AgentId, Option<u64>>,
@@ -1157,6 +1161,8 @@ impl AppState {
             message_delivery_due: false,
             waits: Default::default(),
             server_started_at_ms: 0,
+            restored_question_deliveries: std::collections::HashMap::new(),
+            restored_question_delivery_retry_at: None,
             message_delivery_attempts: std::collections::HashMap::new(),
         }
     }

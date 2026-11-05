@@ -624,6 +624,8 @@ impl App {
             closed_agent_ids: std::collections::VecDeque::new(),
             messages: restored_messages,
             message_delivery_due: true,
+            restored_question_deliveries: std::collections::HashMap::new(),
+            restored_question_delivery_retry_at: None,
             message_delivery_attempts: std::collections::HashMap::new(),
             waits: restored_waits,
             server_started_at_ms: waits::epoch_now_ms(),

@@ -494,15 +494,17 @@ fn resumed_agent_status(
         AgentStatus::Blocked => {
             let reason = saved.blocked_reason.map(Into::into);
             // Only a prose question outlives the process: the resumed transcript still shows
-            // it. A dialog does not come back, and a full-lifecycle hook agent's screen is never
-            // re-read, so nothing would correct a block it no longer shows.
+            // it. A dialog does not come back. A full-lifecycle hook agent's screen is never
+            // re-read, so its question waits for the resumed session to report back.
             let hook_lifecycle = session.is_some_and(|session| {
                 crate::detect::full_lifecycle_hook_authority(&session.source, &session.agent)
             });
-            let status = if reason == Some(BlockedReason::Question) && !hook_lifecycle {
-                Some(RestoredAgentStatus::Blocked(reason))
-            } else {
-                interrupted
+            let status = match reason {
+                Some(BlockedReason::Question) if hook_lifecycle => {
+                    Some(RestoredAgentStatus::UnconfirmedQuestion)
+                }
+                Some(BlockedReason::Question) => Some(RestoredAgentStatus::Blocked(reason)),
+                _ => interrupted,
             };
             (status, true)
         }
@@ -1878,9 +1880,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_full_lifecycle_hook_block_restores_as_interrupted() {
+    async fn a_full_lifecycle_hook_dialog_restores_as_interrupted() {
         use crate::detect::BlockedReason;
-        for reason in [None, Some(BlockedReason::Question)] {
+        for reason in [
+            None,
+            Some(BlockedReason::Permission),
+            Some(BlockedReason::Form),
+        ] {
             let (mut restored, terminal_id) = save_and_restore_hook_pane(
                 PI,
                 |terminal| report_as(PI, terminal, AgentState::Blocked, blocked(reason), 2),
@@ -1898,6 +1904,166 @@ mod tests {
             );
             restored.assert_invariants_for_test();
         }
+    }
+
+    #[tokio::test]
+    async fn a_turn_cut_off_under_a_full_lifecycle_hook_stays_interrupted_at_its_prompt() {
+        let (mut restored, terminal_id) = save_and_restore_hook_pane(
+            PI,
+            |terminal| report_as(PI, terminal, AgentState::Working, Default::default(), 2),
+            true,
+        );
+        resumed_session_reports_idle_as(PI, &mut restored, &terminal_id);
+
+        let terminal = &restored.terminals[&terminal_id];
+        assert_eq!(terminal.state, AgentState::Blocked);
+        assert_eq!(
+            terminal.blocked_reason(),
+            Some(crate::detect::BlockedReason::Interrupted)
+        );
+    }
+
+    fn restored_pi_question() -> (crate::app::AppState, TerminalId) {
+        save_and_restore_hook_pane(
+            PI,
+            |terminal| {
+                report_as(
+                    PI,
+                    terminal,
+                    AgentState::Blocked,
+                    blocked(Some(crate::detect::BlockedReason::Question)),
+                    2,
+                )
+            },
+            true,
+        )
+    }
+
+    #[tokio::test]
+    async fn a_full_lifecycle_hook_question_stands_once_its_session_reports_from_the_prompt() {
+        use crate::detect::BlockedReason;
+        let (mut restored, terminal_id) = restored_pi_question();
+        assert_eq!(
+            restored.terminals[&terminal_id].blocked_reason(),
+            Some(BlockedReason::Interrupted),
+            "nothing says the session came back yet"
+        );
+
+        resumed_session_reports_idle_as(PI, &mut restored, &terminal_id);
+
+        let terminal = &restored.terminals[&terminal_id];
+        assert_eq!(terminal.state, AgentState::Blocked);
+        assert_eq!(terminal.blocked_reason(), Some(BlockedReason::Question));
+        restored.assert_invariants_for_test();
+    }
+
+    #[tokio::test]
+    async fn a_full_lifecycle_hook_question_leaves_when_the_turn_moves_on() {
+        let (mut restored, terminal_id) = restored_pi_question();
+        resumed_session_reports_idle_as(PI, &mut restored, &terminal_id);
+        let terminal = restored.terminals.get_mut(&terminal_id).unwrap();
+
+        report_as(PI, terminal, AgentState::Working, Default::default(), 101);
+        assert_eq!(terminal.state, AgentState::Working);
+        report_as(PI, terminal, AgentState::Idle, Default::default(), 102);
+
+        assert_eq!(terminal.state, AgentState::Idle);
+        assert_eq!(terminal.blocked_reason(), None);
+    }
+
+    #[tokio::test]
+    async fn a_full_lifecycle_hook_question_leaves_with_its_session() {
+        let replaced = crate::agent_resume::AgentSessionRef::id("another-session");
+        for confirmed in [false, true] {
+            let (mut restored, terminal_id) = restored_pi_question();
+            if confirmed {
+                resumed_session_reports_idle_as(PI, &mut restored, &terminal_id);
+            }
+            let terminal = restored.terminals.get_mut(&terminal_id).unwrap();
+
+            terminal.set_agent_session_ref_for_session_start(
+                PI.source.into(),
+                PI.label.into(),
+                replaced.clone(),
+                Some(200),
+                Some("new".into()),
+            );
+            terminal.set_detailed_hook_authority_at(
+                PI.source.into(),
+                PI.label.into(),
+                AgentState::Idle,
+                Default::default(),
+                None,
+                replaced.clone(),
+                Some(201),
+                std::time::Instant::now(),
+            );
+
+            assert_eq!(terminal.state, AgentState::Idle, "confirmed {confirmed}");
+            assert_eq!(terminal.blocked_reason(), None, "confirmed {confirmed}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_full_lifecycle_hook_question_whose_session_never_returns_is_no_live_question() {
+        use crate::detect::BlockedReason;
+        let (mut restored, terminal_id) = restored_pi_question();
+
+        // A report from a session the pane does not hold says nothing about the saved one.
+        let terminal = restored.terminals.get_mut(&terminal_id).unwrap();
+        terminal.set_detailed_hook_authority_at(
+            PI.source.into(),
+            PI.label.into(),
+            AgentState::Idle,
+            Default::default(),
+            None,
+            crate::agent_resume::AgentSessionRef::id("another-session"),
+            Some(3),
+            std::time::Instant::now(),
+        );
+        assert_eq!(
+            terminal.blocked_reason(),
+            Some(BlockedReason::Interrupted),
+            "only the session that asked can confirm it"
+        );
+
+        // Still saved as the question, so a later restart that does resume it can confirm it.
+        let runtimes = crate::terminal::TerminalRuntimeRegistry::new();
+        let saved = crate::persist::capture(
+            &restored.workspaces,
+            &restored.terminals,
+            &runtimes,
+            Some(0),
+            0,
+        );
+        let root = restored.workspaces[0].tabs[0].root_pane;
+        let status = saved.workspaces[0].tabs[0].panes[&root.raw()]
+            .agent_status
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            status.blocked_reason,
+            Some(crate::api::schema::AgentBlockedReason::Question)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_full_lifecycle_hook_question_leaves_when_the_agent_exits() {
+        let (mut restored, terminal_id) = restored_pi_question();
+        let terminal = restored.terminals.get_mut(&terminal_id).unwrap();
+
+        terminal.set_detected_state_with_screen_signals_at(
+            Some(crate::detect::Agent::Pi),
+            AgentState::Idle,
+            false,
+            false,
+            false,
+            true,
+            std::time::Instant::now(),
+        );
+
+        assert_ne!(terminal.state, AgentState::Blocked);
+        assert_eq!(terminal.blocked_reason(), None);
     }
 
     #[tokio::test]

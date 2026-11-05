@@ -25,6 +25,7 @@ On-box steps other tickets have handed to the cutover, to fold into each box tic
 - 006: the dotfiles per-box claude-hooks tickets (`~/dotfiles/.issues/herdr-fork/001-005`).
 - 008: primary mac only, ticket 023 (push the agent-skills seeder, verify seeded `worktree create`).
 - 011: `herdr integration install codex` on each box that runs codex.
+- **Before the box's restart, pull dotfiles to at least `883f0a2` re-claim the herdr session.** A running bridge keeps its old code until its pi relaunches, so the cutover's restart is what deploys the [066](./066-pi-lifecycle-authority-lost.md) fix, and only if the script is already there. A pi pane restored without it can read `idle` for good while it works.
 
 ## Parent
 

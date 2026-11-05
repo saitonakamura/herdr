@@ -119,7 +119,51 @@ wins when pi's argv0 can't be read as `pi`. The flip lasts one `PROCESS_RECHECK_
 measured. Logging the job when `claude` is detected under a `pi-host` leader would settle
 it. A fix doesn't need this answer.
 
-### What a fix could be (not decided, nothing changed)
+### The bridge fix for the cutover (2026-11-05)
+
+Decided on the fork map (`9de770c6`): the fix goes before the cutover, doesn't hold
+fork.3, and takes no `src/terminal` change. Shipped in dotfiles as
+[`883f0a2 re-claim the herdr session`](https://github.com/saitonakamura/dotfiles/commit/883f0a2):
+`scripts/herdr-bridge` claims again when a report moves to `working` from any other state,
+and sends only a source herdr recognizes. Claiming on every report was rejected, since a
+claim with a newer seq reopens the generation gate.
+
+Rerun on the isolated server, through the real bridge. A proxy held the state call so the
+claim and state could land on either side of the flip, which reproduces case B:
+
+| bridge | after the flip and back to Pi | at the next turn start |
+| --- | --- | --- |
+| old, `61bdf83` | none | **none, for good** |
+| new | none | **authority, `working`** |
+
+- **Sources:** a stuck pane recovered on a turn start with `startup` and `resume`. On pi
+  `/reload` the extension keeps reporting `reload`, which herdr ignores on a gated claim
+  (`state.rs:1783`), so the bridge sends `startup` instead. That mapping has a unit test,
+  and the recovery with `startup` is the run above. A stuck pane with `reload` wasn't run
+  end to end: that attempt's setup didn't get stuck.
+- **Healthy panes:** authority kept across two turns with each of `startup`, `resume`,
+  `new`, `fork` and `reload`. The claim doesn't disturb a live pane.
+- **Real pi with the new bridge:** authority kept through a fresh turn, `/reload`, a server
+  restart with restore, and `/new`. No flip occurred in that run, so it shows no regression
+  and isn't a second reproduction.
+- **Late reports:** with the job gone, late `idle` and `working` reports through the new
+  bridge don't revive the pane (agent none, status unknown), also after a further probe.
+
+Limits:
+
+- A pane can still read `idle` from startup until its first turn start. The fix recovers
+  it, it doesn't prevent the flip. Waiting at a prompt, a stuck pane looks the same as
+  before, and the first `working` report corrects it.
+- A running bridge keeps its old code until its pi relaunches, so existing panes are only
+  fixed by the cutover's restart.
+- A dying pi's late `working` report while a replacement pi is already detected in the same
+  pane would now carry a claim. Not tested. A turn start from a dying process is unlikely,
+  and that's why it's limited to turn starts.
+
+Still open in this ticket, after the cutover: dropped reports answering `ok`, `state.rs:1456`,
+the design question, and why pi is unidentifiable for that probe.
+
+### Other fix options (not decided)
 
 - **Smallest:** make the bridge claim again rather than once per session, since R1 shows
   that recovers the pane. This is a dotfiles change.

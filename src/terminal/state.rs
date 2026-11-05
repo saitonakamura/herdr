@@ -63,8 +63,8 @@ pub enum RestoredAgentStatus {
     Blocked(Option<BlockedReason>),
     /// Saved awaiting: a live declared wait keeps it awaiting, otherwise the restart cut it off.
     Awaiting,
-    /// A question saved by a full-lifecycle hook agent, whose screen is never read: it stays
-    /// interrupted until the session that asked reports from its prompt again.
+    /// A question saved by a hook agent: it stays interrupted until the session that asked
+    /// reports from its prompt again.
     UnconfirmedQuestion,
 }
 
@@ -658,7 +658,13 @@ impl TerminalState {
         // screen naming the very block that was saved confirms it instead.
         let confirms_restored = fallback_state == AgentState::Blocked
             && blocked_reason.is_some()
-            && self.restored_status == Some(RestoredAgentStatus::Blocked(blocked_reason));
+            && match self.restored_status {
+                // Standing it again stays the session report's, since that also wakes delivery.
+                Some(RestoredAgentStatus::UnconfirmedQuestion) => {
+                    blocked_reason == Some(BlockedReason::Question)
+                }
+                restored => restored == Some(RestoredAgentStatus::Blocked(blocked_reason)),
+            };
         if process_exited
             || (matches!(fallback_state, AgentState::Working | AgentState::Blocked)
                 && !confirms_restored)
@@ -1057,8 +1063,8 @@ impl TerminalState {
         if state != AgentState::Idle {
             self.restored_status = None;
         }
-        let full_lifecycle_source =
-            crate::detect::full_lifecycle_hook_authority(&source, &agent_label);
+        let confirms_restored_question =
+            crate::detect::session_report_confirms_restored_question(&source, &agent_label);
         let names_session = session_ref.is_some();
         self.hook_authority = Some(HookAuthority {
             source,
@@ -1070,9 +1076,9 @@ impl TerminalState {
             detail,
         });
         let current_session = self.current_session_identity_for_persistence();
-        if full_lifecycle_source && names_session && previous_session != current_session {
+        if confirms_restored_question && names_session && previous_session != current_session {
             self.drop_restored_question_of_replaced_session();
-        } else if full_lifecycle_source
+        } else if confirms_restored_question
             && self.restored_status == Some(RestoredAgentStatus::UnconfirmedQuestion)
         {
             self.restored_status =
@@ -1956,6 +1962,10 @@ impl TerminalState {
             agent: agent_label,
             session_ref,
         };
+        let confirms_restored_question = crate::detect::session_report_confirms_restored_question(
+            &persisted_session.source,
+            &persisted_session.agent,
+        );
         if self.managed_agent_launch_session.as_ref() == Some(&persisted_session) {
             self.managed_agent_launch_session = None;
         }
@@ -1975,7 +1985,7 @@ impl TerminalState {
         if previous_session.is_some() && previous_session != current_session {
             // Rebinding can expose a cached Working screen; only a fresh report ends acquisition.
             self.agent_process_acquisition_pending = true;
-            if full_lifecycle_source {
+            if confirms_restored_question {
                 self.drop_restored_question_of_replaced_session();
             }
         }
@@ -6702,6 +6712,11 @@ mod tests {
     fn restored_claude_terminal(status: RestoredAgentStatus) -> TerminalState {
         let mut terminal = test_terminal();
         terminal.set_detected_state(Some(Agent::Claude), AgentState::Idle);
+        terminal.set_persisted_agent_session(crate::agent_resume::PersistedAgentSession {
+            source: "herdr:claude".into(),
+            agent: "claude".into(),
+            session_ref: crate::agent_resume::AgentSessionRef::id("claude-session").unwrap(),
+        });
         terminal.restore_agent_status(status, Instant::now());
         terminal
     }
@@ -6779,17 +6794,20 @@ mod tests {
     }
 
     #[test]
-    fn typing_or_a_report_from_elsewhere_settles_an_unconfirmed_question() {
+    fn claudes_idle_report_confirms_an_unconfirmed_question() {
         let mut terminal = restored_claude_terminal(RestoredAgentStatus::UnconfirmedQuestion);
         assert_eq!(terminal.state, AgentState::Blocked);
         assert_eq!(terminal.blocked_reason(), Some(BlockedReason::Interrupted));
 
-        // Claude's hooks are not the full-lifecycle kind, so they confirm nothing.
         report_claude(&mut terminal, AgentState::Idle, 1);
-        assert_eq!(
-            terminal.restored_agent_status(),
-            Some(RestoredAgentStatus::UnconfirmedQuestion)
-        );
+
+        assert_eq!(terminal.state, AgentState::Blocked);
+        assert_eq!(terminal.blocked_reason(), Some(BlockedReason::Question));
+    }
+
+    #[test]
+    fn typing_settles_an_unconfirmed_question() {
+        let mut terminal = restored_claude_terminal(RestoredAgentStatus::UnconfirmedQuestion);
 
         let mutation = terminal
             .clear_restored_agent_status(Instant::now())
@@ -6810,6 +6828,37 @@ mod tests {
         terminal.set_detected_state(Some(Agent::Claude), AgentState::Working);
 
         assert_eq!(terminal.state, AgentState::Working);
+        assert_eq!(terminal.restored_agent_status(), None);
+    }
+
+    #[test]
+    fn a_screen_match_naming_a_question_leaves_an_unconfirmed_one_to_its_session() {
+        let screen_blocked = |terminal: &mut TerminalState, reason| {
+            terminal.set_detected_state_with_blocked_reason_at(
+                Some(Agent::Claude),
+                AgentState::Blocked,
+                false,
+                reason,
+                false,
+                false,
+                Instant::now(),
+            );
+        };
+        // A manifest can name the sentinel, and it can match before the session's report lands.
+        let mut terminal = restored_claude_terminal(RestoredAgentStatus::UnconfirmedQuestion);
+        screen_blocked(&mut terminal, Some(BlockedReason::Question));
+        assert_eq!(
+            terminal.restored_agent_status(),
+            Some(RestoredAgentStatus::UnconfirmedQuestion)
+        );
+        assert_eq!(terminal.blocked_reason(), Some(BlockedReason::Interrupted));
+
+        report_claude(&mut terminal, AgentState::Idle, 1);
+        assert_eq!(terminal.blocked_reason(), Some(BlockedReason::Question));
+
+        // A dialog on screen is no such thing, whichever way the question stands.
+        let mut terminal = restored_claude_terminal(RestoredAgentStatus::UnconfirmedQuestion);
+        screen_blocked(&mut terminal, Some(BlockedReason::Permission));
         assert_eq!(terminal.restored_agent_status(), None);
     }
 

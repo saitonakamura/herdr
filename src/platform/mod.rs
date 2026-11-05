@@ -381,6 +381,10 @@ pub fn launch_server_daemon_command(command: &mut std::process::Command) -> std:
 /// Returns the child's pid, or 0 when launchd started it.
 #[cfg(target_os = "macos")]
 pub fn launch_server_daemon_command(command: &mut std::process::Command) -> std::io::Result<u32> {
+    // A launchd job makes herdr, not the terminal, the TCC subject for every pane (FORK.md).
+    if crate::build_info::is_fork() {
+        return command.spawn().map(|child| child.id());
+    }
     match macos::spawn_launchd_job(command) {
         Ok(_label) => Ok(0),
         Err(err) => {
@@ -777,6 +781,20 @@ impl PrefixInputSource for RealPrefixInputSource {
     fn restore(&mut self) {
         let _ = self.restore.take();
     }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+#[test]
+fn fork_builds_start_the_macos_server_as_a_direct_child() {
+    let mut command = std::process::Command::new("/usr/bin/true");
+    let pid = launch_server_daemon_command(&mut command).unwrap();
+    // 0 would mean launchd started it.
+    assert_ne!(pid, 0);
+    let mut status = 0;
+    assert_eq!(
+        unsafe { libc::waitpid(pid as libc::pid_t, &mut status, 0) },
+        pid as libc::pid_t
+    );
 }
 
 #[cfg(all(test, any(unix, windows)))]

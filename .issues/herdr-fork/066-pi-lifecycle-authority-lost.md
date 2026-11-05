@@ -35,7 +35,109 @@ bridge's own comment, so neither side sees a failure. `pi.toml` has no rule that
 matches the spinner, so the fallback is `idle`. While a pane misreads this way,
 herdr treats it as finished and may deliver queued messages mid-turn.
 
-## What isn't known
+## Cause (2026-11-05)
+
+**A restart doesn't remove authority. A pi pane loses it for good if, during startup,
+one process probe reads the pane as `claude` and the session claim and first state
+report land on either side of that probe.** After that, herdr drops every report from
+that session and still answers `ok`, and the bridge never claims again. Evidence and
+what's still inferred are below.
+
+### Is it restart-related?
+
+Not restart-caused, but restart-exposed. Restored panes keep authority on a plain
+restart (see Runtime results). The window opens on any launch, before authority exists:
+`wN:pZ` flipped on a fresh launch. A pane with authority and a stable process group
+isn't exposed, because probes are skipped (`src/pane.rs:704`; case H below). A restart
+puts every pi pane through startup at once and under load, and the one stuck pane seen
+was in that situation, so a cutover is the likeliest place to hit it. That's one
+observed case, so no rate is claimed.
+
+### The mechanism, reproduced on a real server
+
+Installed `0.9.5+fork.2`, isolated server, real API, with a stand-in job: a bash leader,
+a process with argv0 `pi` and one with argv0 `claude`, so killing `pi` makes the next
+probe read `claude`. Reports used the same two API calls as `scripts/herdr-bridge`.
+
+| case | order | authority at the end |
+| --- | --- | --- |
+| control | Pi, claim, state | kept |
+| **B** | **Pi, claim, flip to Claude, first state, back to Pi, more states** | **none, for good** |
+| C | Pi, flip, claim, state, back to Pi | recovers on return to Pi |
+| F | Claude first, claim, state, then Pi | recovers |
+| G | Claude first, then Pi, claim, state | established |
+| H | Pi, claim, state, then `pi` killed | kept; probe skipped |
+| R1 | B, then the same session claimed again | **recovers** |
+| R2 | B, then a new session claimed | recovers |
+
+Case B matches the bug: `agent` is `pi`, `rule` is none, `fallback_reason` is
+`default_known_agent_idle_fallback`. `TerminalState` tests of the same orders in a
+throwaway worktree agree, and also get stuck when the claim hasn't landed at all
+before the state report.
+
+The code path, at `b358c4e0`:
+
+1. With `claude` detected, `process_present` is false, so `route_full_lifecycle_hook_report`
+   creates a suppression entry with reason `ProcessExit` and no `replacement_session_ref`
+   (`src/terminal/state.rs:1286`), and returns `Ignore`.
+2. When Pi is detected again, `clear_full_lifecycle_hook_suppression_for_detected_agent`
+   keeps any `ProcessExit` entry with no replacement (`state.rs:1456`).
+3. Every later state report now fails `!contains_key(source)` (`state.rs:1249`), so it
+   only overwrites the pending report and gets ignored. The API still answers `ok`.
+4. Only a session report with a recognized start source clears the entry, and the bridge
+   sends one per session id (`scripts/herdr-bridge:384`). `/reload` keeps both the session
+   id and the bridge, so nothing sends another (R1 shows one would be enough).
+
+So the generation gate does what it was built for. Here it reads a live pi as an exited
+one, and the one-shot claim makes that permanent.
+
+### Is that what happened to `wN:p9`? Inferred, strongly
+
+`~/.config/herdr/sessions/personal/herdr-server.log`, pane 13:
+
+```text
+10:06:16 agent changed previous_agent=None         agent=Some(Pi)     process=pi     pgid=13988
+10:06:22 agent changed previous_agent=None         agent=Some(Claude) process=claude pgid=13988
+10:06:27 agent changed previous_agent=Some(Claude) agent=Some(Pi)     process=pi     pgid=13988
+```
+
+- In the reproduction, a second `None -> Pi` line follows when authority is acquired. The
+  healthy live panes have it. `wN:pZ` has it straight after its flip. Pane 13 doesn't, and
+  neither does case B.
+- Not provable: successful reports aren't logged, so `wN:p9`'s actual claim and state
+  timing is unknown, and the pane has since closed. Case B needs the claim before the
+  flip and the state after, which are normally milliseconds apart in one bridge call. The
+  claim-less variant is the other candidate. Both end the same way.
+
+### Still unknown: why pi is unidentifiable for that one probe
+
+`process_priority` scores pi (argv0 differs from `node`) 3 and `claude` 2, so `claude` only
+wins when pi's argv0 can't be read as `pi`. The flip lasts one `PROCESS_RECHECK_IDENTIFIED`
+(5s, `src/pane.rs:428`) in both live cases. In an unloaded launch pi had its title about
+800 ms before `claude` appeared, so startup order alone doesn't explain it. A failed
+`process_argv0_name` read under load (`src/platform/macos.rs:563`) is a candidate, not
+measured. Logging the job when `claude` is detected under a `pi-host` leader would settle
+it. A fix doesn't need this answer.
+
+### What a fix could be (not decided, nothing changed)
+
+- **Smallest:** make the bridge claim again rather than once per session, since R1 shows
+  that recovers the pane. This is a dotfiles change.
+- **At the source:** in `state.rs:1456`, when the pending report's session matches the
+  persisted session, treat the return to Pi as validating it, as case C does. A dead
+  process's late report must stay rejected.
+- **Either way:** stop answering `ok` for a dropped report (`src/app/api/panes.rs:1743`),
+  and have the pi extension read the reply rather than any bytes
+  (`docker/pi/herdr-agent-state.ts:59`), or the next variant is just as silent.
+
+A stuck pane can be recovered today by a new session id (`/new` or `/resume` to another
+session), which is the R2 path. A pane restart should do the same, untested.
+
+The upstream sync (`fork/sync-upstream-ee5bfb50`, at this writing) touches neither
+`src/terminal/state.rs` nor this probe logic: its `src/detect/mod.rs` change is Hermes
+identification, `src/pane.rs` a test helper, and `src/terminal/runtime.rs` two lines.
+
+## What wasn't known at filing
 
 Not proven: nothing yet shows which of these lost `wN:p9`'s authority.
 

@@ -167,6 +167,7 @@ impl App {
             self.next_agent_manifest_update_check,
             self.agent_metadata_deadline,
             self.pending_agent_resume_deadline,
+            self.pending_host_appearance_deadline,
             self.state.restored_question_delivery_retry_at,
             self.session_save_deadline,
             self.session_pane_restart_deadline(),

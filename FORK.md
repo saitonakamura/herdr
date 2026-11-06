@@ -104,6 +104,17 @@ herdr runs every agent pane, including the one building it.
 - Detection manifest work: the hot-reload loop in `AGENTS.md` still applies, but
   only against a throwaway session, never the live one.
 
+## Server start on macOS
+
+Fork builds start the server directly, as a detached child, instead of through
+upstream's one-shot launchd job (herdr#4920, `launch_server_daemon_command`).
+Under the job, macOS treats the herdr binary as responsible for every pane instead
+of the terminal, so panes lose the terminal's privacy grants: a cold `op` call asks
+for the 1Password container again. Measured 2026-11-05 on the primary mac, along
+with what the job is for: a directly started server survived quitting a kitty
+opened through LaunchServices. A terminal that does kill its server on quit, as
+Ghostty was reported to, would want the job back.
+
 ## Sidebar pane
 
 `[ui.sidebar] pane = [argv]` in `config.fork.toml` makes the server run that

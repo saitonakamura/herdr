@@ -1,7 +1,7 @@
 ---
 id: herdr-fork-primary-mac-seeded-worktree-create
 title: "Primary mac: turn on seeded worktree create in the work lane"
-status: blocked
+status: open
 labels:
   - wayfinder:task
 parent: herdr-fork-map

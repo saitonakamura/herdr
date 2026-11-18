@@ -128,6 +128,16 @@ also answers panes opened during the hold, so the sync dropped this ticket's
 client hold, its replay order and their tests. The server test
 `client_shell_flip_background_before_report_keeps_the_explicit_appearance` stays.
 
+**Live recheck on upstream's hold, 2026-11-06 and 2026-11-18.** Dogfood build of `a0d39c9d`,
+the merge of that sync, in a throwaway session in its own kitty window, with the
+probe from [043's measurements](./assets/043-flip-chain-measurements.md#the-probe)
+run with `--2031`, and an idle Claude 2.1.319 pane (`theme: "auto"`) started before
+the flips. There were four real flips. In every one, the probe's first `OSC 11`
+answer after the report was already the new side, 0 to 3 ms later, so the stale
+window was 0. Over the last two flips the Claude pane showed 14 new-side markers
+and 0 old-side ones, 1, 3 and 6 s after each flip. The first two flips have no
+Claude count, because the counting pattern was wrong. Appearance was left on Auto.
+
 ## Parent
 
 [000-map](./000-map.md)

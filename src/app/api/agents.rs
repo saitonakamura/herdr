@@ -489,6 +489,7 @@ impl App {
                 "fallback_reason": null,
                 "warning": null,
                 "evaluated_rules": [],
+                "program_status": program_status_json(&pane.program_status()),
             });
             return encode_success(id, ResponseResult::AgentExplain { explain });
         }
@@ -514,7 +515,8 @@ impl App {
                 osc_progress: &osc_progress,
             },
         );
-        let value = crate::detect::manifest::explain_to_json_value(&explain);
+        let mut value = crate::detect::manifest::explain_to_json_value(&explain);
+        value["program_status"] = program_status_json(&pane.program_status());
 
         encode_success(id, ResponseResult::AgentExplain { explain: value })
     }
@@ -584,6 +586,26 @@ fn agent_not_ready(id: String, target: &str) -> String {
         "agent_not_ready",
         format!("agent {target} is not an active named agent"),
     )
+}
+
+/// The pane's OSC 7501 records as reported, the root record with a null id.
+fn program_status_json(
+    records: &[crate::pane::program_status::ProgramStatusRecord],
+) -> serde_json::Value {
+    records
+        .iter()
+        .map(|record| {
+            serde_json::json!({
+                "id": (!record.id.is_empty()).then_some(&record.id),
+                "state": record.state.label(),
+                "kind": record.kind.map(|kind| kind.label()),
+                "progress": record.progress,
+                "app": record.app,
+                "title": record.title,
+                "msg": record.msg,
+            })
+        })
+        .collect()
 }
 
 fn agent_not_found(id: String, target: &str) -> String {

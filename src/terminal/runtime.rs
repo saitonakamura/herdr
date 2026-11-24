@@ -384,6 +384,10 @@ impl TerminalRuntime {
         self.0.agent_osc_progress()
     }
 
+    pub(crate) fn program_status(&self) -> Vec<crate::pane::program_status::ProgramStatusRecord> {
+        self.0.program_status()
+    }
+
     pub(crate) fn screen_snapshot(
         &self,
         lines: Option<usize>,

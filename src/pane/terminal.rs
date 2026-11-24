@@ -35,8 +35,9 @@ use super::{
         current_transient_default_color_owner, parse_reported_cwd,
         restore_host_terminal_theme_if_needed, write_host_terminal_theme_selective,
         AgentOscStateTracker, DefaultColorEvent, DefaultColorEventTracker, DefaultColorOscTracker,
-        DefaultColorQuery, DefaultColorTrackedEvent, OscDebugTracker,
+        DefaultColorQuery, DefaultColorTrackedEvent, OscDebugTracker, ProgramStatusReply,
     },
+    program_status::ProgramStatusRecord,
     xtgettcap::{C1XtgettcapQueryTracker, C1XtgettcapResponse},
 };
 
@@ -643,6 +644,10 @@ impl PaneTerminal {
 
     pub fn agent_osc_progress(&self) -> String {
         self.ghostty.agent_osc_progress()
+    }
+
+    pub(crate) fn program_status(&self) -> Vec<ProgramStatusRecord> {
+        self.ghostty.program_status()
     }
 
     /// Clears retained OSC title/progress evidence on foreground agent change.
@@ -1363,6 +1368,14 @@ impl GhosttyPaneTerminal {
             .unwrap_or_default()
     }
 
+    /// Returns the OSC 7501 records the pane's program has reported.
+    pub(crate) fn program_status(&self) -> Vec<ProgramStatusRecord> {
+        self.core
+            .lock()
+            .map(|core| core.agent_osc_state.program_status())
+            .unwrap_or_default()
+    }
+
     /// Clears retained OSC title/progress evidence when the pane's foreground
     /// agent changes, so a new agent process starts from a blank OSC slate.
     pub fn clear_agent_osc_state(&self) {
@@ -1418,6 +1431,7 @@ impl GhosttyPaneTerminal {
             );
         }
         let terminal_title_changed = core.agent_osc_state.observe(bytes);
+        let program_status_replies = core.agent_osc_state.drain_program_status_replies();
 
         core.kitty_keyboard.observe(bytes);
         let mut terminal_responses = Vec::new();
@@ -1438,6 +1452,7 @@ impl GhosttyPaneTerminal {
             default_color_events,
             in_progress_default_color_event,
             c1_xtgettcap_responses,
+            program_status_replies,
             &mut terminal_responses,
         );
         let terminal_bells = core.terminal.take_bell_count();
@@ -1516,6 +1531,7 @@ impl GhosttyPaneTerminal {
         default_color_events: Vec<DefaultColorTrackedEvent>,
         in_progress_default_color_event: Option<DefaultColorEvent>,
         c1_xtgettcap_responses: Vec<C1XtgettcapResponse>,
+        program_status_replies: Vec<ProgramStatusReply>,
         terminal_responses: &mut Vec<Bytes>,
     ) {
         // Only legacy C1 replies need merging; ordinary XTGETTCAP remains native.
@@ -1526,6 +1542,11 @@ impl GhosttyPaneTerminal {
                 c1_xtgettcap_responses
                     .into_iter()
                     .map(OrderedColorOrC1Event::C1),
+            )
+            .chain(
+                program_status_replies
+                    .into_iter()
+                    .map(OrderedColorOrC1Event::ProgramStatus),
             )
             .collect();
         events.sort_by_key(OrderedColorOrC1Event::end_offset);
@@ -1569,6 +1590,11 @@ impl GhosttyPaneTerminal {
                     if !response.suppress_native {
                         terminal_responses.push(response.bytes);
                     }
+                }
+                OrderedColorOrC1Event::ProgramStatus(reply) => {
+                    // libghostty ignores OSC 7501, so these replies are to earlier queries.
+                    terminal_responses.extend(libghostty_responses);
+                    terminal_responses.push(reply.bytes);
                 }
             }
         }
@@ -3480,6 +3506,7 @@ fn ghostty_cell_style(
 enum OrderedColorOrC1Event {
     Color(DefaultColorTrackedEvent),
     C1(C1XtgettcapResponse),
+    ProgramStatus(ProgramStatusReply),
 }
 
 impl OrderedColorOrC1Event {
@@ -3487,6 +3514,7 @@ impl OrderedColorOrC1Event {
         match self {
             Self::Color(event) => event.end_offset,
             Self::C1(response) => response.end_offset,
+            Self::ProgramStatus(reply) => reply.end_offset,
         }
     }
 }
@@ -6902,6 +6930,118 @@ mod tests {
         let result = pane.process_pty_bytes(pane_id, 0, b"\\", &tx);
         assert!(result.terminal_responses.is_empty());
         assert!(rx.try_recv().is_err());
+    }
+
+    const PROGRAM_STATUS_REPLY: &str =
+        "\x1b]7501;?:states=idle,working,done,blocked,error:kinds=permission,question,auth";
+
+    fn program_status_test_pane() -> (GhosttyPaneTerminal, mpsc::Sender<Bytes>) {
+        let (tx, _rx) = mpsc::channel(4);
+        let terminal = crate::ghostty::Terminal::new(20, 5, 0).unwrap();
+        (GhosttyPaneTerminal::new(terminal, tx.clone()).unwrap(), tx)
+    }
+
+    #[test]
+    fn process_pty_bytes_answers_program_status_query_with_its_terminator() {
+        let (pane, tx) = program_status_test_pane();
+        let pane_id = PaneId::from_raw(1);
+
+        let st = pane.process_pty_bytes(pane_id, 0, b"\x1b]7501;?\x1b\\", &tx);
+        assert_eq!(
+            st.terminal_responses,
+            vec![Bytes::from(format!("{PROGRAM_STATUS_REPLY}\x1b\\"))]
+        );
+
+        let bel = pane.process_pty_bytes(pane_id, 0, b"\x1b]7501;?\x07", &tx);
+        assert_eq!(
+            bel.terminal_responses,
+            vec![Bytes::from(format!("{PROGRAM_STATUS_REPLY}\x07"))]
+        );
+
+        // A report is never answered.
+        let report = pane.process_pty_bytes(pane_id, 0, b"\x1b]7501;state=working\x07", &tx);
+        assert!(report.terminal_responses.is_empty());
+        assert_eq!(pane.program_status().len(), 1);
+    }
+
+    #[test]
+    fn process_pty_bytes_orders_program_status_reply_before_following_device_attributes() {
+        let (pane, tx) = program_status_test_pane();
+
+        // One write: kitty keyboard query, program status query, then DA.
+        let result = pane.process_pty_bytes(
+            PaneId::from_raw(1),
+            0,
+            b"\x1b[?u\x1b]7501;?\x1b\\\x1b[c",
+            &tx,
+        );
+
+        let replies: Vec<_> = result
+            .terminal_responses
+            .iter()
+            .map(|reply| String::from_utf8_lossy(reply).into_owned())
+            .collect();
+        let status = replies
+            .iter()
+            .position(|reply| reply.starts_with("\x1b]7501;?"))
+            .unwrap();
+        let attributes = replies
+            .iter()
+            .position(|reply| reply.starts_with("\x1b[?") && reply.ends_with('c'))
+            .unwrap();
+        assert!(status < attributes, "{replies:?}");
+        assert_eq!(replies[status], format!("{PROGRAM_STATUS_REPLY}\x1b\\"));
+    }
+
+    #[test]
+    fn process_pty_bytes_orders_device_attributes_before_following_program_status_reply() {
+        let (pane, tx) = program_status_test_pane();
+
+        let result = pane.process_pty_bytes(PaneId::from_raw(1), 0, b"\x1b[c\x1b]7501;?\x07", &tx);
+
+        assert_eq!(result.terminal_responses.len(), 2);
+        assert!(result.terminal_responses[0].ends_with(b"c"));
+        assert_eq!(
+            result.terminal_responses[1],
+            Bytes::from(format!("{PROGRAM_STATUS_REPLY}\x07"))
+        );
+    }
+
+    #[test]
+    fn process_pty_bytes_answers_program_status_query_split_across_chunks() {
+        let (pane, tx) = program_status_test_pane();
+        let pane_id = PaneId::from_raw(1);
+
+        let first = pane.process_pty_bytes(pane_id, 0, b"\x1b]75", &tx);
+        assert!(first.terminal_responses.is_empty());
+        let second = pane.process_pty_bytes(pane_id, 0, b"01;?\x1b", &tx);
+        assert!(second.terminal_responses.is_empty());
+        let third = pane.process_pty_bytes(pane_id, 0, b"\\\x1b[c", &tx);
+
+        assert_eq!(third.terminal_responses.len(), 2);
+        assert_eq!(
+            third.terminal_responses[0],
+            Bytes::from(format!("{PROGRAM_STATUS_REPLY}\x1b\\"))
+        );
+        assert!(third.terminal_responses[1].ends_with(b"c"));
+    }
+
+    #[test]
+    fn clearing_agent_osc_state_drops_live_program_status_records() {
+        let (pane, tx) = program_status_test_pane();
+        pane.process_pty_bytes(
+            PaneId::from_raw(1),
+            0,
+            b"\x1b]7501;state=working\x07\x1b]7501;state=done:id=job\x07",
+            &tx,
+        );
+        assert_eq!(pane.program_status().len(), 2);
+
+        pane.clear_agent_osc_state();
+
+        let records = pane.program_status();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].id, "job");
     }
 
     #[test]

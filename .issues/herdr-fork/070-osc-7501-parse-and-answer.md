@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-osc-7501-parse-and-answer
 title: Answer the OSC 7501 support query and keep each pane's program-status records
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee: saitonakamura
-claimed_by:
+claimed_by: macos/w1:p2B/c3c4ded8-3c27-491b-83ae-b5b5ca88b9dd
 ---
 
 ## Question

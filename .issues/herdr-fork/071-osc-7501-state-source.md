@@ -1,14 +1,14 @@
 ---
 id: herdr-fork-osc-7501-state-source
 title: OSC 7501 records decide an agent pane's lifecycle state
-status: open
+status: in-progress
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
   - herdr-fork-osc-7501-parse-and-answer
 assignee: saitonakamura
-claimed_by:
+claimed_by: macos/w1:p2D/180ecbde-335b-428c-9657-1fc1b63fd371
 ---
 
 ## Question

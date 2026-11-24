@@ -43,6 +43,9 @@ pub enum BlockedReason {
     /// A turn or prompt a restart cut off; the user decides whether it continues. Only a
     /// restore sets it.
     Interrupted,
+    /// A login or credential the agent cannot go on without. Appended last so
+    /// existing serialized tags keep their values.
+    Auth,
 }
 
 /// Screen-derived agent state plus confidence metadata used for source arbitration.

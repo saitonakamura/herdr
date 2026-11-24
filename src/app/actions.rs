@@ -1412,6 +1412,16 @@ impl AppState {
                 })
                 .into_iter()
                 .collect(),
+            AppEvent::ProgramStatusReported {
+                pane_id,
+                status,
+                observed_at,
+            } => self
+                .update_terminal_state(pane_id, |terminal| {
+                    terminal.set_program_status_at(status, observed_at)
+                })
+                .into_iter()
+                .collect(),
             AppEvent::HookStateReported {
                 pane_id,
                 source,

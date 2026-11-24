@@ -129,6 +129,7 @@ fn blocked_word(reason: Option<BlockedReason>) -> &'static str {
         Some(BlockedReason::Permission) => "permission",
         Some(BlockedReason::Form) => "form",
         Some(BlockedReason::Interrupted) => "interrupted by restart",
+        Some(BlockedReason::Auth) => "login",
         Some(BlockedReason::Unknown) | None => "blocked",
     }
 }

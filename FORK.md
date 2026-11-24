@@ -307,6 +307,63 @@ Ctrl+click focuses its pane, through the same `pane.link.resolve` and
 - **Colours** are the sidebar's meanings, and `[sidebar.colors]` overrides apply.
 - **Off:** `[ui] agent_references = false` in `config.fork.toml`.
 
+## Agent state authority
+
+A pane's agent state is decided by the first of these that has something to say
+(`src/terminal/program_status.rs`, `effective_state_and_blocked_reason`):
+
+1. **A status saved before a restart**, until the agent leaves its prompt.
+2. **The program's own OSC 7501 root record** (herdr-fork 070, 071). It comes
+   down the pane's PTY, so it needs no claim and no bridge: `working`, `blocked`
+   with `permission`, `question` or `auth`, and `done`, `idle` and `error`, which
+   all read idle (an unseen idle is herdr's done; an error keeps its `msg`).
+   It counts only while an agent holds the pane.
+3. **Hook reports** (`pane.report_agent`, the pi bridge).
+4. **Screen rules.**
+
+While a record stands, hooks are a layer on top of it, for what the protocol
+cannot say. Their plain `working` and `idle` no longer decide anything, with one
+exception, the second point:
+
+- **How the turn ended.** A `blocked`/`question` report (the `⏳` sentinel) or a
+  `working` + `background` one (the `🔄` sentinel, a running sub-agent, pi's
+  `background`) refines a record that is `done` or `idle`, if it was made since
+  the record's turn began.
+- **A record left `working` after the turn.** Claude Code keeps its root record
+  `working` while a background shell runs. A hook report that ends a turn (idle
+  included), made since that turn began, stands over it. Without this a parked
+  dev server would hold the pane at working. Codex, which has no state hooks,
+  does read working until its background terminal ends.
+- **A dialog the agent's host raised.** A hook `blocked` newer than the record's
+  last change refines a `working` record (loom's gate approvals).
+- **Form.** The protocol has one kind, `question`, for a question in prose and
+  for a dialog that asks. It reads `form` when a hook names a form or permission
+  dialog, or the screen rule names a form; `agent prompt` must not type into one.
+- A record `blocked` with no kind takes the hook's reason, then the screen's.
+
+Session ids, resume commands, metadata and declared waits are untouched.
+
+What ends a record: its own `clear`, a terminal reset, the agent's process going
+away, or another agent taking the pane. `done` and `error` stay listed in
+`agent explain` after that, but decide nothing for the next program. Records are
+not saved and do not cross a live handoff, and programs do not re-send, so a
+restored or handed-off pane runs on hooks and screen rules until its program
+next reports. `agent explain` says which source decided, as `lifecycle.source`.
+
+Once a program has reported, its OSC 9;4 progress is no longer read as a status,
+as the protocol asks. Claude Code also stops putting its spinner in the terminal
+title once the query is answered, so `claude.toml`'s `osc_title_working` and
+`osc_title_idle` only ever match a Claude that did not get the answer (an older
+release, or a reply lost to a wrapper). They stay for that case and for nothing else.
+
+**`auth` is a blocked reason upstream does not have.** A 7501 `kind=auth` reads
+`blocked` with `blocked_reason: "auth"`; the sidebar says "login". The variant is
+appended to `detect::BlockedReason` and `AgentBlockedReason`, which a generation-1
+codec reaches through pane info. That knowingly breaks `AGENTS.md`'s
+append-closed rule: a stock client attached to a fork server cannot decode a pane
+blocked on `auth`. The fork accepts that (2026-11-24); its own clients and the
+sidebar program know the value, and saved sessions carry it.
+
 ## Dogfooding
 
 On the primary mac, real work in the fork runs in a side session named `fork`.

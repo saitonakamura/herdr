@@ -105,7 +105,8 @@ impl Tone {
     fn for_blocked(reason: Option<BlockedReason>) -> Tone {
         match reason {
             Some(BlockedReason::Question) => Tone::BlockedQuestion,
-            Some(BlockedReason::Permission) => Tone::BlockedPermission,
+            // A login is the same kind of ask as a permission: only the user can give it.
+            Some(BlockedReason::Permission | BlockedReason::Auth) => Tone::BlockedPermission,
             Some(BlockedReason::Form) => Tone::BlockedForm,
             Some(BlockedReason::Interrupted) => Tone::BlockedInterrupted,
             None => Tone::Blocked,

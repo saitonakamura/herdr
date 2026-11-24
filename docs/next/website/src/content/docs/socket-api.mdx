@@ -114,7 +114,7 @@ Raw socket method names use dot notation:
 | Integrations | `integration.install`, `integration.uninstall` |
 | Plugins | `plugin.link`, `plugin.list`, `plugin.unlink`, `plugin.enable`, `plugin.disable`, `plugin.action.list`, `plugin.action.invoke`, `plugin.log.list`, `plugin.pane.open`, `plugin.pane.focus`, `plugin.pane.close` |
 
-`agent.wait` is server-owned and event-driven. It pins the resolved pane occupant so a replacement cannot satisfy the wait. `agent.prompt` accepts an optional `wait` object with `until` and `timeout_ms`; this submits the prompt and starts the wait in one request, avoiding a race between separate calls. If the resolved agent is already `blocked`, `agent.prompt` returns `agent_blocked_permission`, `agent_blocked_form` or `agent_blocked` without sending input or starting the wait. An agent blocked with `blocked_reason` `question` takes the prompt when its composer is empty, and returns `agent_composer_not_empty` or `agent_composer_not_found` otherwise.
+`agent.wait` is server-owned and event-driven. It pins the resolved pane occupant so a replacement cannot satisfy the wait. `agent.prompt` accepts an optional `wait` object with `until` and `timeout_ms`; this submits the prompt and starts the wait in one request, avoiding a race between separate calls. If the resolved agent is already `blocked`, `agent.prompt` returns `agent_blocked_permission`, `agent_blocked_form`, `agent_blocked_auth` or `agent_blocked` without sending input or starting the wait. An agent blocked with `blocked_reason` `question` takes the prompt when its composer is empty, and returns `agent_composer_not_empty` or `agent_composer_not_found` otherwise.
 
 The session pane is a fork-only terminal that belongs to no workspace or tab. The server runs the program configured as `[ui.sidebar] pane` once per server, restarts it with backoff when it exits, and leaves it out of `pane.list`, `agent.list`, `session.snapshot` and the saved session. Its process gets `HERDR_SOCKET_PATH` and `HERDR_SESSION` but no `HERDR_PANE_ID`. Clients that support it draw it in place of their expanded and collapsed sidebar; others keep the native sidebar. `session_pane.get` reports `status` (`off`, `running`, `restarting` or `failed`), `argv`, `focused`, its size and widths, and `restarts`. `session_pane.focus` gives the program keyboard focus, which every client shares like pane focus, and returns `session_pane_not_running` when it is down; `session_pane.unfocus` hands focus back to the focused pane. `session_pane.set_width` sets the expanded `width` every client gives the pane, clamped by the sidebar bounds and kept across server restarts, and returns the result like `session_pane.get`; a `null` width goes back to `ui.sidebar_width`. Clients call it when the divider beside the expanded pane is dragged, and on a double-click with `null`. Herdr never intercepts Esc for it. `workspace.focus`, `tab.focus`, `pane.focus`, `pane.focus_direction`, `agent.focus` and `plugin.pane.focus` also take focus back, so a program can focus a pane and leave in one call. The program sees resizes as SIGWINCH, mouse input as ordinary terminal mouse reports, and focus changes as focus reports when it enables them.
 
@@ -684,7 +684,8 @@ rollups. Report display-only values separately through metadata.
 
 With `"state": "blocked"`, an optional `blocked_reason` says what the agent
 waits on: `question` (asked in prose, answered in the composer), `permission`
-(a tool permission dialog) or `form` (a form or selection dialog). Agent and
+(a tool permission dialog), `form` (a form or selection dialog) or `auth` (a
+login or credential, which a program can also report itself over OSC 7501). Agent and
 pane info and `pane.agent_status_changed` events carry it as `blocked_reason`
 while the agent is blocked for that reason; a blocked agent without one omits
 it. They can also carry `interrupted`, which only a server restart sets, for a
@@ -983,7 +984,7 @@ Fields such as `last_check_unix`, `last_result`, `active_version`, `cached_remot
 }
 ```
 
-The response contains the same explain object printed by `herdr agent explain --json`, including the final state, manifest source and version, matched rule, evaluated rule evidence, skip-state reason, idle fallback reason, and `screen_detection_skip_reason` when a full lifecycle hook authority makes screen rules non-authoritative. It also carries `program_status`, the pane's OSC 7501 records as an array of `{ id, state, kind, progress, app, title, msg }`, where the root record has a null `id`.
+The response contains the same explain object printed by `herdr agent explain --json`, including the final state, manifest source and version, matched rule, evaluated rule evidence, skip-state reason, idle fallback reason, and `screen_detection_skip_reason` when a full lifecycle hook authority makes screen rules non-authoritative. It also carries `program_status`, the pane's OSC 7501 records as an array of `{ id, state, kind, progress, app, title, msg }`, where the root record has a null `id`. `lifecycle` is the state as decided: `{ state, blocked_reason, source, message }`, where `source` is `program_status`, `program_status+hook`, `hook`, `screen` or `restored`, and `message` is the root record's `msg`.
 
 Clients need a running server that supports `agent.explain`; after upgrading Herdr, restart or live-handoff the server before relying on this method.
 

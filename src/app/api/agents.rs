@@ -246,6 +246,16 @@ impl App {
                         ),
                     ));
                 }
+                Some(crate::detect::BlockedReason::Auth) => {
+                    return Err(encode_error(
+                        id,
+                        "agent_blocked_auth",
+                        format!(
+                            "agent {} is blocked on a login and requires interactive input",
+                            params.target
+                        ),
+                    ));
+                }
                 None => {
                     return Err(encode_error(
                         id,
@@ -490,6 +500,7 @@ impl App {
                 "warning": null,
                 "evaluated_rules": [],
                 "program_status": program_status_json(&pane.program_status()),
+                "lifecycle": lifecycle_json(terminal),
             });
             return encode_success(id, ResponseResult::AgentExplain { explain });
         }
@@ -517,6 +528,7 @@ impl App {
         );
         let mut value = crate::detect::manifest::explain_to_json_value(&explain);
         value["program_status"] = program_status_json(&pane.program_status());
+        value["lifecycle"] = lifecycle_json(terminal);
 
         encode_success(id, ResponseResult::AgentExplain { explain: value })
     }
@@ -586,6 +598,18 @@ fn agent_not_ready(id: String, target: &str) -> String {
         "agent_not_ready",
         format!("agent {target} is not an active named agent"),
     )
+}
+
+/// The pane's state as decided, and which source decided it.
+fn lifecycle_json(terminal: &crate::terminal::TerminalState) -> serde_json::Value {
+    serde_json::json!({
+        "state": crate::detect::manifest::agent_state_label(terminal.state),
+        "blocked_reason": terminal
+            .blocked_reason()
+            .map(crate::api::schema::AgentBlockedReason::from),
+        "source": terminal.lifecycle_source().label(),
+        "message": terminal.program_status_message(),
+    })
 }
 
 /// The pane's OSC 7501 records as reported, the root record with a null id.

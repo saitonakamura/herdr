@@ -14,6 +14,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::layout::PaneId;
 use crate::protocol::CellData;
+use crate::terminal::ProgramStatusReport;
 
 #[cfg(test)]
 mod migration_tests;
@@ -23,6 +24,7 @@ mod windows_recent_fallback;
 #[cfg(test)]
 use super::cursor::CURSOR_POSITION_SETTLE;
 use super::cursor::{CursorPositionSettleState, DecscusrTracker};
+
 use super::{
     input::{
         configure_key_encoder, ghostty_key_event_from_terminal_key,
@@ -167,6 +169,8 @@ pub(crate) struct ProcessBytesResult {
     pub request_render: bool,
     pub render_delay: Option<Duration>,
     pub terminal_title_changed: bool,
+    /// The root OSC 7501 record was reported, cleared or dropped in this chunk.
+    pub program_status_changed: bool,
     pub terminal_bells: u16,
     pub clipboard_writes: Vec<Vec<u8>>,
     pub reported_cwd: Option<std::path::PathBuf>,
@@ -232,11 +236,15 @@ pub(crate) struct GhosttyPaneCore {
 
 pub(crate) struct PaneTerminal {
     pub(crate) ghostty: GhosttyPaneTerminal,
+    program_status_changed: tokio::sync::Notify,
 }
 
 impl PaneTerminal {
     pub(crate) fn new(ghostty: GhosttyPaneTerminal) -> Self {
-        Self { ghostty }
+        Self {
+            ghostty,
+            program_status_changed: tokio::sync::Notify::new(),
+        }
     }
 
     pub fn process_pty_bytes(
@@ -246,8 +254,13 @@ impl PaneTerminal {
         bytes: &[u8],
         response_writer: &mpsc::Sender<Bytes>,
     ) -> ProcessBytesResult {
-        self.ghostty
-            .process_pty_bytes(pane_id, shell_pid, bytes, response_writer)
+        let result = self
+            .ghostty
+            .process_pty_bytes(pane_id, shell_pid, bytes, response_writer);
+        if result.program_status_changed {
+            self.program_status_changed.notify_one();
+        }
+        result
     }
 
     pub fn resize(
@@ -650,9 +663,20 @@ impl PaneTerminal {
         self.ghostty.program_status()
     }
 
+    /// The root OSC 7501 record as a lifecycle, with the revision it was read at.
+    pub(crate) fn program_status_root(&self) -> (u64, Option<ProgramStatusReport>) {
+        self.ghostty.program_status_root()
+    }
+
+    /// Resolves once the root OSC 7501 record may have changed; one waiter only.
+    pub(crate) async fn program_status_changed(&self) {
+        self.program_status_changed.notified().await;
+    }
+
     /// Clears retained OSC title/progress evidence on foreground agent change.
     pub fn clear_agent_osc_state(&self) {
-        self.ghostty.clear_agent_osc_state()
+        self.ghostty.clear_agent_osc_state();
+        self.program_status_changed.notify_one();
     }
 
     pub fn keyboard_protocol(
@@ -1376,6 +1400,18 @@ impl GhosttyPaneTerminal {
             .unwrap_or_default()
     }
 
+    pub(crate) fn program_status_root(&self) -> (u64, Option<ProgramStatusReport>) {
+        self.core
+            .lock()
+            .map(|core| {
+                (
+                    core.agent_osc_state.program_status_root_revision(),
+                    core.agent_osc_state.program_status_root(),
+                )
+            })
+            .unwrap_or_default()
+    }
+
     /// Clears retained OSC title/progress evidence when the pane's foreground
     /// agent changes, so a new agent process starts from a blank OSC slate.
     pub fn clear_agent_osc_state(&self) {
@@ -1398,6 +1434,7 @@ impl GhosttyPaneTerminal {
                 request_render: false,
                 render_delay: None,
                 terminal_title_changed: false,
+                program_status_changed: false,
                 terminal_bells: 0,
                 clipboard_writes: Vec::new(),
                 reported_cwd: None,
@@ -1430,7 +1467,10 @@ impl GhosttyPaneTerminal {
                 "agent OSC evidence observed"
             );
         }
+        let program_status_revision = core.agent_osc_state.program_status_root_revision();
         let terminal_title_changed = core.agent_osc_state.observe(bytes);
+        let program_status_changed =
+            core.agent_osc_state.program_status_root_revision() != program_status_revision;
         let program_status_replies = core.agent_osc_state.drain_program_status_replies();
 
         core.kitty_keyboard.observe(bytes);
@@ -1517,6 +1557,7 @@ impl GhosttyPaneTerminal {
             request_render,
             render_delay,
             terminal_title_changed,
+            program_status_changed,
             terminal_bells,
             clipboard_writes,
             reported_cwd,
@@ -7024,6 +7065,31 @@ mod tests {
             Bytes::from(format!("{PROGRAM_STATUS_REPLY}\x1b\\"))
         );
         assert!(third.terminal_responses[1].ends_with(b"c"));
+    }
+
+    #[test]
+    fn process_pty_bytes_flags_a_change_of_the_root_program_status() {
+        let (pane, tx) = program_status_test_pane();
+        let pane_id = PaneId::from_raw(1);
+        let changed = |bytes: &[u8]| {
+            pane.process_pty_bytes(pane_id, 0, bytes, &tx)
+                .program_status_changed
+        };
+
+        assert!(!changed(b"plain output"));
+        assert!(!changed(b"\x1b]7501;state=working:id=job\x07"));
+        assert!(changed(b"\x1b]7501;state=blocked:kind=auth\x07"));
+        let (revision, root) = pane.program_status_root();
+        assert_eq!(
+            root.map(|report| report.lifecycle),
+            Some(crate::terminal::ProgramLifecycle::Blocked(Some(
+                crate::detect::BlockedReason::Auth
+            )))
+        );
+        assert!(changed(b"\x1b]7501;state=clear\x07"));
+        let (cleared_revision, root) = pane.program_status_root();
+        assert_eq!(root, None);
+        assert!(cleared_revision > revision);
     }
 
     #[test]

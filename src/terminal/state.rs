@@ -2,7 +2,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-// Effective state arbitration is intentionally centralized here. Full lifecycle
+// Effective state arbitration is intentionally centralized here. A program's own
+// OSC 7501 record ranks first (program_status.rs). Below it, full lifecycle
 // Herdr hook integrations are hook-authoritative while live; screen recovery
 // remains only for session-only/custom hook paths and fallback detection.
 // Process-exit updates clear matching hook authority before recomputing state.
@@ -17,6 +18,10 @@ const SCREEN_IDLE_ENDS_LIVE_TURN_AFTER: Duration = Duration::from_secs(3);
 #[path = "metadata.rs"]
 mod metadata;
 pub use metadata::{AgentMetadata, AgentMetadataReport, EffectivePresentation};
+
+#[path = "program_status.rs"]
+mod program_status;
+pub use program_status::{ProgramLifecycle, ProgramStatusReport};
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct HookAuthority {
@@ -188,6 +193,8 @@ pub struct TerminalState {
     hook_dialog_seen: bool,
     blocked_reason: Option<BlockedReason>,
     pub hook_authority: Option<HookAuthority>,
+    /// The root OSC 7501 record of the pane's program; it ranks above hooks and the screen.
+    program_status: Option<program_status::ProgramStatusAuthority>,
     pub agent_metadata: HashMap<String, AgentMetadata>,
     pub metadata_tokens: crate::metadata_tokens::MetadataTokens,
     pub persisted_agent_session: Option<crate::agent_resume::PersistedAgentSession>,
@@ -251,6 +258,7 @@ impl TerminalState {
             hook_dialog_seen: false,
             blocked_reason: None,
             hook_authority: None,
+            program_status: None,
             agent_metadata: HashMap::new(),
             metadata_tokens: crate::metadata_tokens::MetadataTokens::default(),
             persisted_agent_session: None,
@@ -657,14 +665,7 @@ impl TerminalState {
         // The agent left its prompt, or left the pane: what was saved no longer stands. The
         // screen naming the very block that was saved confirms it instead.
         let confirms_restored = fallback_state == AgentState::Blocked
-            && blocked_reason.is_some()
-            && match self.restored_status {
-                // Standing it again stays the session report's, since that also wakes delivery.
-                Some(RestoredAgentStatus::UnconfirmedQuestion) => {
-                    blocked_reason == Some(BlockedReason::Question)
-                }
-                restored => restored == Some(RestoredAgentStatus::Blocked(blocked_reason)),
-            };
+            && self.block_confirms_restored_status(blocked_reason);
         if process_exited
             || (matches!(fallback_state, AgentState::Working | AgentState::Blocked)
                 && !confirms_restored)
@@ -687,6 +688,8 @@ impl TerminalState {
             self.hook_dialog_seen = true;
         }
         if process_exited {
+            // Its process wrote the record, so the record goes with it.
+            self.program_status = None;
             if let Some(agent) = agent {
                 self.recent_agent_process_exit = Some(RecentAgentProcessExit {
                     agent,
@@ -2207,6 +2210,7 @@ impl TerminalState {
         let previous_presentation = self.effective_presentation_for_state_at(previous_state, now);
         let previous_session = self.current_session_identity_for_persistence();
         self.hook_authority = None;
+        self.program_status = None;
         self.set_reported_resume(None);
         self.detected_agent = None;
         self.fallback_state = AgentState::Unknown;
@@ -2428,6 +2432,9 @@ impl TerminalState {
         &self,
         now: Instant,
     ) -> (AgentState, Option<BlockedReason>) {
+        if let Some((state, blocked_reason, _)) = self.program_status_state_and_blocked_reason() {
+            return (state, blocked_reason);
+        }
         if self.visible_blocker_overrides_hook() {
             return (AgentState::Blocked, self.fallback_blocked_reason);
         }
@@ -2730,6 +2737,7 @@ impl TerminalState {
         self.fallback_blocked_reason = None;
         self.fallback_observed_at = None;
         self.hook_authority = None;
+        self.program_status = None;
         self.persisted_agent_session = None;
         self.agent_metadata.clear();
         self.metadata_report_agents.clear();

@@ -142,6 +142,7 @@ pub enum BlockedReason {
     Permission,
     Form,
     Interrupted,
+    Auth,
     #[serde(other)]
     Unknown,
 }

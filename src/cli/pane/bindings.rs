@@ -36,6 +36,7 @@ const BLOCKED_REASONS: &[Choice<AgentBlockedReason>] = &[
     Choice::new("question", AgentBlockedReason::Question),
     Choice::new("permission", AgentBlockedReason::Permission),
     Choice::new("form", AgentBlockedReason::Form),
+    Choice::new("auth", AgentBlockedReason::Auth),
 ];
 
 pub(crate) fn blocked_reason() -> Input<Option<AgentBlockedReason>> {

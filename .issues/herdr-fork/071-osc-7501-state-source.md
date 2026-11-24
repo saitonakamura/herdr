@@ -94,6 +94,56 @@ Where it goes:
   ([dotfiles herdr-fork 019](https://github.com/saitonakamura/dotfiles/blob/master/.issues/herdr-fork/019-pi-bridge-state-from-7501.md)).
 - **Review:** the PR touches server state, so it comes to the cockpit for review.
 
+## Resolution
+
+Implemented on `fork/071-osc-7501-state-source`; the PR is open and not merged, so this ticket stays
+in-progress until it is.
+
+- **Order:** restored status, then the 7501 root record, then hooks, then screen rules. `FORK.md`
+  § Agent state authority has the full rules; `src/terminal/program_status.rs` has the code and the
+  engine tests.
+- **Path:** a per-pane watcher task sends the root record to `TerminalState` on every root report,
+  apart from the 300 ms detection tick. `agent explain` shows the decision as `lifecycle`.
+- **`Auth`** is appended to both reason enums; the sidebar says "login"; `agent prompt` answers
+  `agent_blocked_auth`; `pane report-agent --blocked-reason auth` exists for the bridge.
+
+Live, in a throwaway debug session with bundled manifests (2026-11-24): Claude Code 2.1.331, Codex
+0.166.0, host pi 1.2.0, sandbox pi 1.1.0.
+
+| | Claude | Codex | host pi | sandbox pi |
+| --- | --- | --- | --- | --- |
+| idle at start | hook (no record until the first turn) | record | record | record |
+| working, done | record | record | record | record |
+| permission | record, 6 s before the hook | record | not reached | not reached |
+| question | `⏳`: record + hook; `AskUserQuestion`: `form` | not tried | `⏳`: record + hook | `⏳`: record + hook |
+| background | `🔄`: awaiting; shell left running: idle | n/a | `🔄`: awaiting | `🔄`: awaiting |
+| Esc to idle | 136 ms (was 4.4 s) | 50 ms | 68 ms | 233 ms |
+| exit | record cleared, pane released | same | same | same |
+
+What the ticket got wrong or left open:
+
+- **"7501 outranks hook idle" cannot hold for a record left `working`.** Claude keeps root `working`
+  (`msg` "1 shell still running") after a turn that left a shell running. A hook report that ends a
+  turn, made since the record's turn began, stands over it; otherwise a parked dev server holds the
+  pane at working. Codex has no state hooks: interrupted with a terminal still running, it reads
+  working until that terminal ends.
+- **`kind=question` is not always herdr's `Question`.** Claude reports its `AskUserQuestion` dialog as
+  `question`. It reads `form` when a hook names a form or permission dialog or the screen rule names
+  a form, so `agent prompt` does not type into it. Claude's late `permission_prompt` notification for
+  the same dialog no longer flips it to `permission`.
+- **`done` and `idle` both read idle.** herdr's done is an unseen idle, as before.
+- **Claude reports no record until its first turn**, and its `/exit` dialog is `blocked` with no kind
+  only some of the time; the other time it reads idle, as it did under an idle hook.
+- **`auth` was not seen live.** pi's `/login` picker reports nothing, and going further starts a real
+  sign-in. A gate approval over a `working` record was not reached either. Engine tests cover both.
+- **Title rules:** `claude.toml` is unchanged. Its two title rules only match a Claude that never got
+  the answer, and nothing depends on them otherwise.
+- **Restore and handoff:** records are not carried; the pane runs on hooks and screen rules until
+  the next report.
+- **OSC 9;4** is read as empty once the pane's program has sent any 7501 report.
+- A wrong first process match (host pi read as `claude` for 5 s, once) drops the record pi sent at
+  startup when it is corrected; the pane runs on hooks until pi next reports.
+
 ## Parent
 
 [000-map](./000-map.md)

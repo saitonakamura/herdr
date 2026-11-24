@@ -1,7 +1,7 @@
 ---
 id: herdr-fork-primary-mac-seeded-worktree-create
 title: "Primary mac: turn on seeded worktree create in the work lane"
-status: open
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
@@ -50,6 +50,15 @@ work lane, so this is the only box with any.
   (`worktree_post_create: true`), but `config.work.toml` was generated before the
   seeder landed and has no `post_create`. Left: the next `hw` attach regenerates it,
   `hw restart` loads it, then step 4.
+- **2026-11-24, done.** After `hw restart` the work server (0.9.5+fork.3, tap) runs with
+  `post_create = [".../dispatch/scripts/seed-worktree", "--herdr-post-create"]` in
+  `config.work.toml`. `herdr worktree create --branch <scratch>` in `stripchat` came back
+  seeded: `.envrc` allowed, `.env.local.tokens` copied, `GITLAB_TOKEN` present. The seeder
+  prepends `source_up` to the tracked `.envrc` where the repo has no `.envrc.local` hook, so
+  the tree starts with `.envrc` dirty, by design. In `okd` the same call returned
+  `worktree_post_create_failed`, because its `.envrc` needs `devenv`, which this box does not
+  have. The main checkout cannot load it either. That is the refusal working, not a seeding
+  fault. Both scratch trees and branches were removed.
 
 ## Parent
 

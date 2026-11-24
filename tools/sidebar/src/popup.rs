@@ -33,12 +33,12 @@ impl Io for Live {
             .output()
         {
             Ok(out) => Output {
-                ok: out.status.success(),
+                code: out.status.code(),
                 stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
                 stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
             },
             Err(err) => Output {
-                ok: false,
+                code: None,
                 stdout: String::new(),
                 stderr: format!("{}: {err}", argv[0]),
             },

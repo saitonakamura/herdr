@@ -41,6 +41,16 @@ work lane, so this is the only box with any.
    they still refuse `worktree create`, and they still have the container's
    `seed-worktree`.
 
+## Progress
+
+- **2026-11-24.** Step 1: `ed95fcc` rebased onto agent-skills `main` as `2bc37f4` (dispatch
+  tests 152 ok), pushed, its worktree removed, and the main checkout fast-forwarded
+  around the user's uncommitted `dispatch/SKILL.md` edit. Step 2: the dotfiles branch
+  is merged. Step 3: the work server runs 0.9.5+fork.3 from the tap
+  (`worktree_post_create: true`), but `config.work.toml` was generated before the
+  seeder landed and has no `post_create`. Left: the next `hw` attach regenerates it,
+  `hw restart` loads it, then step 4.
+
 ## Parent
 
 [000-map](./000-map.md)

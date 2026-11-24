@@ -983,7 +983,7 @@ Fields such as `last_check_unix`, `last_result`, `active_version`, `cached_remot
 }
 ```
 
-The response contains the same explain object printed by `herdr agent explain --json`, including the final state, manifest source and version, matched rule, evaluated rule evidence, skip-state reason, idle fallback reason, and `screen_detection_skip_reason` when a full lifecycle hook authority makes screen rules non-authoritative.
+The response contains the same explain object printed by `herdr agent explain --json`, including the final state, manifest source and version, matched rule, evaluated rule evidence, skip-state reason, idle fallback reason, and `screen_detection_skip_reason` when a full lifecycle hook authority makes screen rules non-authoritative. It also carries `program_status`, the pane's OSC 7501 records as an array of `{ id, state, kind, progress, app, title, msg }`, where the root record has a null `id`.
 
 Clients need a running server that supports `agent.explain`; after upgrading Herdr, restart or live-handoff the server before relying on this method.
 

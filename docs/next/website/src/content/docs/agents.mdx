@@ -112,6 +112,8 @@ herdr agent explain --file screen.txt --agent codex --json
 
 Live explain is evaluated by the running server, so it reflects the active manifest cache. The explain output shows the agent, final state, whether screen detection was skipped by a full lifecycle authority, manifest source and version, cached remote version, local override shadowing, remote update status, matched rule, visible evidence flags, matcher and region evidence for evaluated rules, skipped-update reason for transcript viewers, and the idle fallback reason when no rule matched.
 
+Herdr answers the [Program Status Protocol](https://www.superlogical.com/rex/docs/build/program-status) support query (`OSC 7501 ; ?`) in every pane and keeps the records a program reports there: a root record plus child records by `id`, each with its state, kind, progress, app, title and message. Live explain lists them as `program_status` (text and `--json`). The records are what the program said; they do not change the pane's agent status. Herdr never forwards a pane's query or reports to the terminal it runs in.
+
 Herdr can run inside tmux as the outer terminal environment. Agent detection does not inspect tmux sessions launched inside a Herdr pane. If a shell framework auto-enters tmux inside Herdr, Herdr sees `tmux` as the pane process instead of the agent behind it.
 
 If your shell automatically attaches to tmux whenever `TMUX` is unset, update its startup rule to exclude Herdr panes. Reattaching the outer tmux session from inside a Herdr pane can recursively shrink the terminal and make it flicker. Add the `HERDR_ENV` check to your existing condition before it runs tmux:

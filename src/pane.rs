@@ -30,6 +30,7 @@ mod cursor;
 mod input;
 mod kitty_keyboard;
 mod osc;
+pub(crate) mod program_status;
 mod state;
 mod terminal;
 mod xtgettcap;
@@ -3701,6 +3702,10 @@ impl PaneRuntime {
 
     pub fn agent_osc_progress(&self) -> String {
         self.terminal.agent_osc_progress()
+    }
+
+    pub(crate) fn program_status(&self) -> Vec<program_status::ProgramStatusRecord> {
+        self.terminal.program_status()
     }
 
     pub(crate) fn screen_snapshot(

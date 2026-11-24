@@ -1841,6 +1841,57 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn agent_explain_lists_program_status_records() {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &crate::config::Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        app.state.workspaces = vec![crate::workspace::Workspace::test_new("agent-explain")];
+        app.state.ensure_test_terminals();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .detected_agent = Some(Agent::Codex);
+        let runtime = crate::terminal::TerminalRuntime::test_with_screen_bytes(80, 24, b"");
+        runtime.test_process_pty_bytes(
+            b"\x1b]7501;state=working:app=some-app\x07\x1b]7501;state=blocked:kind=permission:id=sub\x07",
+        );
+        app.terminal_runtimes.insert(terminal_id, runtime);
+        let target = app.public_pane_id(0, pane_id).unwrap();
+
+        let response = app.handle_api_request(crate::api::schema::Request {
+            id: "agent_explain".into(),
+            method: crate::api::schema::Method::AgentExplain(crate::api::schema::AgentTarget {
+                target,
+            }),
+        });
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+
+        assert_eq!(
+            response["result"]["explain"]["program_status"],
+            serde_json::json!([
+                {
+                    "id": null, "state": "working", "kind": null, "progress": null,
+                    "app": "some-app", "title": null, "msg": null,
+                },
+                {
+                    "id": "sub", "state": "blocked", "kind": "permission", "progress": null,
+                    "app": "some-app", "title": null, "msg": null,
+                },
+            ])
+        );
+    }
+
+    #[tokio::test]
     async fn agent_explain_rejects_hook_only_full_lifecycle_authority() {
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
         let mut app = App::new(

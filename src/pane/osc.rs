@@ -4,6 +4,7 @@ use tracing::info;
 
 use crate::layout::PaneId;
 
+use super::program_status::{ProgramStatusRecord, ProgramStatusRecords, QUERY_REPLY_BODY};
 use super::terminal::GhosttyPaneCore;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -367,10 +368,45 @@ enum OscStreamState {
     DiscardingEscape,
 }
 
+/// One item the collector hands to its consumer, in stream order.
+enum OscStreamEvent<'a> {
+    /// A complete OSC body, its terminator, and the chunk offset just past it.
+    Body {
+        body: &'a [u8],
+        terminator: OscTerminator,
+        end_offset: usize,
+    },
+    /// RIS (`ESC c`) seen outside any string.
+    FullReset,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum OscTerminator {
+    Bel,
+    St,
+}
+
+impl OscTerminator {
+    pub(super) fn bytes(self) -> &'static [u8] {
+        match self {
+            Self::Bel => b"\x07",
+            Self::St => b"\x1b\\",
+        }
+    }
+}
+
 impl OscStreamCollector {
     const MAX_BODY_BYTES: usize = 4096;
 
     fn observe(&mut self, bytes: &[u8], mut receive: impl FnMut(&[u8])) {
+        self.observe_events(bytes, |event| {
+            if let OscStreamEvent::Body { body, .. } = event {
+                receive(body);
+            }
+        });
+    }
+
+    fn observe_events(&mut self, bytes: &[u8], mut receive: impl FnMut(OscStreamEvent<'_>)) {
         let mut cursor = 0;
         while cursor < bytes.len() {
             if matches!(
@@ -396,22 +432,26 @@ impl OscStreamCollector {
                         self.state = OscStreamState::Body;
                     }
                     0x1b => self.state = OscStreamState::Escape,
+                    b'c' => {
+                        self.state = OscStreamState::Ground;
+                        receive(OscStreamEvent::FullReset);
+                    }
                     byte if is_ignored_string_intro(byte) => {
                         self.state = OscStreamState::IgnoringString;
                     }
                     _ => self.state = OscStreamState::Ground,
                 },
                 OscStreamState::Body => match byte {
-                    0x07 => self.finish(&mut receive),
+                    0x07 => self.finish(OscTerminator::Bel, cursor, &mut receive),
                     0x1b => self.state = OscStreamState::BodyEscape,
                     _ => self.push(byte),
                 },
                 OscStreamState::BodyEscape => match byte {
-                    b'\\' => self.finish(&mut receive),
+                    b'\\' => self.finish(OscTerminator::St, cursor, &mut receive),
                     0x07 => {
                         self.push(0x1b);
                         if matches!(self.state, OscStreamState::Body) {
-                            self.finish(&mut receive);
+                            self.finish(OscTerminator::Bel, cursor, &mut receive);
                         } else {
                             self.state = OscStreamState::Ground;
                         }
@@ -471,8 +511,17 @@ impl OscStreamCollector {
         }
     }
 
-    fn finish(&mut self, receive: &mut impl FnMut(&[u8])) {
-        receive(&self.body);
+    fn finish(
+        &mut self,
+        terminator: OscTerminator,
+        end_offset: usize,
+        receive: &mut impl FnMut(OscStreamEvent<'_>),
+    ) {
+        receive(OscStreamEvent::Body {
+            body: &self.body,
+            terminator,
+            end_offset,
+        });
         self.body.clear();
         self.state = OscStreamState::Ground;
     }
@@ -496,18 +545,40 @@ pub(super) struct AgentOscStateTracker {
     latest_title: Option<String>,
     terminal_title: Option<String>,
     latest_progress: Option<String>,
+    program_status: ProgramStatusRecords,
+    pending_program_status_replies: Vec<ProgramStatusReply>,
+}
+
+/// Herdr's reply to an OSC 7501 support query, due at `end_offset` of the chunk.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ProgramStatusReply {
+    pub(super) end_offset: usize,
+    pub(super) bytes: bytes::Bytes,
 }
 
 impl AgentOscStateTracker {
     pub(super) fn observe(&mut self, bytes: &[u8]) -> bool {
-        let (collector, latest_title, terminal_title, latest_progress) = (
+        let (collector, latest_title, terminal_title, latest_progress, program_status, replies) = (
             &mut self.collector,
             &mut self.latest_title,
             &mut self.terminal_title,
             &mut self.latest_progress,
+            &mut self.program_status,
+            &mut self.pending_program_status_replies,
         );
         let mut terminal_title_changed = false;
-        collector.observe(bytes, |body| {
+        collector.observe_events(bytes, |event| {
+            let (body, terminator, end_offset) = match event {
+                OscStreamEvent::Body {
+                    body,
+                    terminator,
+                    end_offset,
+                } => (body, terminator, end_offset),
+                OscStreamEvent::FullReset => {
+                    program_status.clear_all();
+                    return;
+                }
+            };
             let Some((command, payload)) = parse_agent_osc_body(body) else {
                 return;
             };
@@ -523,6 +594,15 @@ impl AgentOscStateTracker {
                     *latest_progress =
                         Some(sanitize_agent_osc_string(payload, AGENT_OSC_MAX_CHARS));
                 }
+                b"7501" if payload.trim_ascii() == b"?" => {
+                    // The reply ends the way the query did.
+                    let reply = [QUERY_REPLY_BODY, terminator.bytes()].concat();
+                    replies.push(ProgramStatusReply {
+                        end_offset,
+                        bytes: reply.into(),
+                    });
+                }
+                b"7501" => program_status.apply_report(payload),
                 _ => {}
             }
         });
@@ -558,6 +638,15 @@ impl AgentOscStateTracker {
     pub(super) fn clear_retained(&mut self) {
         self.latest_title = None;
         self.latest_progress = None;
+        self.program_status.drop_live_states();
+    }
+
+    pub(super) fn drain_program_status_replies(&mut self) -> Vec<ProgramStatusReply> {
+        std::mem::take(&mut self.pending_program_status_replies)
+    }
+
+    pub(super) fn program_status(&self) -> Vec<ProgramStatusRecord> {
+        self.program_status.snapshot()
     }
 }
 
@@ -1084,6 +1173,93 @@ mod tests {
         assert_eq!(t.latest_progress(), "");
         t.observe(b";\x07");
         assert_eq!(t.latest_progress(), "4;3;");
+    }
+
+    fn program_status_states(tracker: &AgentOscStateTracker) -> Vec<(String, &'static str)> {
+        tracker
+            .program_status()
+            .into_iter()
+            .map(|record| (record.id, record.state.label()))
+            .collect()
+    }
+
+    #[test]
+    fn program_status_reports_accept_bel_and_st() {
+        let mut t = AgentOscStateTracker::default();
+        t.observe(b"\x1b]7501;state=working\x07\x1b]7501;state=idle:id=a\x1b\\");
+        assert_eq!(
+            program_status_states(&t),
+            [(String::new(), "working"), ("a".to_string(), "idle")]
+        );
+        assert!(t.drain_program_status_replies().is_empty());
+    }
+
+    #[test]
+    fn program_status_report_split_across_chunks() {
+        let mut t = AgentOscStateTracker::default();
+        for chunk in [
+            &b"\x1b"[..],
+            b"]7501;sta",
+            b"te=blocked:kind=ques",
+            b"tion\x1b",
+            b"\\",
+        ] {
+            t.observe(chunk);
+        }
+        let records = t.program_status();
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            records[0].kind,
+            Some(crate::pane::program_status::ProgramStatusKind::Question)
+        );
+    }
+
+    #[test]
+    fn program_status_query_reply_carries_offset_and_terminator() {
+        let mut t = AgentOscStateTracker::default();
+        t.observe(b"ab\x1b]7501;?\x07cd\x1b]7501;?\x1b\\");
+        let replies = t.drain_program_status_replies();
+        assert_eq!(replies.len(), 2);
+        assert_eq!(replies[0].end_offset, 11);
+        assert!(replies[0].bytes.ends_with(b"auth\x07"));
+        assert_eq!(replies[1].end_offset, 23);
+        assert!(replies[1].bytes.ends_with(b"auth\x1b\\"));
+        assert!(t.drain_program_status_replies().is_empty());
+
+        // A query that ends in a later chunk is due at its end in that chunk.
+        t.observe(b"\x1b]7501;");
+        t.observe(b"?\x07");
+        assert_eq!(t.drain_program_status_replies()[0].end_offset, 2);
+    }
+
+    #[test]
+    fn program_status_full_reset_clears_records_in_stream_order() {
+        let mut t = AgentOscStateTracker::default();
+        t.observe(b"\x1b]7501;state=done\x07\x1bc\x1b]7501;state=working:id=a\x07");
+        assert_eq!(program_status_states(&t), [("a".to_string(), "working")]);
+
+        // Soft reset and a `c` that is not RIS leave records alone.
+        t.observe(b"\x1b[!p\x1b[c\x1b(c\x1b]2;\x1bc\x07\x1bP\x1bc\x1b\\");
+        assert_eq!(program_status_states(&t), [("a".to_string(), "working")]);
+
+        t.observe(b"\x1b");
+        t.observe(b"c");
+        assert!(t.program_status().is_empty());
+    }
+
+    #[test]
+    fn program_status_oversized_report_is_dropped() {
+        let mut t = AgentOscStateTracker::default();
+        let mut report = b"\x1b]7501;state=working:msg=".to_vec();
+        report.extend(std::iter::repeat_n(
+            b'A',
+            OscStreamCollector::MAX_BODY_BYTES,
+        ));
+        report.push(0x07);
+        t.observe(&report);
+        assert!(t.program_status().is_empty());
+        t.observe(b"\x1b]7501;state=working\x07");
+        assert_eq!(t.program_status().len(), 1);
     }
 
     #[test]

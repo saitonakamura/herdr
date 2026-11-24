@@ -181,6 +181,9 @@ fn print_agent_explain_text(explain: &serde_json::Value, verbose: bool) {
         println!("warning: {warning}");
     }
 
+    for line in program_status_text_lines(explain) {
+        println!("{line}");
+    }
     if !verbose {
         return;
     }
@@ -242,6 +245,38 @@ fn print_agent_explain_text(explain: &serde_json::Value, verbose: bool) {
             );
         }
     }
+}
+
+/// One line per OSC 7501 record; nothing when the program reported none.
+fn program_status_text_lines(explain: &serde_json::Value) -> Vec<String> {
+    let Some(records) = explain["program_status"]
+        .as_array()
+        .filter(|records| !records.is_empty())
+    else {
+        return Vec::new();
+    };
+    let mut lines = vec!["program_status:".to_string()];
+    for record in records {
+        let mut line = format!(
+            "  {} state={}",
+            record["id"].as_str().unwrap_or("(root)"),
+            record["state"].as_str().unwrap_or("unknown")
+        );
+        for key in ["kind", "progress", "app"] {
+            match &record[key] {
+                serde_json::Value::String(value) => line.push_str(&format!(" {key}={value}")),
+                serde_json::Value::Number(value) => line.push_str(&format!(" {key}={value}")),
+                _ => {}
+            }
+        }
+        for key in ["title", "msg"] {
+            if let Some(value) = record[key].as_str() {
+                line.push_str(&format!(" {key}={value:?}"));
+            }
+        }
+        lines.push(line);
+    }
+    lines
 }
 
 fn matched_rule_region_preview<'a>(
@@ -657,4 +692,31 @@ fn agent_read(params: AgentReadParams) -> std::io::Result<i32> {
         method: Method::AgentRead(params),
     })?;
     super::print_read_response(&response)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::program_status_text_lines;
+
+    #[test]
+    fn program_status_text_lists_one_line_per_record() {
+        let explain = serde_json::json!({
+            "program_status": [
+                { "id": null, "state": "working", "kind": null, "progress": 40,
+                  "app": "some-app", "title": null, "msg": "half way" },
+                { "id": "sub", "state": "blocked", "kind": "question", "progress": null,
+                  "app": "some-app", "title": "sub task", "msg": null },
+            ]
+        });
+        assert_eq!(
+            program_status_text_lines(&explain),
+            [
+                "program_status:",
+                "  (root) state=working progress=40 app=some-app msg=\"half way\"",
+                "  sub state=blocked kind=question app=some-app title=\"sub task\"",
+            ]
+        );
+        assert!(program_status_text_lines(&serde_json::json!({})).is_empty());
+        assert!(program_status_text_lines(&serde_json::json!({ "program_status": [] })).is_empty());
+    }
 }

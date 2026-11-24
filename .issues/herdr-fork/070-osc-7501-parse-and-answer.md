@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-osc-7501-parse-and-answer
 title: Answer the OSC 7501 support query and keep each pane's program-status records
-status: in-progress
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee: saitonakamura
-claimed_by: macos/w1:p2B/c3c4ded8-3c27-491b-83ae-b5b5ca88b9dd
+claimed_by: macos/c3c4ded8-3c27-491b-83ae-b5b5ca88b9dd
 ---
 
 ## Question
@@ -103,6 +103,26 @@ libghostty-vt pin (`44f2a44d`), so there's no vendor bump and no new patch.
   Also check Claude's OSC 0 titles. `claude.toml` has `osc_title` rules, and Claude may change titles
   once 7501 is answered.
 - **Review:** the PR touches server state, so it comes to the cockpit for review.
+
+## Resolution
+
+Merged 2026-11-24 on the user's word: [saitonakamura/herdr#65](https://github.com/saitonakamura/herdr/pull/65) as `a6aa5019` (head `5bf59f6b`), all CI checks green.
+
+- **Answer:** herdr replies to `OSC 7501 ; ?` in every pane with the full rev 0.4 form, the query's terminator echoed, at the query's byte offset, so it precedes the DA reply to a later `CSI c` in the same chunk.
+- **Records:** `src/pane/program_status.rs`, fed from a `7501` arm in `AgentOscStateTracker`. `agent explain` shows them as `program_status`.
+- **Live, in a throwaway debug session:** Claude Code 2.1.331, host pi 1.2.0, sandbox pi 1.1.0 and Codex 0.166.0 all reported. `kind=permission`, `kind=auth` and child ids were not seen live; engine tests cover them.
+- **Per-chunk cost:** one byte compare per ESC outside a string, one slice compare per completed OSC body that is not 0, 2 or 9. Nothing per ordinary byte.
+
+What this ticket got wrong or left loose, for [071](./071-osc-7501-state-source.md):
+
+- **Claude drops the spinner glyph from its OSC 0 title once the query is answered.** `claude.toml`'s `osc_title_working` and `osc_title_idle` no longer match; Claude panes run on screen rules until 071. Codex's title rules still match.
+- Over-limit or undecodable `title`/`msg` voids the whole report, as the spec says; nothing is truncated.
+- The cap is 64 records per pane including the root, least recently updated evicted.
+- An `id` pair with a byte outside the value set voids the report instead of being skipped, which would address the root.
+- When the pane's agent goes away `idle` is dropped too; only `done` and `error` stay.
+- `agent explain` needs a detected agent, so a shell pane's records cannot be read.
+- Records do not survive a live handoff or a server restart, and programs do not re-send.
+- The spec's "stop mapping OSC 9;4 after a 7501 report" is not done.
 
 ## Parent
 

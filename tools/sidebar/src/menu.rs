@@ -9,6 +9,7 @@ use crossterm::event::{
 };
 use ratatui::buffer::Buffer;
 use ratatui::style::{Modifier, Style};
+use serde::Deserialize;
 use serde_json::{json, Value};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -255,7 +256,11 @@ pub struct CloseRequest {
 
 impl CloseRequest {
     fn args(&self) -> Vec<String> {
-        let mut args = vec!["--outcome".into(), self.outcome.word().into()];
+        let mut args = vec![
+            "--json".into(),
+            "--outcome".into(),
+            self.outcome.word().into(),
+        ];
         if let Some(why) = &self.why {
             args.extend(["--why".into(), why.clone()]);
         }
@@ -266,12 +271,28 @@ impl CloseRequest {
     }
 }
 
-/// Why `loom close` refused. It prints no structured refusal, so this reads its
-/// held lines, `  <name> [<id>] <reason>: …`, whose reason is loom's own token.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct CloseNode {
+    id: String,
+    name: String,
+    pane: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CloseRefusal {
+    refusal: String,
+    ack_clears: bool,
+    nodes: Vec<CloseNode>,
+}
+
+/// Why `loom close` refused, from its exit status and JSON response.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Refusal {
-    /// The user still has part of the subtree; `(id, name, reason)` per node.
-    Held(Vec<(String, String, String)>),
+    /// The user still has part of the subtree; ack must clear both held and busy gates.
+    Held {
+        nodes: Vec<CloseNode>,
+        ack_clears: bool,
+    },
     /// Part of the subtree is working or blocked.
     Busy,
     /// Anything else: an error, not a refusal, so force is not offered.
@@ -280,19 +301,41 @@ pub enum Refusal {
 
 impl Refusal {
     /// Only unread reports hold it, so acking them is all closing needs.
-    pub fn unread_only(&self) -> bool {
-        matches!(self, Refusal::Held(nodes) if !nodes.is_empty() && nodes.iter().all(|(_, _, reason)| reason == "unseen"))
+    pub fn ack_clears(&self) -> bool {
+        matches!(
+            self,
+            Refusal::Held {
+                ack_clears: true,
+                ..
+            }
+        )
     }
 }
 
-pub fn refusal(stderr: &str) -> Refusal {
+fn refusal(out: &Output) -> Refusal {
+    let Ok(reply) = serde_json::from_str::<CloseRefusal>(&out.stdout) else {
+        return Refusal::Error;
+    };
+    match (out.code, reply.refusal.as_str()) {
+        (Some(3), "held") => Refusal::Held {
+            nodes: reply.nodes,
+            ack_clears: reply.ack_clears,
+        },
+        (Some(4), "busy") => Refusal::Busy,
+        _ => Refusal::Error,
+    }
+}
+
+// Only used after an older loom rejects --json before closing anything.
+fn legacy_refusal(stderr: &str) -> Refusal {
     if stderr.contains("loom: close: still working or blocked") {
         return Refusal::Busy;
     }
     if !stderr.contains("loom: close: the user still has it") {
         return Refusal::Error;
     }
-    let nodes = stderr
+    let mut ack_clears = true;
+    let nodes: Vec<_> = stderr
         .lines()
         .filter_map(|line| {
             let line = line.trim();
@@ -301,11 +344,16 @@ pub fn refusal(stderr: &str) -> Refusal {
             let name = &line[..open];
             let id = &line[open + 2..close];
             let reason = line[close + 2..].split(':').next()?;
-            (!id.is_empty() && !reason.contains(' '))
-                .then(|| (id.to_string(), name.to_string(), reason.to_string()))
+            ack_clears &= reason == "unseen";
+            (!id.is_empty() && !reason.contains(' ')).then(|| CloseNode {
+                id: id.to_string(),
+                name: name.to_string(),
+                pane: None,
+            })
         })
         .collect();
-    Refusal::Held(nodes)
+    ack_clears &= !nodes.is_empty();
+    Refusal::Held { nodes, ack_clears }
 }
 
 /// A node whose unread report holds a close, shown before the user acks it.
@@ -387,14 +435,14 @@ pub enum Exit {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Output {
-    pub ok: bool,
+    pub code: Option<i32>,
     pub stdout: String,
     pub stderr: String,
 }
 
 pub trait Io {
     fn call(&mut self, method: &str, params: Value) -> Result<Value, ApiError>;
-    /// Runs `argv` to completion. A program that can't start is `ok: false`.
+    /// Runs `argv` to completion. A program that can't start has no exit code.
     fn run(&mut self, argv: &[String]) -> Output;
     fn spawn(&mut self, argv: &[String]) -> Result<(), String>;
     /// `herdr-sidebar ctl <verb> <arg>` against the running sidebar.
@@ -970,7 +1018,7 @@ impl Menu {
     fn ack(&self, io: &mut dyn Io, vars: &[(&'static str, String)]) -> Result<(), String> {
         let (argv, _) = self.override_argv("ack", vars).ok_or(NO_ACK)?;
         let out = io.run(&argv);
-        if out.ok {
+        if out.code == Some(0) {
             Ok(())
         } else {
             Err(format!("ack: {}", first_line(&out.stderr, &out.stdout)))
@@ -981,31 +1029,44 @@ impl Menu {
         let Some((mut argv, _)) = self.override_argv("close", &self.vars()) else {
             return self.back();
         };
+        let json_arg = argv.len();
         argv.extend(request.args());
-        let out = io.run(&argv);
-        if out.ok {
+        let mut out = io.run(&argv);
+        let legacy = out.code == Some(1)
+            && out
+                .stderr
+                .lines()
+                .any(|line| line == "loom: close: unknown argument --json");
+        if legacy {
+            argv.remove(json_arg);
+            out = io.run(&argv);
+        }
+        if out.code == Some(0) {
             self.exit = Some(Exit::Quit);
             return;
         }
-        let refusal = refusal(&out.stderr);
+        let refusal = if legacy {
+            legacy_refusal(&out.stderr)
+        } else {
+            refusal(&out)
+        };
         let lines: Vec<String> = out
             .stderr
             .lines()
-            .chain(out.stdout.lines())
             .map(str::to_string)
             .filter(|l| !l.trim().is_empty())
             .collect();
         match refusal {
             Refusal::Error => {
                 self.back();
-                self.status = Some(format!("close: {}", first_line(&out.stderr, &out.stdout)));
+                self.status = Some(format!("close: {}", first_line(&out.stderr, "")));
             }
             Refusal::Busy if request.force => {
                 self.back();
-                self.status = Some(format!("close: {}", first_line(&out.stderr, &out.stdout)));
+                self.status = Some(format!("close: {}", first_line(&out.stderr, "")));
             }
             refusal => {
-                let unread = if refusal.unread_only() {
+                let unread = if refusal.ack_clears() {
                     self.unread_nodes(io, &refusal)
                 } else {
                     Vec::new()
@@ -1024,33 +1085,38 @@ impl Menu {
 
     /// The held nodes with their latest reports, so the user never acks blind.
     fn unread_nodes(&self, io: &mut dyn Io, refusal: &Refusal) -> Vec<Unread> {
-        let Refusal::Held(nodes) = refusal else {
+        let Refusal::Held { nodes, .. } = refusal else {
             return Vec::new();
         };
-        let snapshot = io
-            .call("session.snapshot", json!({}))
-            .ok()
-            .and_then(|r| api::snapshot_from_result(&r).ok())
-            .unwrap_or_default();
+        let snapshot = if nodes.iter().any(|node| node.pane.is_none()) {
+            io.call("session.snapshot", json!({}))
+                .ok()
+                .and_then(|r| api::snapshot_from_result(&r).ok())
+                .unwrap_or_default()
+        } else {
+            SessionSnapshot::default()
+        };
         nodes
             .iter()
-            .map(|(id, name, _)| {
-                let pane_id = snapshot
-                    .panes
-                    .iter()
-                    .find(|p| p.agent_id.as_deref() == Some(id.as_str()))
-                    .map(|p| p.pane_id.clone())
-                    .unwrap_or_default();
+            .map(|node| {
+                let pane_id = node.pane.clone().unwrap_or_else(|| {
+                    snapshot
+                        .panes
+                        .iter()
+                        .find(|p| p.agent_id.as_deref() == Some(node.id.as_str()))
+                        .map(|p| p.pane_id.clone())
+                        .unwrap_or_default()
+                });
                 let line = io
-                    .call("message.list", json!({ "from": id }))
+                    .call("message.list", json!({ "from": node.id }))
                     .ok()
                     .and_then(|r| latest_report(api::messages_from_result(&r)))
                     .map(|r| r.first_line().to_string())
                     .unwrap_or_else(|| "(no report found)".into());
                 Unread {
-                    agent_id: id.clone(),
+                    agent_id: node.id.clone(),
                     pane_id,
-                    name: name.clone(),
+                    name: node.name.clone(),
                     line,
                 }
             })
@@ -1411,7 +1477,7 @@ pub mod tests {
             self.runs.push(argv.to_vec());
             if self.outputs.is_empty() {
                 return Output {
-                    ok: true,
+                    code: Some(0),
                     stdout: String::new(),
                     stderr: String::new(),
                 };
@@ -1506,10 +1572,35 @@ pub mod tests {
 
     fn failed(stderr: &str) -> Output {
         Output {
-            ok: false,
+            code: Some(1),
             stdout: String::new(),
             stderr: stderr.into(),
         }
+    }
+
+    fn refused(code: i32, ack_clears: bool, stderr: &str, nodes: Value) -> Output {
+        Output {
+            code: Some(code),
+            stdout: json!({
+                "closable": false, "closed": false,
+                "refusal": if code == 3 { "held" } else { "busy" },
+                "ack_clears": ack_clears, "nodes": nodes,
+            })
+            .to_string(),
+            stderr: stderr.into(),
+        }
+    }
+
+    fn unseen() -> Output {
+        refused(
+            3,
+            true,
+            HELD_UNSEEN,
+            json!([
+                { "id": "a", "name": "alpha", "pane": "w1:p3", "refusal": "held", "reason": "unseen" },
+                { "id": "a1", "name": "alpha-one", "pane": "w1:p5", "refusal": "held", "reason": "unseen" },
+            ]),
+        )
     }
 
     const HELD_UNSEEN: &str = "loom: close: the user still has it, nothing closed (leave it to them; --force to close anyway):\n  alpha [a] unseen: its audience is the user, who has not seen its done report (loom ack once they have)\n  alpha-one [a1] unseen: its audience is the user, who has not seen its failed report (loom ack once they have)\n";
@@ -1796,7 +1887,10 @@ pub mod tests {
         press(&mut m, KeyCode::Char('o'));
         let mut stub = Stub::default();
         m.work(&mut stub);
-        assert_eq!(stub.runs, [["loom", "close", "a", "--outcome", "ok"]]);
+        assert_eq!(
+            stub.runs,
+            [["loom", "close", "a", "--json", "--outcome", "ok"]]
+        );
         assert_eq!(m.exit, Some(Exit::Quit));
 
         let mut m = menu(agent(None), LOOM);
@@ -1811,6 +1905,7 @@ pub mod tests {
                 "loom",
                 "close",
                 "a",
+                "--json",
                 "--outcome",
                 "struggled",
                 "--why",
@@ -1824,13 +1919,21 @@ pub mod tests {
         let mut m = menu(agent(Some("done")), LOOM);
         typed(&mut m, "co");
         let mut stub = Stub {
-            outputs: vec![failed(HELD_UNSEEN)],
+            outputs: vec![unseen()],
             ..Default::default()
         };
         m.work(&mut stub);
-        let Screen::Refused { unread, .. } = &m.screen else {
+        assert!(stub
+            .calls
+            .iter()
+            .all(|(method, _)| method != "session.snapshot"));
+        let Screen::Refused { unread, lines, .. } = &m.screen else {
             panic!("{:?}", m.screen)
         };
+        assert_eq!(
+            lines,
+            &HELD_UNSEEN.lines().map(str::to_string).collect::<Vec<_>>()
+        );
         assert_eq!(
             unread
                 .iter()
@@ -1855,7 +1958,7 @@ pub mod tests {
             [
                 vec!["loom", "ack", "a"],
                 vec!["loom", "ack", "a1"],
-                vec!["loom", "close", "a", "--outcome", "ok"]
+                vec!["loom", "close", "a", "--json", "--outcome", "ok"]
             ]
         );
         assert_eq!(m.exit, Some(Exit::Quit));
@@ -1863,11 +1966,14 @@ pub mod tests {
 
     #[test]
     fn any_other_refusal_offers_only_force() {
-        for stderr in [HELD_HANDOFF, BUSY] {
+        for output in [
+            refused(3, false, HELD_HANDOFF, json!([])),
+            refused(4, false, BUSY, json!([])),
+        ] {
             let mut m = menu(agent(Some("done")), LOOM);
             typed(&mut m, "co");
             let mut stub = Stub {
-                outputs: vec![failed(stderr)],
+                outputs: vec![output],
                 ..Default::default()
             };
             m.work(&mut stub);
@@ -1878,7 +1984,7 @@ pub mod tests {
             m.work(&mut stub);
             assert_eq!(
                 stub.runs,
-                [["loom", "close", "a", "--outcome", "ok", "--force"]]
+                [["loom", "close", "a", "--json", "--outcome", "ok", "--force"]]
             );
             assert_eq!(m.exit, Some(Exit::Quit));
         }
@@ -1889,7 +1995,7 @@ pub mod tests {
         let mut m = menu(agent(Some("done")), LOOM);
         typed(&mut m, "co");
         let mut stub = Stub {
-            outputs: vec![failed(HELD_UNSEEN)],
+            outputs: vec![unseen()],
             ..Default::default()
         };
         m.work(&mut stub);
@@ -1897,16 +2003,16 @@ pub mod tests {
         let mut stub = Stub {
             outputs: vec![
                 Output {
-                    ok: true,
+                    code: Some(0),
                     stdout: String::new(),
                     stderr: String::new(),
                 },
                 Output {
-                    ok: true,
+                    code: Some(0),
                     stdout: String::new(),
                     stderr: String::new(),
                 },
-                failed(BUSY),
+                refused(4, false, BUSY, json!([])),
             ],
             ..Default::default()
         };
@@ -1930,14 +2036,272 @@ pub mod tests {
     }
 
     #[test]
+    fn unseen_and_still_working_offers_force_not_ack() {
+        let mut m = menu(agent(Some("done")), LOOM);
+        typed(&mut m, "co");
+        let mut stub = Stub {
+            outputs: vec![refused(
+                3,
+                false,
+                HELD_UNSEEN,
+                json!([
+                    { "id": "a", "name": "alpha", "pane": "w1:p3", "refusal": "held", "reason": "unseen", "ack_clears": true },
+                    { "id": "a", "name": "alpha", "pane": "w1:p3", "refusal": "busy", "reason": "live-working", "ack_clears": false },
+                ]),
+            )],
+            ..Default::default()
+        };
+        m.work(&mut stub);
+        assert_eq!(keys(&m), "f");
+        assert!(stub.calls.is_empty());
+        assert!(matches!(&m.screen, Screen::Refused { unread, .. } if unread.is_empty()));
+    }
+
+    #[test]
+    fn json_not_prose_supplies_the_unread_nodes_and_ack_gate() {
+        let mut m = menu(agent(Some("done")), LOOM);
+        typed(&mut m, "co");
+        let mut stub = Stub {
+            outputs: vec![refused(
+                3,
+                true,
+                "wording is not a protocol\n",
+                json!([
+                    { "id": "new", "name": "new name", "pane": "w9:p2", "line": "not parsed" },
+                ]),
+            )],
+            ..Default::default()
+        };
+        m.work(&mut stub);
+        let Screen::Refused { unread, lines, .. } = &m.screen else {
+            panic!()
+        };
+        assert_eq!(lines, &["wording is not a protocol"]);
+        assert_eq!(
+            unread,
+            &[Unread {
+                agent_id: "new".into(),
+                pane_id: "w9:p2".into(),
+                name: "new name".into(),
+                line: "done: new finished".into(),
+            }]
+        );
+        assert_eq!(keys(&m), "af");
+    }
+
+    #[test]
+    fn only_the_exact_old_loom_rejection_retries_without_json() {
+        for output in [
+            failed("wrapper: unknown argument --json\n"),
+            failed(HELD_UNSEEN),
+            Output {
+                code: Some(4),
+                ..failed("loom: close: unknown argument --json\n")
+            },
+            Output {
+                code: None,
+                ..failed("could not start loom")
+            },
+        ] {
+            let mut m = menu(agent(None), LOOM);
+            typed(&mut m, "co");
+            let mut stub = Stub {
+                outputs: vec![output],
+                ..Default::default()
+            };
+            m.work(&mut stub);
+            assert_eq!(stub.runs.len(), 1);
+            assert_eq!(m.screen, Screen::Menu);
+            assert_eq!(m.exit, None);
+        }
+    }
+
+    #[test]
+    fn older_loom_retries_once_and_keeps_the_prose_outcomes() {
+        for (stderr, expected_keys) in [(HELD_UNSEEN, "af"), (HELD_HANDOFF, "f"), (BUSY, "f")] {
+            let mut m = menu(agent(None), LOOM);
+            typed(&mut m, "csretry reason");
+            press(&mut m, KeyCode::Enter);
+            let mut stub = Stub {
+                outputs: vec![
+                    failed("loom: close: unknown argument --json\n"),
+                    failed(stderr),
+                ],
+                ..Default::default()
+            };
+            m.work(&mut stub);
+            assert_eq!(
+                stub.runs,
+                [
+                    vec![
+                        "loom",
+                        "close",
+                        "a",
+                        "--json",
+                        "--outcome",
+                        "struggled",
+                        "--why",
+                        "retry reason"
+                    ],
+                    vec![
+                        "loom",
+                        "close",
+                        "a",
+                        "--outcome",
+                        "struggled",
+                        "--why",
+                        "retry reason"
+                    ],
+                ]
+            );
+            assert_eq!(keys(&m), expected_keys);
+            if expected_keys == "af" {
+                assert!(stub
+                    .calls
+                    .iter()
+                    .any(|(method, _)| method == "session.snapshot"));
+            }
+        }
+        let mut m = menu(agent(None), LOOM);
+        typed(&mut m, "co");
+        let mut stub = Stub {
+            outputs: vec![failed("loom: close: unknown argument --json\n")],
+            ..Default::default()
+        };
+        m.work(&mut stub);
+        assert_eq!(stub.runs.len(), 2);
+        assert_eq!(m.exit, Some(Exit::Quit));
+
+        for stderr in [
+            "loom: close: herdr refused: permission denied\n",
+            "loom: close: unknown argument --json\n",
+        ] {
+            let mut m = menu(agent(None), LOOM);
+            typed(&mut m, "co");
+            let mut stub = Stub {
+                outputs: vec![
+                    failed("loom: close: unknown argument --json\n"),
+                    failed(stderr),
+                ],
+                ..Default::default()
+            };
+            m.work(&mut stub);
+            assert_eq!(stub.runs.len(), 2);
+            assert_eq!(m.screen, Screen::Menu);
+            assert_eq!(m.status, Some(format!("close: {}", stderr.trim_end())));
+        }
+    }
+
+    #[test]
+    fn errors_and_malformed_json_never_offer_force_or_retry() {
+        for mut output in [
+            Output {
+                code: Some(1),
+                ..unseen()
+            },
+            Output {
+                code: Some(3),
+                stdout: "invalid JSON".into(),
+                ..unseen()
+            },
+            refused(4, false, "ignored", json!([])),
+            Output {
+                stdout: json!({ "closed": false, "left": [{ "id": "a" }] }).to_string(),
+                ..failed("ignored")
+            },
+        ] {
+            if output.code == Some(4) {
+                output.stdout = output.stdout.replace("busy", "held");
+            }
+            output.stderr = "loom: close: herdr refused: permission denied\nextra detail\n".into();
+            let mut m = menu(agent(None), LOOM);
+            typed(&mut m, "co");
+            let mut stub = Stub {
+                outputs: vec![output],
+                ..Default::default()
+            };
+            m.work(&mut stub);
+            assert_eq!(stub.runs.len(), 1);
+            assert_eq!(m.screen, Screen::Menu);
+            assert_eq!(
+                m.status.as_deref(),
+                Some("close: loom: close: herdr refused: permission denied")
+            );
+        }
+        assert_eq!(
+            legacy_refusal("loom: close: herdr refused: permission denied"),
+            Refusal::Error
+        );
+    }
+
+    #[test]
+    fn an_unexpected_busy_after_force_is_only_a_status() {
+        let request = CloseRequest {
+            outcome: Outcome::Ok,
+            why: None,
+            force: true,
+        };
+        for legacy in [false, true] {
+            let mut m = menu(agent(None), LOOM);
+            m.start(Job::LoomClose(request.clone()));
+            let outputs = if legacy {
+                vec![
+                    failed("loom: close: unknown argument --json\n"),
+                    failed(BUSY),
+                ]
+            } else {
+                vec![refused(4, false, BUSY, json!([]))]
+            };
+            let mut stub = Stub {
+                outputs,
+                ..Default::default()
+            };
+            m.work(&mut stub);
+            assert_eq!(m.screen, Screen::Menu);
+            assert!(m
+                .status
+                .as_deref()
+                .unwrap()
+                .starts_with("close: loom: close: still working"));
+            assert!(stub
+                .runs
+                .iter()
+                .all(|argv| argv.last().unwrap() == "--force"));
+        }
+    }
+
+    #[test]
+    fn custom_close_commands_receive_the_same_protocol_flags() {
+        let mut m = menu(
+            agent(None),
+            r#"actions = { close = { command = ["custom-close", "{pane_id}"] } }"#,
+        );
+        typed(&mut m, "co");
+        let mut stub = Stub {
+            outputs: vec![failed("custom-close: unknown argument --json")],
+            ..Default::default()
+        };
+        m.work(&mut stub);
+        assert_eq!(
+            stub.runs,
+            [["custom-close", "w1:p3", "--json", "--outcome", "ok"]]
+        );
+        assert_eq!(m.screen, Screen::Menu);
+        assert_eq!(
+            m.status.as_deref(),
+            Some("close: custom-close: unknown argument --json")
+        );
+    }
+
+    #[test]
     fn refusals_read_looms_held_lines() {
-        assert!(refusal(HELD_UNSEEN).unread_only());
-        assert!(!refusal(HELD_HANDOFF).unread_only());
-        assert_eq!(refusal(BUSY), Refusal::Busy);
-        assert_eq!(refusal("loom: close: no node x"), Refusal::Error);
+        assert!(legacy_refusal(HELD_UNSEEN).ack_clears());
+        assert!(!legacy_refusal(HELD_HANDOFF).ack_clears());
+        assert_eq!(legacy_refusal(BUSY), Refusal::Busy);
+        assert_eq!(legacy_refusal("loom: close: no node x"), Refusal::Error);
         // a held line loom words differently counts as not unread: force only
         let odd = "loom: close: the user still has it, nothing closed:\n  alpha [a] has a thing\n";
-        assert!(!refusal(odd).unread_only());
+        assert!(!legacy_refusal(odd).ack_clears());
     }
 
     #[test]

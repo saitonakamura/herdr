@@ -1,13 +1,13 @@
 ---
 id: herdr-fork-sidebar-reads-close-json
 title: herdr-sidebar reads loom close --json instead of its stderr
-status: open
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
 assignee: saitonakamura
-claimed_by:
+claimed_by: macos/01a20d3d-9c6b-7160-ac9a-724fc2c6e7f5
 ---
 
 ## Question
@@ -37,6 +37,22 @@ Follow-up from [059 sidebar popup menu](./059-sidebar-popup-menu.md). `tools/sid
 Switch only on `refusal`, `reason` and the exit status. `line` is prose.
 
 Done: the menu's three outcomes come from `--json`, the prose parser runs only for an older loom, `FORK.md` says so, and the unseen-and-working case has a test.
+
+## Resolution
+
+The popup appends `--json` to close overrides and reads loom's exit status and
+JSON refusal. Top-level `ack_clears` alone controls ack and close, including when
+a node is both unseen and working; node names and panes come from the response.
+Only the exact older-loom exit-1 rejection retries without `--json` and uses the
+legacy parser. Refusals display stderr only; errors offer neither ack nor force.
+`FORK.md` documents the contract required of custom close commands.
+
+Added regression coverage for unseen-and-working, JSON independent of prose,
+legacy retries and errors, malformed responses, unexpected busy after force,
+and custom argv. All 124 sidebar tests, formatting and sidebar Clippy pass.
+Full local `just check` was attempted but unrelated remote-attach and agent-status
+integration tests timed out; clearing inherited Herdr environment fixed the former
+but not the latter. Full PR CI is the integration gate.
 
 ## Parent
 

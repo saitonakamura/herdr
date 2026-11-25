@@ -230,13 +230,24 @@ it draws and does is 018's resolution (`.issues/herdr-fork/018-sidebar-content.m
     the top or bottom the entry stays and says "already first" or "already
     last".
   - With `[sidebar.actions] close`, close asks for an outcome, ok or struggled
-    (with a why), and runs the override with `--outcome <it>` (and `--why`)
-    appended, loom's flags. When it refuses, the menu offers `--force`; when
-    unread reports are all that hold it (every line loom names a node on reads
-    `[<id>] unseen:`), it also offers **ack and close**, listing each report's
-    first line before acking them through `ack`. Without the override, close is herdr's
-    `agent.close`: the panes it would take, a confirm, and `--force` on
-    `agent_subtree_busy`.
+    (with a why), and runs the override with `--json --outcome <it>` (and `--why`)
+    appended, loom's flags. The JSON response and exit status distinguish held
+    (3), busy (4), and errors (any other nonzero status). Held and busy offer
+    `--force`; a held response with top-level `ack_clears = true` also offers
+    **ack and close**, listing each report's first line before acking through
+    `ack`. An unread node that is still working does not offer ack and close.
+    The refusal screen shows stderr only, never the JSON on stdout. An error
+    shows the first stderr line and offers neither force nor ack.
+    - A custom close command or wrapper receives these same flags and must
+      implement loom's JSON and exit-status contract to offer refusal actions;
+      exit 0 still closes the menu without requiring JSON. Other failures stay
+      in the menu as errors, not force prompts.
+    - For older loom only, exit 1 with the exact stderr line
+      `loom: close: unknown argument --json` retries once without that flag and
+      reads the old prose refusal. No other diagnostic triggers a retry. This
+      fallback stays through the loom cutover.
+    - Without the override, close is herdr's `agent.close`: the panes it would
+      take, a confirm, and `--force` on `agent_subtree_busy` only.
 - **Reordering efforts** (062). Pressing a workspace header and releasing
   elsewhere in the list moves that workspace in herdr's order, which herdr keeps
   and every client shows: above the header it is dropped on, or after the last

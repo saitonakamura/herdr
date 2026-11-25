@@ -1,14 +1,14 @@
 ---
 id: herdr-fork-osc-7501-state-source
 title: OSC 7501 records decide an agent pane's lifecycle state
-status: in-progress
+status: closed
 labels:
   - wayfinder:task
 parent: herdr-fork-map
 blocked_by:
   - herdr-fork-osc-7501-parse-and-answer
 assignee: saitonakamura
-claimed_by: macos/w1:p2D/180ecbde-335b-428c-9657-1fc1b63fd371
+claimed_by:
 ---
 
 ## Question
@@ -96,8 +96,10 @@ Where it goes:
 
 ## Resolution
 
-Implemented on `fork/071-osc-7501-state-source`; the PR is open and not merged, so this ticket stays
-in-progress until it is.
+Merged 2026-11-25 by the user: [saitonakamura/herdr#67](https://github.com/saitonakamura/herdr/pull/67)
+as `d8b84e96` (head `3fc99d23`), every CI check green after a macOS rerun. Not deployed: the dogfood
+build and fork.4 carry it, and the dotfiles `docs/setup/herdr.md` agent-integration paragraph is written
+with that release.
 
 - **Order:** restored status, then the 7501 root record, then hooks, then screen rules. `FORK.md`
   § Agent state authority has the full rules; `src/terminal/program_status.rs` has the code and the

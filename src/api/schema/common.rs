@@ -279,6 +279,8 @@ pub enum AgentBlockedReason {
     Form,
     // A turn or prompt a restart cut off; the user decides whether it continues.
     Interrupted,
+    // A login or credential the agent needs. Appended last: older clients do not know it.
+    Auth,
 }
 
 impl From<crate::detect::BlockedReason> for AgentBlockedReason {
@@ -288,6 +290,7 @@ impl From<crate::detect::BlockedReason> for AgentBlockedReason {
             crate::detect::BlockedReason::Permission => Self::Permission,
             crate::detect::BlockedReason::Form => Self::Form,
             crate::detect::BlockedReason::Interrupted => Self::Interrupted,
+            crate::detect::BlockedReason::Auth => Self::Auth,
         }
     }
 }
@@ -299,6 +302,7 @@ impl From<AgentBlockedReason> for crate::detect::BlockedReason {
             AgentBlockedReason::Permission => Self::Permission,
             AgentBlockedReason::Form => Self::Form,
             AgentBlockedReason::Interrupted => Self::Interrupted,
+            AgentBlockedReason::Auth => Self::Auth,
         }
     }
 }

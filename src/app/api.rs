@@ -1892,6 +1892,84 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_program_status_report_decides_the_pane_state_and_explain_says_so() {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &crate::config::Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        app.state.workspaces = vec![crate::workspace::Workspace::test_new("program-status")];
+        app.state.ensure_test_terminals();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        let now = std::time::Instant::now();
+        app.handle_internal_event(AppEvent::StateChanged {
+            pane_id,
+            agent: Some(Agent::Codex),
+            state: AgentState::Idle,
+            visible_blocker: false,
+            blocked_reason: None,
+            visible_working: false,
+            process_exited: false,
+            observed_at: now,
+        });
+        app.handle_internal_event(AppEvent::ProgramStatusReported {
+            pane_id,
+            status: Some(crate::terminal::ProgramStatusReport {
+                lifecycle: crate::terminal::ProgramLifecycle::Blocked(Some(
+                    crate::detect::BlockedReason::Auth,
+                )),
+                message: Some("sign in".into()),
+            }),
+            observed_at: now,
+        });
+        let runtime = crate::terminal::TerminalRuntime::test_with_screen_bytes(80, 24, b"");
+        app.terminal_runtimes.insert(terminal_id, runtime);
+        let target = app.public_pane_id(0, pane_id).unwrap();
+
+        let pane = app.handle_api_request(crate::api::schema::Request {
+            id: "pane_get".into(),
+            method: crate::api::schema::Method::PaneGet(crate::api::schema::PaneTarget {
+                pane_id: target.clone(),
+            }),
+        });
+        let pane: serde_json::Value = serde_json::from_str(&pane).unwrap();
+        assert_eq!(pane["result"]["pane"]["agent_status"], "blocked");
+        assert_eq!(pane["result"]["pane"]["blocked_reason"], "auth");
+
+        let explain = app.handle_api_request(crate::api::schema::Request {
+            id: "agent_explain".into(),
+            method: crate::api::schema::Method::AgentExplain(crate::api::schema::AgentTarget {
+                target,
+            }),
+        });
+        let explain: serde_json::Value = serde_json::from_str(&explain).unwrap();
+        assert_eq!(
+            explain["result"]["explain"]["lifecycle"],
+            serde_json::json!({
+                "state": "blocked",
+                "blocked_reason": "auth",
+                "source": "program_status",
+                "message": "sign in",
+            })
+        );
+
+        app.handle_internal_event(AppEvent::ProgramStatusReported {
+            pane_id,
+            status: None,
+            observed_at: now,
+        });
+        let state = &app.state.terminals
+            [&app.state.workspaces[0].tabs[0].panes[&pane_id].attached_terminal_id];
+        assert_eq!(state.state, AgentState::Idle);
+    }
+
+    #[tokio::test]
     async fn agent_explain_rejects_hook_only_full_lifecycle_authority() {
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
         let mut app = App::new(

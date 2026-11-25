@@ -45,7 +45,8 @@
             "question",
             "permission",
             "form",
-            "interrupted"
+            "interrupted",
+            "auth"
           ],
           "type": "string"
         },
@@ -1869,7 +1870,8 @@
             "question",
             "permission",
             "form",
-            "interrupted"
+            "interrupted",
+            "auth"
           ],
           "type": "string"
         },
@@ -7901,7 +7903,8 @@
             "question",
             "permission",
             "form",
-            "interrupted"
+            "interrupted",
+            "auth"
           ],
           "type": "string"
         },
@@ -8136,7 +8139,8 @@
             "question",
             "permission",
             "form",
-            "interrupted"
+            "interrupted",
+            "auth"
           ],
           "type": "string"
         },

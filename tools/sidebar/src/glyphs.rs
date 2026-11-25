@@ -120,7 +120,7 @@ impl Meaning {
                 Some(BlockedReason::Permission) => Meaning::BlockedPermission,
                 Some(BlockedReason::Form) => Meaning::BlockedForm,
                 Some(BlockedReason::Interrupted) => Meaning::BlockedInterrupted,
-                Some(BlockedReason::Unknown) | None => Meaning::Blocked,
+                Some(BlockedReason::Auth | BlockedReason::Unknown) | None => Meaning::Blocked,
             },
             AgentStatus::Unknown => Meaning::Unknown,
         }

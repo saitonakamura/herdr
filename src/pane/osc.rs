@@ -538,7 +538,8 @@ const AGENT_OSC_MAX_CHARS: usize = 256;
 /// - `latest_title` — last OSC 0 or OSC 2 payload, sanitized. An empty
 ///   payload (e.g. `\x1b]0;\x07`) clears the stored value.
 /// - `latest_progress` — last OSC 9 payload (the part after `9;`), stored
-///   as-is after sanitization. E.g. `"4;3;"` or `"4;0;"`.
+///   as-is after sanitization. E.g. `"4;3;"` or `"4;0;"`. Read as empty once
+///   the program has sent an OSC 7501 report.
 #[derive(Debug, Default)]
 pub(super) struct AgentOscStateTracker {
     collector: OscStreamCollector,
@@ -628,6 +629,10 @@ impl AgentOscStateTracker {
     /// Returns the latest retained OSC 9 progress payload, or `""` if none.
     #[allow(dead_code)] // used by terminal.rs; full call chain wired in Stage C
     pub(super) fn latest_progress(&self) -> &str {
+        // The spec: after an OSC 7501 report, OSC 9;4 is no longer a status.
+        if self.program_status.reporting() {
+            return "";
+        }
         self.latest_progress.as_deref().unwrap_or("")
     }
 
@@ -647,6 +652,14 @@ impl AgentOscStateTracker {
 
     pub(super) fn program_status(&self) -> Vec<ProgramStatusRecord> {
         self.program_status.snapshot()
+    }
+
+    pub(super) fn program_status_root_revision(&self) -> u64 {
+        self.program_status.root_revision()
+    }
+
+    pub(super) fn program_status_root(&self) -> Option<crate::terminal::ProgramStatusReport> {
+        self.program_status.root_lifecycle()
     }
 }
 
@@ -1173,6 +1186,21 @@ mod tests {
         assert_eq!(t.latest_progress(), "");
         t.observe(b";\x07");
         assert_eq!(t.latest_progress(), "4;3;");
+    }
+
+    #[test]
+    fn osc9_progress_stops_counting_once_the_program_reports_status() {
+        let mut t = AgentOscStateTracker::default();
+        t.observe(b"\x1b]9;4;3;\x07");
+        assert_eq!(t.latest_progress(), "4;3;");
+        t.observe(b"\x1b]7501;state=working\x07");
+        assert_eq!(t.latest_progress(), "");
+        t.observe(b"\x1b]9;4;0;\x07");
+        assert_eq!(t.latest_progress(), "");
+        // The next program in the pane has not reported, so its progress counts again.
+        t.clear_retained();
+        t.observe(b"\x1b]9;4;1;\x07");
+        assert_eq!(t.latest_progress(), "4;1;");
     }
 
     fn program_status_states(tracker: &AgentOscStateTracker) -> Vec<(String, &'static str)> {

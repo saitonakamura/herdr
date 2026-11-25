@@ -184,6 +184,12 @@ fn print_agent_explain_text(explain: &serde_json::Value, verbose: bool) {
     for line in program_status_text_lines(explain) {
         println!("{line}");
     }
+    if let (Some(state), Some(source)) = (
+        explain["lifecycle"]["state"].as_str(),
+        explain["lifecycle"]["source"].as_str(),
+    ) {
+        println!("lifecycle: {state} (decided by {source})");
+    }
     if !verbose {
         return;
     }

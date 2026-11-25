@@ -1,11 +1,16 @@
 //! OSC 7501 program status records (Program Status Protocol, rev 0.4).
 //!
 //! A program reports its state down its own PTY. This module keeps what one
-//! pane's program reported; nothing here decides the pane's agent state.
+//! pane's program reported. The root record, read through
+//! [`ProgramStatusRecords::root_lifecycle`], is what the terminal state ranks
+//! above hooks and screen rules.
 
 use std::collections::BTreeMap;
 
 use base64::Engine as _;
+
+use crate::detect::BlockedReason;
+use crate::terminal::{ProgramLifecycle, ProgramStatusReport};
 
 /// What herdr writes back to `OSC 7501 ; ?`, without the terminator.
 pub(crate) const QUERY_REPLY_BODY: &[u8] =
@@ -82,10 +87,34 @@ pub(crate) struct ProgramStatusRecord {
     pub(crate) msg: Option<String>,
 }
 
+impl ProgramStatusRecord {
+    /// What this record says about the lifecycle of the program that wrote it.
+    pub(crate) fn lifecycle_report(&self) -> ProgramStatusReport {
+        let lifecycle = match self.state {
+            ProgramStatusState::Working => ProgramLifecycle::Working,
+            ProgramStatusState::Blocked => ProgramLifecycle::Blocked(match self.kind {
+                Some(ProgramStatusKind::Permission) => Some(BlockedReason::Permission),
+                Some(ProgramStatusKind::Question) => Some(BlockedReason::Question),
+                Some(ProgramStatusKind::Auth) => Some(BlockedReason::Auth),
+                None => None,
+            }),
+            ProgramStatusState::Done => ProgramLifecycle::Done,
+            ProgramStatusState::Idle => ProgramLifecycle::Idle,
+            ProgramStatusState::Error => ProgramLifecycle::Error,
+        };
+        ProgramStatusReport {
+            lifecycle,
+            message: self.msg.clone(),
+        }
+    }
+}
+
 #[derive(Debug)]
 struct StoredRecord {
     record: ProgramStatusRecord,
     updated: u64,
+    /// Kept past the process that wrote it: shown, but no longer anyone's state.
+    outlived: bool,
 }
 
 /// The records of one pane, keyed by id so a parent sorts before its children.
@@ -93,6 +122,10 @@ struct StoredRecord {
 pub(crate) struct ProgramStatusRecords {
     records: BTreeMap<String, StoredRecord>,
     updates: u64,
+    /// Bumped by every report or drop that touches the root record.
+    root_revision: u64,
+    /// The current program has reported, so its OSC 9;4 progress says nothing more.
+    reporting: bool,
 }
 
 enum ReportState {
@@ -107,6 +140,10 @@ impl ProgramStatusRecords {
         let Some((id, state, mut record)) = parse_report(payload) else {
             return;
         };
+        self.reporting = true;
+        if id.is_empty() {
+            self.root_revision += 1;
+        }
         let state = match state {
             ReportState::Clear => {
                 self.clear(&id);
@@ -119,6 +156,7 @@ impl ProgramStatusRecords {
         let stored = StoredRecord {
             record,
             updated: self.updates,
+            outlived: false,
         };
         if self.records.insert(id, stored).is_none() && self.records.len() > MAX_RECORDS {
             self.evict_least_recently_updated();
@@ -128,16 +166,38 @@ impl ProgramStatusRecords {
     /// RIS: every record goes.
     pub(crate) fn clear_all(&mut self) {
         self.records.clear();
+        self.root_revision += 1;
     }
 
-    /// The reporting process is gone: only `done` and `error` outlive it.
+    /// The reporting process is gone: only `done` and `error` outlive it, and
+    /// they stop being the state of whatever runs in the pane next.
     pub(crate) fn drop_live_states(&mut self) {
         self.records.retain(|_, stored| {
+            stored.outlived = true;
             matches!(
                 stored.record.state,
                 ProgramStatusState::Done | ProgramStatusState::Error
             )
         });
+        self.root_revision += 1;
+        self.reporting = false;
+    }
+
+    /// The root record as the running program's lifecycle; `None` once cleared
+    /// or once its process is gone.
+    pub(crate) fn root_lifecycle(&self) -> Option<ProgramStatusReport> {
+        self.records
+            .get("")
+            .filter(|stored| !stored.outlived)
+            .map(|stored| stored.record.lifecycle_report())
+    }
+
+    pub(crate) fn root_revision(&self) -> u64 {
+        self.root_revision
+    }
+
+    pub(crate) fn reporting(&self) -> bool {
+        self.reporting
     }
 
     /// Records in id order, each with `app` resolved through its ancestors.
@@ -189,6 +249,9 @@ impl ProgramStatusRecords {
             .min_by_key(|(_, stored)| stored.updated)
             .map(|(id, _)| id.clone());
         if let Some(oldest) = oldest {
+            if oldest.is_empty() {
+                self.root_revision += 1;
+            }
             self.records.remove(&oldest);
         }
     }
@@ -339,6 +402,7 @@ fn parse_progress(value: &[u8]) -> Option<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::terminal::ProgramLifecycle;
 
     fn b64(text: &str) -> String {
         base64::engine::general_purpose::STANDARD.encode(text)
@@ -549,5 +613,84 @@ mod tests {
         assert_eq!(ids(&records), ["c", "d"]);
         records.clear_all();
         assert!(ids(&records).is_empty());
+    }
+
+    fn root(report: &str) -> Option<ProgramStatusReport> {
+        records(&[report]).root_lifecycle()
+    }
+
+    #[test]
+    fn root_lifecycle_maps_every_state_and_kind() {
+        let lifecycle = |report: &str| root(report).map(|report| report.lifecycle);
+        assert_eq!(lifecycle("state=working"), Some(ProgramLifecycle::Working));
+        assert_eq!(lifecycle("state=done"), Some(ProgramLifecycle::Done));
+        assert_eq!(lifecycle("state=idle"), Some(ProgramLifecycle::Idle));
+        assert_eq!(lifecycle("state=error"), Some(ProgramLifecycle::Error));
+        assert_eq!(
+            lifecycle("state=blocked"),
+            Some(ProgramLifecycle::Blocked(None))
+        );
+        for (kind, reason) in [
+            ("permission", BlockedReason::Permission),
+            ("question", BlockedReason::Question),
+            ("auth", BlockedReason::Auth),
+        ] {
+            assert_eq!(
+                lifecycle(&format!("state=blocked:kind={kind}")),
+                Some(ProgramLifecycle::Blocked(Some(reason)))
+            );
+        }
+        assert_eq!(
+            root(&format!("state=error:msg={}", b64("rate limited"))),
+            Some(ProgramStatusReport {
+                lifecycle: ProgramLifecycle::Error,
+                message: Some("rate limited".into()),
+            })
+        );
+        // Only the root record speaks for the pane.
+        assert_eq!(lifecycle("state=working:id=job"), None);
+    }
+
+    #[test]
+    fn root_lifecycle_ends_with_a_clear_or_with_its_process() {
+        let mut records = records(&["state=working"]);
+        let reported = records.root_revision();
+        records.apply_report(b"state=clear");
+        assert_eq!(records.root_lifecycle(), None);
+        assert!(records.root_revision() > reported);
+
+        // A done record outlives its process as a record, not as the next program's state.
+        records.apply_report(b"state=done");
+        let reported = records.root_revision();
+        records.drop_live_states();
+        assert_eq!(ids(&records), [""]);
+        assert_eq!(records.root_lifecycle(), None);
+        assert!(records.root_revision() > reported);
+
+        records.apply_report(b"state=done");
+        assert!(records.root_lifecycle().is_some());
+    }
+
+    #[test]
+    fn root_revision_moves_on_every_root_report_only() {
+        let mut records = records(&["state=working"]);
+        let reported = records.root_revision();
+        records.apply_report(b"state=working:id=job");
+        records.apply_report(b"state=nonsense");
+        assert_eq!(records.root_revision(), reported);
+        // A repeat still counts: the state it reaches may have been dropped meanwhile.
+        records.apply_report(b"state=working");
+        assert!(records.root_revision() > reported);
+    }
+
+    #[test]
+    fn reporting_lasts_until_the_process_is_gone() {
+        let mut records = ProgramStatusRecords::default();
+        assert!(!records.reporting());
+        records.apply_report(b"state=working:id=job");
+        records.apply_report(b"state=clear:id=job");
+        assert!(records.reporting());
+        records.drop_live_states();
+        assert!(!records.reporting());
     }
 }

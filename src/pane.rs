@@ -297,6 +297,44 @@ async fn publish_state_changed_event(
     }
 }
 
+/// Aborts the task it holds when dropped, so a helper task ends with its owner.
+struct AbortOnDrop(tokio::task::AbortHandle);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+/// Forwards the pane's root OSC 7501 record to the app whenever its program reports,
+/// clears or loses it. It runs beside the detection tick so a report decides at once.
+fn spawn_program_status_watcher(
+    pane_id: PaneId,
+    terminal: Arc<PaneTerminal>,
+    state_events: mpsc::Sender<AppEvent>,
+) -> AbortOnDrop {
+    let task = tokio::spawn(async move {
+        let mut last_revision = 0;
+        loop {
+            terminal.program_status_changed().await;
+            let (revision, status) = terminal.program_status_root();
+            if revision == last_revision {
+                continue;
+            }
+            last_revision = revision;
+            let event = AppEvent::ProgramStatusReported {
+                pane_id,
+                status,
+                observed_at: std::time::Instant::now(),
+            };
+            if state_events.send(event).await.is_err() {
+                return;
+            }
+        }
+    });
+    AbortOnDrop(task.abort_handle())
+}
+
 async fn publish_agent_process_detected_event(
     state_events: mpsc::Sender<AppEvent>,
     pane_id: PaneId,
@@ -962,6 +1000,8 @@ fn spawn_basic_detection_task(
     let pending_release_for_task = pending_release.clone();
 
     let handle = tokio::spawn(async move {
+        let _program_status_watcher =
+            spawn_program_status_watcher(pane_id, terminal.clone(), state_events.clone());
         let mut agent_presence = AgentDetectionPresence::from_agent(None);
         let mut state = AgentState::Unknown;
         let mut last_visible_idle = false;
@@ -2951,6 +2991,8 @@ impl PaneRuntime {
             let pending_release_for_task = pending_release.clone();
 
             let handle = tokio::spawn(async move {
+                let _program_status_watcher =
+                    spawn_program_status_watcher(pane_id, terminal.clone(), state_events.clone());
                 let mut agent_presence =
                     AgentDetectionPresence::from_agent(initial_state.detected_agent);
                 let mut state = AgentState::Idle;

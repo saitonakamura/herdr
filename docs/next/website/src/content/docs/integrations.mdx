@@ -122,7 +122,9 @@ The hook reports Claude Code session identity on session start and decides the p
 | `Stop` whose last line is `🔄 awaiting background work`, or with a sub-agent still running | `awaiting` |
 | any other `Stop`, `StopFailure` | `idle` |
 
-Screen detection still covers what hooks cannot see. A dialog on screen blocks a working turn. A turn the screen has shown idle for three seconds has ended, because an interrupt fires no `Stop`. A reported permission or form ends once its dialog has been seen and is gone. Sub-agent hooks never change the parent pane's state, except a permission prompt raised for a sub-agent, which waits in the parent pane.
+Claude Code releases that speak the Program Status Protocol also report their state over OSC 7501, and that record ranks above these hooks: an interrupt reads idle at once, and a permission dialog reads blocked before its notification hook fires. The hooks then only say how a turn ended (the two sentinels, a running sub-agent, or a plain stop while a background shell keeps the record working) and that a question is a form. See [agent detection](/docs/agents/).
+
+Without a record, screen detection still covers what hooks cannot see. A dialog on screen blocks a working turn. A turn the screen has shown idle for three seconds has ended, because an interrupt fires no `Stop`. A reported permission or form ends once its dialog has been seen and is gone. Sub-agent hooks never change the parent pane's state, except a permission prompt raised for a sub-agent, which waits in the parent pane.
 
 Claude integration v12 adds these state hooks. Reinstall it after upgrading; v11 and older report session identity only and leave state to screen detection.
 

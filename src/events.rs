@@ -105,6 +105,12 @@ pub enum AppEvent {
         process_exited: bool,
         observed_at: Instant,
     },
+    /// The pane's program reported, cleared or lost its root OSC 7501 record.
+    ProgramStatusReported {
+        pane_id: PaneId,
+        status: Option<crate::terminal::ProgramStatusReport>,
+        observed_at: Instant,
+    },
     /// Hook-authoritative agent state was reported for a pane.
     HookStateReported {
         pane_id: PaneId,
